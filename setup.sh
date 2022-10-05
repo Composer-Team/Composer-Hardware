@@ -3,7 +3,7 @@ mkdir -p project
 echo "sbt.version=1.3.13" > project/build.properties 
 
 # rocket-chip
-git clone https://github.com/chipsalliance/rocket-chip.git && cd rocket-chip && git checkout f6e0f0e && git submodule update --init && cd ..
+git clone -q https://github.com/chipsalliance/rocket-chip.git && cd rocket-chip && git checkout f6e0f0e -q && git submodule update --init -q && cd ..
 
 rcpluglen=$(wc -l rocket-chip/project/plugins.sbt | grep -o "[0-9]*")
 if test -e project/plugins.sbt ;
