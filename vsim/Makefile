@@ -4,11 +4,6 @@
 # Chris Kjellqvist (cmk91@cs.duke.edu)
 #
 
-ifndef COMPOSER_AWS_SDK_DIR
-$(error COMPOSER_AWS_SDK_DIR is not set)
-endif
-
-
 default: all
 
 base_dir = $(abspath ..)
@@ -23,6 +18,14 @@ TB ?= TestDriver
 CXX ?= g++
 CXXFLAGS := -O1
 JVM_MEMORY ?= 2G
+
+# Extracting this information from SBT would be more robust
+# api-config-chipsalliance does not use standard SBT src/main/scala, but has no resources
+scala_srcs := $(shell find $(base_dir) -name "*.scala" -o -name "*.sbt")
+resource_dirs := $(shell find $(base_dir) -type d -path "*/src/main/resources")
+resources := $(foreach d,$(resource_dirs),$(shell find $(d) -type f))
+all_srcs := $(scala_srcs) $(resources)
+
 
 JAVA ?= java -Xmx$(JVM_MEMORY) -Xss8M
 FIRRTL ?= $(JAVA) -cp $(ROCKET_CHIP_JAR) firrtl.stage.FirrtlMain
@@ -48,12 +51,6 @@ splitConfigs := $(subst $(comma), ,$(CONFIG))
 configBases := $(foreach config,$(splitConfigs),$(lastword $(subst ., ,$(config))))
 CONFIG_STR := $(subst $(space),_,$(configBases))
 
-# Extracting this information from SBT would be more robust
-# api-config-chipsalliance does not use standard SBT src/main/scala, but has no resources
-scala_srcs := $(shell find $(base_dir) -name "*.scala" -o -name "*.sbt")
-resource_dirs := $(shell find $(base_dir) -type d -path "*/src/main/resources")
-resources := $(foreach d,$(resource_dirs),$(shell find $(d) -type f))
-all_srcs := $(scala_srcs) $(resources)
 
 #--------------------------------------------------------------------
 # Verilog Generation
