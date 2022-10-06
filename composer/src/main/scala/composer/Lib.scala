@@ -12,21 +12,27 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 case class Permissions(readable: Boolean, writeable: Boolean)
+
 object ReadOnly extends Permissions(true, false)
+
 object WriteOnly extends Permissions(false, true)
+
 object ReadWrite extends Permissions(true, true)
 
 abstract class MCRMapEntry {
   def name: String
+
   def permissions: Permissions
 }
 
 case class DecoupledSinkEntry(node: DecoupledIO[UInt], name: String) extends MCRMapEntry {
   val permissions = WriteOnly
 }
+
 case class DecoupledSourceEntry(node: DecoupledIO[UInt], name: String) extends MCRMapEntry {
   val permissions = ReadOnly
 }
+
 case class RegisterEntry(node: Data, name: String, permissions: Permissions) extends MCRMapEntry
 
 
@@ -59,12 +65,13 @@ class MCRFileMap() {
       sb append s"#define $fullName $address\n"
     }
   }
+
   // A variation of above which dumps the register map as a series of arrays
   def genArrayHeader(prefix: String, base: BigInt, sb: StringBuilder): Unit = {
     def emitArrays(regs: Seq[(MCRMapEntry, BigInt)], prefix: String): Unit = {
       sb.append(genConstStatic(s"${prefix}_num_registers", UInt32(regs.size)))
-      sb.append(genArray(s"${prefix}_names", regs.map{ x => CStrLit(x._1.name)}))
-      sb.append(genArray(s"${prefix}_addrs", regs.map{ x => UInt32(x._2)}))
+      sb.append(genArray(s"${prefix}_names", regs.map { x => CStrLit(x._1.name) }))
+      sb.append(genArray(s"${prefix}_addrs", regs.map { x => UInt32(x._2) }))
     }
 
     val regAddrs = regList map (reg => reg -> (base + lookupAddress(reg.name).get))
@@ -78,7 +85,10 @@ class MCRFileMap() {
   def getRegMap = name2addr.toMap
 
   def printCRs(): Unit = {
-    regList.zipWithIndex foreach { case (entry, i) => println(s"Name: ${entry.name}, Addr: $i") }
+    regList.zipWithIndex foreach { case (entry, i) =>
+      val addr = i << 2
+      println(s"Name: ${entry.name}, ID: $i, Addr: $addr")
+    }
   }
 }
 
@@ -89,7 +99,7 @@ class MCRIO(numCRs: Int)(implicit p: Parameters) extends ParameterizedBundle()(p
 
   def bindReg(reg: RegisterEntry, addr: Int): Unit = {
     if (reg.permissions.writeable) {
-      when(write(addr).valid){
+      when(write(addr).valid) {
         reg.node := write(addr).bits
       }
     } else {
@@ -122,7 +132,7 @@ class MCRFile(numRegs: Int)(implicit p: Parameters) extends LazyModule {
 
   val node = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
     slaves = Seq(AXI4SlaveParameters(
-      address = List(AddressSet(0,1023)),
+      address = List(AddressSet(0, 1023)),
       regionType = RegionType.UNCACHED,
       supportsWrite = TransferSizes(1, 4),
       supportsRead = TransferSizes(1, 4)
@@ -157,14 +167,14 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
   val rAddr = Reg(UInt(log2Up(numRegs).W))
   val wStrb = Reg(UInt(4.W))
 
-  when(in.aw.fire){
+  when(in.aw.fire) {
     awFired := true.B
     wAddr := in.aw.bits.addr >> log2Up(nastiWStrobeBits)
     bId := in.aw.bits.id
     assert(in.aw.bits.len === 0.U)
   }
 
-  when(in.w.fire){
+  when(in.w.fire) {
     wFired := true.B
     wData := in.w.bits.data
     wStrb := in.w.bits.strb
@@ -172,7 +182,7 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
 
   when(in.ar.fire) {
     arFired := true.B
-    rAddr := (in.ar.bits.addr >> log2Up(nastiWStrobeBits))(log2Up(numRegs)-1,0)
+    rAddr := (in.ar.bits.addr >> log2Up(nastiWStrobeBits)) (log2Up(numRegs) - 1, 0)
     rId := in.ar.bits.id
     assert(in.ar.bits.len === 0.U, "MCRFile only support single beat reads")
   }
@@ -187,12 +197,14 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
     wCommited := false.B
   }
 
-  when(io.mcr.write(wAddr).fire){
+  when(io.mcr.write(wAddr).fire) {
     wCommited := true.B
   }
 
   io.mcr.write foreach { w => w.valid := false.B; w.bits := wData }
-  io.mcr.read foreach { _.ready := false.B }
+  io.mcr.read foreach {
+    _.ready := false.B
+  }
   io.mcr.write(wAddr).valid := awFired && wFired && (~wCommited).asBool
   io.mcr.read(rAddr).ready := arFired && in.r.ready
 
