@@ -10,6 +10,7 @@ import scala.util.Random
 case class LFSRConfig(length: Int, taps: Seq[Int])
 
 // galois lfsr
+// note to self: look at dramsim2
 class LFSRCore(composerCoreParams: ComposerCoreParams)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
   val s_idle :: s_working :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
@@ -48,6 +49,7 @@ class LFSRCore(composerCoreParams: ComposerCoreParams)(implicit p: Parameters) e
         lfsr(tap) := lfsr(tap+1) ^ outputbit
       }
     }
+    count := count - 1.U
     when(count === 0.U) {
       state := s_finish
     }

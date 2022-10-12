@@ -149,78 +149,112 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
     val mcr = new MCRIO(numRegs)
   })
 
-  val nastiWStrobeBits = 4
-
   val (in, _) = outer.node.in(0)
 
-  //TODO: Just use a damn state machine.
-  val rValid = RegInit(false.B)
-  val arFired = RegInit(false.B)
-  val awFired = RegInit(false.B)
-  val wFired = RegInit(false.B)
-  val wCommited = RegInit(false.B)
-  val bId = Reg(UInt(1.W))
-  val rId = Reg(UInt(1.W))
-  val rData = Reg(UInt(32.W))
-  val wData = Reg(UInt(32.W))
-  val wAddr = Reg(UInt(log2Up(numRegs).W))
-  val rAddr = Reg(UInt(log2Up(numRegs).W))
-  val wStrb = Reg(UInt(4.W))
+  val sWriteIdle :: sGetWrite :: sDoWrite :: sWriteResp :: Nil = Enum(4)
+  val sReadIdle :: sGetReadData :: sPublishRead :: Nil = Enum(3)
 
-  when(in.aw.fire) {
-    awFired := true.B
-    wAddr := in.aw.bits.addr >> log2Up(nastiWStrobeBits)
-    bId := in.aw.bits.id
-    assert(in.aw.bits.len === 0.U)
+  val writeState = RegInit(sWriteIdle)
+  val writeAddr = Reg(UInt(log2Up(numRegs).W))
+  val writeLen = Reg(UInt(in.aw.bits.len.getWidth.W))
+  val writeId = Reg(UInt(in.aw.bits.id.getWidth.W))
+  val wStrb = Reg(UInt(io.mcr.wstrb.getWidth.W))
+  val wData = Reg(UInt(in.w.bits.data.getWidth.W))
+
+  val readState = RegInit(sReadIdle)
+  val readAddr = Reg(UInt(log2Up(numRegs).W))
+  val readLen = Reg(UInt(in.aw.bits.len.getWidth.W))
+  val readID = Reg(UInt(in.ar.bits.id.getWidth.W))
+  val readData = Reg(UInt(in.r.bits.data.getWidth.W))
+
+  in.ar.ready := readState === sReadIdle
+  in.aw.ready := writeState === sWriteIdle
+  in.w.ready := writeState === sGetWrite
+
+  // initialize read/write value wires
+  io.mcr.read.foreach { rChannel =>
+    rChannel.ready := false.B
+  }
+  io.mcr.write.foreach { wChannel =>
+    wChannel.bits := DontCare
+    wChannel.valid := false.B
   }
 
-  when(in.w.fire) {
-    wFired := true.B
-    wData := in.w.bits.data
-    wStrb := in.w.bits.strb
+  io.mcr.write(writeAddr).bits := wData
+  io.mcr.wstrb := wStrb
+  io.mcr.write(writeAddr).valid := writeState === sDoWrite
+
+  in.r.valid := readState === sPublishRead
+  in.r.bits.data := io.mcr.read(readAddr).bits
+  in.r.bits.resp := DontCare
+  in.r.bits.id := readID
+
+  in.b.valid := writeState === sWriteResp
+  in.b.bits.resp := 2.U
+
+  switch(writeState) {
+    is(sWriteIdle) {
+      when(in.aw.valid) {
+        writeAddr := (in.aw.bits.addr >> 2)(log2Up(numRegs) - 1, 0)
+        writeState := sGetWrite
+        writeLen := in.aw.bits.len
+        assert(in.aw.bits.len === 0.U, "Currently only support single word writes")
+        writeId := in.aw.bits.id
+      }
+    }
+    is(sGetWrite) {
+      when(in.w.fire) {
+        wStrb := in.w.bits.strb
+        wData := in.w.bits.data
+        writeState := sDoWrite
+      }
+    }
+    is(sDoWrite) {
+      io.mcr.write(writeAddr).valid := true.B
+      when(io.mcr.write(writeAddr).fire) {
+        when(writeLen === 0.U) {
+          writeState := sWriteResp
+        } .otherwise {
+          writeLen := writeLen - 1.U
+          // don't increment the address because we're writing to the same register
+        }
+      }
+    }
+    is(sWriteResp) {
+      in.b.bits.resp := 0.U // OKAY signal
+      in.b.bits.id := writeId
+      when(in.b.fire) {
+        writeState := sWriteIdle
+      }
+    }
   }
 
-  when(in.ar.fire) {
-    arFired := true.B
-    rAddr := (in.ar.bits.addr >> log2Up(nastiWStrobeBits)) (log2Up(numRegs) - 1, 0)
-    rId := in.ar.bits.id
-    assert(in.ar.bits.len === 0.U, "MCRFile only support single beat reads")
+  switch(readState) {
+    is(sReadIdle) {
+      when(in.ar.valid) {
+        readAddr := (in.ar.bits.addr >> 2)(log2Up(numRegs) - 1, 0)
+        readState := sGetReadData
+        readLen := in.ar.bits.len
+        readID := in.ar.bits.id
+        assert(in.ar.bits.len === 0.U, "Currently only support single word reads")
+      }
+    }
+    is (sGetReadData){
+      io.mcr.read(readAddr).ready := true.B
+      when(io.mcr.read(readAddr).fire) {
+        readData := io.mcr.read(readAddr).bits
+        readState := sPublishRead
+      }
+    }
+    is(sPublishRead) {
+      in.r.valid := true.B
+      when(in.r.fire) {
+        when (readLen === 0.U) {
+          readState := sReadIdle
+        }.otherwise {
+          readLen := readLen - 1.U
+        }
+      }
+    }
   }
-
-  when(in.r.fire) {
-    arFired := false.B
-  }
-
-  when(in.b.fire) {
-    awFired := false.B
-    wFired := false.B
-    wCommited := false.B
-  }
-
-  when(io.mcr.write(wAddr).fire) {
-    wCommited := true.B
-  }
-
-  io.mcr.write foreach { w => w.valid := false.B; w.bits := wData }
-  io.mcr.read foreach {
-    _.ready := false.B
-  }
-  io.mcr.write(wAddr).valid := awFired && wFired && (~wCommited).asBool
-  io.mcr.read(rAddr).ready := arFired && in.r.ready
-
-  in.r.bits.id := rId
-  in.r.bits.data := io.mcr.read(rAddr).bits
-  in.r.bits.last := true.B
-  in.r.bits.resp := 0.U
-  //in.r.bits.user := 0.U
-  in.r.valid := arFired && io.mcr.read(rAddr).valid
-
-  in.b.bits.id := bId
-  in.b.bits.resp := 0.U
-  //in.b.bits.user := 0.U
-  in.b.valid := awFired && wFired && wCommited
-
-  in.ar.ready := ~arFired
-  in.aw.ready := ~awFired
-  in.w.ready := ~wFired
 }

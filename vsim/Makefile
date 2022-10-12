@@ -61,6 +61,7 @@ CONFIG_STR := $(subst $(space),_,$(configBases))
 .SECONDARY: $(generated_dir)/composer.v $(generated_dir)/composer.fir
 
 $(generated_dir)/composer.fir $(generated_dir)/%.d: $(ROCKET_CHIP_JAR) $(bootrom_img)
+	rm -f $@
 	mkdir -p $(dir $@)
 	cd $(base_dir) && $(GENERATOR) -td $(generated_dir) -T composer.$(MODEL) -C $(CONFIG)
 	mv $(generated_dir)/*.fir $@
@@ -74,7 +75,10 @@ $(generated_dir)/composer.v $(generated_dir)/%.conf: $(generated_dir)/composer.f
 verilog: $(generated_dir)/composer.v
 # End Verilog Generation
 
-all: verilog
+vsim: verilog ${COMPOSER_ROOT}/Composer_Verilator/*.cc ${COMPOSER_ROOT}/Composer_Verilator/*.h
+	composer-make
+
+all: vsim
 
 clean:
 	rm -rf $(junk) simv* csrc *.key DVE* *.h *.a *.daidir $(generated_dir) $(ROCKET_CHIP_JAR)

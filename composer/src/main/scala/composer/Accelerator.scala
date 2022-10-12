@@ -142,16 +142,6 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   val system_id = accCmd.bits.inst.system_id
   accCmd.ready := false.B //base case
 
-  val respIF = outer.systems.map(_.module.io.resp)
-  val respArb = Module(new RRArbiter(new ComposerRoccResponse(), respIF.size))
-  respArb.io.in <> respIF
-  //io.resp <> respArb.io.out
-  io.resp.valid := respArb.io.out.valid
-  respArb.io.out.ready := io.resp.ready
-  io.resp.bits.rd := respArb.io.out.bits.rd
-  // TODO UG: fix this to extract the correct bits according to the parameter
-  io.resp.bits.data := respArb.io.out.bits.packData()
-
   // MONITOR CODE
   val hostRespFile = RegInit(VecInit(Seq.fill(maxTypes)(VecInit(Seq.fill(maxCores)(false.B)))))
   val monitorWaiting = RegInit(false.B)
@@ -186,10 +176,20 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
     x.inst.funct === FUNC_START.U
   }
 
+
+  val respIF = outer.systems.map(_.module.io.resp)
+  val respArb = Module(new RRArbiter(new ComposerRoccResponse(), respIF.size))
   when(respArb.io.out.fire) {
     hostRespFile(respArb.io.out.bits.system_id)(respArb.io.out.bits.core_id) := false.B
   }
 
+  respArb.io.in <> respIF
+  //io.resp <> respArb.io.out
+  respArb.io.out.ready := io.resp.ready
+
+  io.resp.bits.rd := respArb.io.out.bits.rd
+  // TODO UG: fix this to extract the correct bits according to the parameter
+  io.resp.bits.data := respArb.io.out.bits.packData()
   io.resp.valid := respArb.io.out.valid && hostRespFile(respArb.io.out.bits.system_id)(respArb.io.out.bits.core_id)
   // MONITOR CODE END
 
