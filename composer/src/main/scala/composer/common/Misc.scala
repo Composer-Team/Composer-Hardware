@@ -72,7 +72,8 @@ class ComposerRoccCommand() extends Bundle {
     val funct = UInt(3.W)
   }
   val core_id = UInt(8.W)
-  val rs1 = UInt(8.W)
+  // TODO UG: This should change dynamically according to width of sys/core id width
+  val rs1 = UInt(56.W)
   val rs2 = UInt(64.W)
 }
 
@@ -81,7 +82,7 @@ class ComposerRoccResponse()(implicit p: Parameters) extends Bundle {
   // TODO UG: these should reflect parameters SystemIDBitsKey, etc...
   val system_id = UInt(4.W)
   val core_id = UInt(8.W)
-  val data = UInt((p(XLen)-16).W)
+  val data = UInt((p(XLen)-system_id.getWidth-core_id.getWidth).W)
   def packData()(implicit p: Parameters): UInt = {
     val q = Wire(UInt(64.W))
     q := Cat(system_id, core_id, data)

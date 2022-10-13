@@ -9,7 +9,15 @@ import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
 
 // can configure this to add whatever features of a channel we want. Location should probably be an enum...
-case class ComposerChannelParams(width: Int = 8,
+// TODO UG: Channels should be named. The user shouldn't have to know the order of the channels and remember in both
+//          the software and the hardware! There should be a similar "Key" system that gets put into the composer.yaml
+//          and manifests in software that way or per haps we just generate the C++ enum and code stubs here...
+//          This is a more design-focused task and I may end up doing it myself but you are more than welcome to propose
+//          a solution - but it has to be good because this is an interface that is end-user-facing.
+
+// TODO UG & Chris: Is the current address scheme for read/write channels good? May consider re-doing the whole thing
+//                  to a more intuitive interface.
+case class ComposerChannelParams(widthBytes: Int = 8,
                                  location: String = "Mem")
 
 case class ComposerCoreParams(readChannelParams: Seq[ComposerChannelParams],

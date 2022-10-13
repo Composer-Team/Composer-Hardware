@@ -24,7 +24,7 @@ class ComposerCore(val composerCoreParams: ComposerCoreParams)(implicit p: Param
 
   val readChannels = if (!composerCoreParams.customRead) {
     composerCoreParams.readChannelParams.map {
-      ch => IO(Flipped(new DataChannelIO(ch.width)))
+      ch => IO(Flipped(new DataChannelIO(ch.widthBytes)))
     }
   } else {
     Seq()
@@ -32,7 +32,7 @@ class ComposerCore(val composerCoreParams: ComposerCoreParams)(implicit p: Param
 
   val writeChannels = {
     composerCoreParams.writeChannelParams.map {
-      ch => IO(new DataChannelIO(ch.width))
+      ch => IO(new DataChannelIO(ch.widthBytes))
     }
   }
 

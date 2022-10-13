@@ -10,7 +10,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.config.Parameters
 
-
+// TODO CHRIS & UG:
 abstract class SequentialWriteChannelIO(maxBytes: Int) extends Bundle {
   val req: DecoupledIO[Data]
   val channel = Flipped(new DataChannelIO(maxBytes))
@@ -96,9 +96,7 @@ abstract class AbstractSequentialWriteChannelModule(outer: AbstractSequentialWri
     }
 
     val gntId = tl.d.bits.source
-    xactBusy := (xactBusy | Mux(tl.a.fire, xactOneHot, 0.U)) &
-      ~Mux(tl.d.fire, UIntToOH(gntId), 0.U)
-
+    xactBusy := (xactBusy | Mux(tl.a.fire, xactOneHot, 0.U) & (~Mux(tl.d.fire, UIntToOH(gntId), 0.U)).asUInt)
     io.req.ready := state === s_idle
     io.channel.data.ready := state === s_data || state === s_finishing
     when(state === s_finishing) {

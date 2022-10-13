@@ -33,12 +33,12 @@ class ComposerSystem(val systemParams: ComposerSystemParams)(implicit p: Paramet
   // TODO Other reader types
   val readers = Seq.fill(nCores) {
     modularInterface.readChannelParams.map { rch =>
-      LazyModule(new ColumnReadChannel(rch.width)(p))
+      LazyModule(new ColumnReadChannel(rch.widthBytes)(p))
     }
   }
   val writers = Seq.fill(nCores) {
     modularInterface.writeChannelParams.map { wch =>
-      LazyModule(new FixedSequentialWriteChannel(wch.width, modularInterface.nMemXacts)(p))
+      LazyModule(new FixedSequentialWriteChannel(wch.widthBytes, modularInterface.nMemXacts)(p))
     }
   }
 
@@ -257,6 +257,11 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     outer.systemParams.buildCore(cparam, p)
   }
 
+  // TODO UG: Look at this! Currently, the composer only supports contiguous reads/writes (as supposed to sparse r/w
+  //          that you might find in dynamic data structures, for instance. How long is this contiguous read? Not super
+  //          well thought out here, it's just whatever was in rs2 when the command got sent over. You can command the
+  //          core to stop prematurely but in that case you have both the Reader module AND the user counting when
+  //          they're going to end. I think this needs a better interface. This is an important task to get right
   cores.zipWithIndex.foreach { case (_, i) =>
     readLengths(i).foreach(_ := RegNext(cmd.bits.rs2))
     writeLengths(i).foreach(_ := RegNext(cmd.bits.rs2))
@@ -277,8 +282,6 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
 
   lazy val coreSelect = cmd.bits.core_id
 
-  // val addressBits = (outer.mem ++ outer.producerBuffers.filter(_.isDefined).map(_.get).flatten.map(_.node) ++
-  //   outer.remoteMem.filter(_.isDefined).map(_.get)).map { case m =>
   val addressBits = (outer.mem
     ++ outer.localWrite.filter(_.isDefined).map(_.get)
     ++ outer.remoteWrite.filter(_.isDefined).map(_.get)
@@ -300,14 +303,6 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
 
   lazy val resp = Wire(Decoupled(new ComposerRoccResponse())) //Queue(io.resp)
 
-  //TODO: figure out hwo to deal with type param for arbiter
-  //val arbiter = Module(new RRArbiter(new DKAggregatorCoreResponse(addressBits), nCores))
-  //arbiter.io.in <> cores.map(_.io.resp)
-  //resp.valid := arbiter.io.out.valid
-  //resp.bits.rd := arbiter.io.out.bits.rd
-  //resp.bits.data := Cat(arbiter.io.out.bits.id, arbiter.io.out.bits.len.asTypeOf(UInt(32.W)))
-  //arbiter.io.out.ready := resp.ready
-
   def coreRWReady(c: Int): Bool = {
     RegNext(outer.readers(c).map(_.module.io.req.ready).fold(true.B) (_ && _) &&
       outer.writers(c).map(_.module.io.req.ready).fold(true.B)(_ && _))
@@ -316,7 +311,6 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   //TODO: Have to assign length manually for now
   lazy val readLengths: Seq[Seq[UInt]] = outer.readers.map(_.map(_.module.io.req.bits.len))
   lazy val writeLengths: Seq[Seq[UInt]] = outer.writers.map(_.map(_.module.io.req.bits.len))
-
 
   lazy val coreReady = cores.zipWithIndex.map { case (core, i) =>
     (core.io.req.ready && coreRWReady(i)) || (coreSelect =/= i.U)
@@ -338,14 +332,6 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     }
   }
 
-  cores.zipWithIndex.foreach { case (core, i) =>
-    // TO-DO: delay until all readers/writers are ready? use DecoupledHelper
-    val coreStart = cmd.fire && funct === FUNC_START.U && coreSelect === i.U //&& coreRWReady(i)
-    core.io.req.valid := coreStart
-    core.io.req.bits := io.cmd.bits
-
-    //rest are up to individual system
-  }
 
   cmd.ready := funct =/= FUNC_START.U || coreReady
 
@@ -355,36 +341,42 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   addrFile.io.write.addr := cmd.bits.rs1 + (numChannels.U * coreSelect)
   addrFile.io.write.data := cmd.bits.rs2
 
-  // connect readChannels and writeChannels appropriately
   cores.zipWithIndex.foreach { case (core, i) =>
+    // TO-DO: delay until all readers/writers are ready? use DecoupledHelper
+    val coreStart = cmd.fire && funct === FUNC_START.U && coreSelect === i.U //&& coreRWReady(i)
+    core.io.req.valid := coreStart
+    core.io.req.bits := cmd.bits
+    //rest are up to individual system
+  }
+
+  // scope to separate out read channel stuff
+  {
     val cmdFireLatch = RegNext(cmd.fire)
     val cmdBitsLatch = RegNext(cmd.bits)
     val functLatch = cmdBitsLatch.inst.funct
     val coreSelectLatch = cmdBitsLatch.core_id
 
-    core.readChannels.zipWithIndex.foreach { case (c, j) =>
-      val r = outer.readers(i)(j)
-      //        c.req <> r.module.io.req
-      r.module.io.req.valid := cmdFireLatch && functLatch === FUNC_START.U && coreSelectLatch === i.U
-      r.module.io.req.bits.addr := addrFile.io.values(i * numChannels + j)
+    // connect readChannels and writeChannels appropriately
+    cores.zipWithIndex.foreach { case (core, i) =>
 
-      c <> SFQueue(outer.queueDepth, outer.modularInterface.readChannelParams(j).width)(r.module.io.channel)
+      core.readChannels.zipWithIndex.foreach { case (c, j) =>
+        val r = outer.readers(i)(j)
+        //        c.req <> r.module.io.req
+        r.module.io.req.valid := cmdFireLatch && functLatch === FUNC_START.U && coreSelectLatch === i.U
+        r.module.io.req.bits.addr := addrFile.io.values(i * numChannels + j)
+
+        c <> SFQueue(outer.queueDepth, outer.modularInterface.readChannelParams(j).widthBytes)(r.module.io.channel)
+      }
+
+      core.writeChannels.zipWithIndex.foreach { case (c, j) =>
+        val w = outer.writers(i)(j)
+        //        c.req <> w.module.io.req
+        w.module.io.req.valid := cmdFireLatch && functLatch === FUNC_START.U && coreSelectLatch === i.U
+        w.module.io.req.bits.addr := addrFile.io.values(i * numChannels + numReadChannels + j)
+
+        w.module.io.channel <> SFQueue(outer.queueDepth, outer.modularInterface.writeChannelParams(j).widthBytes)(c)
+      }
     }
-
-    core.writeChannels.zipWithIndex.foreach { case (c, j) =>
-      val w = outer.writers(i)(j)
-      //        c.req <> w.module.io.req
-      w.module.io.req.valid := cmdFireLatch && functLatch === FUNC_START.U && coreSelectLatch === i.U
-      w.module.io.req.bits.addr := addrFile.io.values(i * numChannels + numReadChannels + j)
-
-      w.module.io.channel <> SFQueue(outer.queueDepth, outer.modularInterface.writeChannelParams(j).width)(c)
-    }
-  }
-
-  // TO-DO: Generate value for r.module.io.req
-  cores.zipWithIndex.foreach { case (_, i) =>
-    readLengths(i).foreach(_ := RegNext(cmd.bits.rs2))
-    writeLengths(i).foreach(_ := RegNext(cmd.bits.rs2))
   }
 }
 

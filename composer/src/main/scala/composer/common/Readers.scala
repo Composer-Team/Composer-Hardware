@@ -168,5 +168,4 @@ class ColumnReadChannelModule(maxBytes: Int, outer: ColumnReadChannel)(implicit 
   io.channel.data.valid := (state === s_send) && data_valid
   io.channel.data.bits := masked_data
   io.busy := state =/= s_idle
-
 }
