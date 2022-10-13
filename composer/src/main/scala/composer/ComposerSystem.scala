@@ -7,6 +7,7 @@ import composer.RoccConstants.{FUNC_ADDR, FUNC_START}
 import composer.common.Util.BoolSeqHelper
 import composer.common._
 import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.subsystem.ExtMem
 import freechips.rocketchip.tilelink.{TLBuffer, TLFragmenter, TLIdentityNode, TLXbar}
 
 class ComposerSystem(val systemParams: ComposerSystemParams)(implicit p: Parameters) extends LazyModule {
@@ -43,10 +44,11 @@ class ComposerSystem(val systemParams: ComposerSystemParams)(implicit p: Paramet
   }
 
   val maxBufSize = 1024 * 4 * 4
+  // TODO UG: use parameters for this
   val maxCores = 32
   val maxWriteCount = 4
   val maxReadCount = 5
-  val maxMemAddr = 0x400000000L
+  val maxMemAddr = p(ExtMem).get.master.size
   val bufStride = 1 // used for sharing a buffer amongst several cores
   val bufSize = /*systemParams.bufSize  * nBytes*/ maxBufSize * bufStride
   val producerBuffers = modularInterface.writeChannelParams.indices.map { i =>
@@ -295,6 +297,8 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     case l: Seq[Int] => l.max
     case _ => 0
   }
+
+  println("Address is " + addressBits + "b wide")
 
   lazy val numReadChannels = outer.readLoc.length
   lazy val numWriteChannels = outer.writeLoc.length
