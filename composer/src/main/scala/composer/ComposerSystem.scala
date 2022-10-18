@@ -234,6 +234,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
       None
     }
   }
+
   val remoteWrite = writeLoc.zipWithIndex.map { case (wloc, i) =>
     if (wloc contains "Remote") {
       val corenode = TLIdentityNode()
@@ -257,16 +258,6 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     val cparam = outer.systemParams.coreParams.copy(core_id = idx, system_id = outer.system_id)
     outer.systemParams.buildCore(cparam, p)
   }
-
-  //  // TODO UG: Look at this! Currently, the composer only supports contiguous reads/writes (as supposed to sparse r/w
-  //  //          that you might find in dynamic data structures, for instance. How long is this contiguous read? Not super
-  //  //          well thought out here, it's just whatever was in rs2 when the command got sent over. You can command the
-  //  //          core to stop prematurely but in that case you have both the Reader module AND the user counting when
-  //  //          they're going to end. I think this needs a better interface. This is an important task to get right
-  //  cores.zipWithIndex.foreach { case (_, i) =>
-  //    readLengths(i).foreach(_ := RegNext(cmd.bits.rs2))
-  //    writeLengths(i).foreach(_ := RegNext(cmd.bits.rs2))
-  //  }
 
   val arbiter = Module(new RRArbiter(new ComposerRoccResponse(), outer.systemParams.nCores))
   arbiter.io.in <> cores.map(_.io.resp)
