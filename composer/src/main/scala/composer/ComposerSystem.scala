@@ -13,10 +13,10 @@ import freechips.rocketchip.tilelink.{TLBuffer, TLFragmenter, TLIdentityNode, TL
 class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)(implicit p: Parameters) extends LazyModule {
   val nCores = systemParams.nCores
   val queueDepth = systemParams.channelQueueDepth
-  val modularInterface = systemParams.coreParams
+  val coreParams = systemParams.coreParams
 
-  val readLoc = modularInterface.readChannelParams.map(_.location)
-  val writeLoc = modularInterface.writeChannelParams.map(_.location)
+  val readLoc = coreParams.readChannelParams.map(_.location)
+  val writeLoc = coreParams.writeChannelParams.map(_.location)
 
   // replace this code with "getorelse"
 
@@ -32,13 +32,13 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
 
   // TODO Other reader types
   val readers = Seq.fill(nCores) {
-    modularInterface.readChannelParams.map { rch =>
+    coreParams.readChannelParams.map { rch =>
       LazyModule(new ColumnReadChannel(rch.widthBytes)(p))
     }
   }
   val writers = Seq.fill(nCores) {
-    modularInterface.writeChannelParams.map { wch =>
-      LazyModule(new FixedSequentialWriteChannel(wch.widthBytes, modularInterface.nMemXacts)(p))
+    coreParams.writeChannelParams.map { wch =>
+      LazyModule(new FixedSequentialWriteChannel(wch.widthBytes, coreParams.nMemXacts)(p))
     }
   }
 
@@ -50,7 +50,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
   val maxMemAddr = p(ExtMem).get.master.size
   val bufStride = 1 // used for sharing a buffer amongst several cores
   val bufSize = /*systemParams.bufSize  * nBytes*/ maxBufSize * bufStride
-  val producerBuffers = modularInterface.writeChannelParams.indices.map { i =>
+  val producerBuffers = coreParams.writeChannelParams.indices.map { i =>
     val wloc = writeLoc(i)
     if (wloc contains "Local") {
       val bufSize = /*systemParams.bufSize  * nBytes*/ maxBufSize * bufStride
@@ -69,7 +69,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
     }
   }
 
-  val consumerBuffersModules = modularInterface.readChannelParams.indices.map { i =>
+  val consumerBuffersModules = coreParams.readChannelParams.indices.map { i =>
     val rloc = readLoc(i)
     if (rloc contains "Local") {
       //TODO: This address thing sucks, can collide addresses between the two
@@ -364,6 +364,11 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
       w.module.io.req.bits.len := addrFile.io.lens_out(i * numChannels + numReadChannels + j)
       //        w.module.io.channel <> SFQueue(outer.queueDepth, outer.modularInterface.writeChannelParams(j).widthBytes)(c)
     }
+  }
+  val fields = cores(0).getClass.getDeclaredFields
+  if (fields.isEmpty) println("no fields??")
+  fields foreach {f =>
+    println(s"field ${f.getName} is class ${f.getAnnotatedType}")
   }
 }
 
