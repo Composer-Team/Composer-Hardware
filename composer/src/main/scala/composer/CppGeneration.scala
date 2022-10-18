@@ -1,5 +1,11 @@
 package composer
 
+import chipsalliance.rocketchip.config.Parameters
+import chisel3.util.log2Up
+import freechips.rocketchip.subsystem.ExtMem
+
+import java.io.FileWriter
+
 trait CPPLiteral {
   def typeString: String
   def toC: String
@@ -60,6 +66,28 @@ object CppGenerationUtils {
     "#define %s %s\n".format(name, value.toC)
 
   def genComment(str: String): String = "// %s\n".format(str)
+
+  def genMemoryAllocatorDeclaration(cr: MCRFileMap, acc: ComposerAcc)(implicit p: Parameters): Unit = {
+    // we might have multiple address spaces...
+    val f = new FileWriter("vsim/generated-src/composer_allocator_declaration.h")
+    val sz = p(ExtMem).get.master.size
+    f.write("// Automatically generated memory-allocator declaration from Composer-Hardware:CppGeneration\n" +
+      "#include <composer_alloc.h>\n" +
+      "#include <rocc.h>\n" +
+      "#include <cinttypes>\n" +
+      "#ifndef COMPOSER_ALLOCATOR_GEN\n" +
+      "#define COMPOSER_ALLOCATOR_GEN\n" +
+      "using composer_allocator=composer::device_allocator<" + sz + ">;\n")
+    cr.printCRs(Some(f))
+    acc.system_tups foreach { tup =>
+      f.write(s"const uint8_t ${tup._3.name}_ID = ${tup._2};\n")
+    }
+    f.write(s"static const uint8_t system_id_bits = ${p(SystemIDLengthKey)};\n")
+    f.write(s"static const uint8_t core_id_bits = ${p(CoreIDLengthKey)};\n")
+    f.write(s"static const composer::composer_pack_info pack_cfg(system_id_bits, core_id_bits);\n")
+    f.write("#endif\n")
+    f.close()
+  }
 
 }
 

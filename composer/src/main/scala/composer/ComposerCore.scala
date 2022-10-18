@@ -22,7 +22,7 @@ class DataChannelIO(maxBytes: Int) extends Bundle {
 class ComposerCore(val composerCoreParams: ComposerCoreParams)(implicit p: Parameters) extends Module { // with HasCoreParams
   val io = IO(new ComposerCoreIO())
 
-  val readChannels = if (!composerCoreParams.customRead) {
+  val readChannels: Seq[DataChannelIO] = if (!composerCoreParams.customRead) {
     composerCoreParams.readChannelParams.map {
       ch => IO(Flipped(new DataChannelIO(ch.widthBytes)))
     }
@@ -30,7 +30,7 @@ class ComposerCore(val composerCoreParams: ComposerCoreParams)(implicit p: Param
     Seq()
   }
 
-  val writeChannels = {
+  val writeChannels: Seq[DataChannelIO] = {
     composerCoreParams.writeChannelParams.map {
       ch => IO(new DataChannelIO(ch.widthBytes))
     }

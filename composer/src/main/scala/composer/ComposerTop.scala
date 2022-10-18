@@ -2,6 +2,7 @@ package composer
 
 import chisel3._
 import chisel3.util._
+import composer.CppGenerationUtils.genMemoryAllocatorDeclaration
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
@@ -66,6 +67,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   val cmd_resp_axilhub = LazyModule(new AXILHub()(dummyTL))
 
+
   // connect axil hub to external axil port
   cmd_resp_axilhub.node := ocl_port
   // connect axil hub to accelerator
@@ -92,6 +94,9 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   val dram_ports = outer.dram_ports
   acc.module.io.cmd <> axil_hub.module.io.rocc_in
   axil_hub.module.io.rocc_out <> acc.module.io.resp
+
+  genMemoryAllocatorDeclaration(outer.cmd_resp_axilhub.axil_widget.module.crRegistry, acc.acc)
+
 
   // TODO what in the world does this do?
   val ocl = IO(Flipped(HeterogeneousBag.fromNode(ocl_port.out)))

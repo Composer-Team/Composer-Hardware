@@ -14,7 +14,7 @@ class WithLFSR(withNCores: Int) extends Config((site, here, up) => {
         writeChannelParams = Seq()
       ),
       nCores = withNCores,
-      system_id = 0,
+      name = "LFSRSystem",
       buildCore = {
         case (coreParams: ComposerCoreParams, parameters: Parameters) =>
           Module(new LFSRCore(coreParams)(parameters))
@@ -30,14 +30,14 @@ class WithALUs(withNCores: Int) extends Config((site, here, up) => {
       writeChannelParams = Seq()
     ),
     nCores = withNCores,
-    system_id = 1,
+    name = "ALUSystem",
     buildCore = {
       case (coreParams: ComposerCoreParams, parameters: Parameters) =>
         Module(new SimpleALU(coreParams)(parameters))
     }))
 })
 
-class WithVectorAdder(withNCores: Int) extends Config((site, here, up) => {
+class WithVectorAdder(withNCores: Int, dataWidth: Int) extends Config((site, here, up) => {
   case ComposerSystemsKey => up(ComposerSystemsKey, site) ++ Seq(ComposerSystemParams(
     coreParams = ComposerCoreParams(
       // just use default parameters, widthBytes=8 bytes
@@ -45,7 +45,7 @@ class WithVectorAdder(withNCores: Int) extends Config((site, here, up) => {
       writeChannelParams = Seq(ComposerChannelParams())
     ),
     nCores = withNCores,
-    system_id = 2,
+    name = "VectorSystem",
     buildCore = {
       case (composerCoreParams: ComposerCoreParams, parameters: Parameters) =>
         Module(new VectorAdder(composerCoreParams)(parameters))
@@ -53,20 +53,13 @@ class WithVectorAdder(withNCores: Int) extends Config((site, here, up) => {
   ))
 
   // use 8-bit data divisions
-  case VectorAdderKey => VectorConfig(dWidth = 8)
+  case VectorAdderKey => VectorConfig(dWidth = dataWidth)
 })
-class MyLFSRConfig extends Config (
-  new WithLFSR(1) ++
-    new WithComposer ++
-    new WithAWSMem
-)
-
-class MyALUConfig extends Config (
-  new WithALUs(5) ++
-    new WithComposer ++
-    new WithAWSMem
-)
-
-class MyVectorAdderConfig extends Config (
-  new WithVectorAdder(2) ++ new WithComposer ++ new WithAWSMem
+class exampleConfig extends Config (
+  // example configuration that has
+  //  - 1 SimpleALU that supports add, sub, multiply
+  //  - 1 VectorAdder that uses Readers/Writers to read/write to large chunks of memory
+  //  - 1 GaloisLFSR that returns random numbers over the command/response interface
+  new WithALUs(1) ++ new WithVectorAdder(1, 16) ++ new WithLFSR(1) ++
+    new WithComposer() ++ new WithAWSMem
 )

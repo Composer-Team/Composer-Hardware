@@ -8,6 +8,7 @@ import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 
+import java.io.FileWriter
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
@@ -84,10 +85,13 @@ class MCRFileMap() {
   // Returns a copy of the current register map
   def getRegMap = name2addr.toMap
 
-  def printCRs(): Unit = {
+  def printCRs(outStream: Option[FileWriter] = None): Unit = {
     regList.zipWithIndex foreach { case (entry, i) =>
       val addr = i << 2
-      println(s"Name: ${entry.name}, ID: $i, Addr: $addr")
+      outStream match {
+        case a: Some[FileWriter] => a.get.write(s"#define ${entry.name.toUpperCase()} ($addr)\n")
+        case None => println(s"Name: ${entry.name}, ID: $i, Addr: $addr")
+      }
     }
   }
 }

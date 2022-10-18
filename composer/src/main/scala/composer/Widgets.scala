@@ -6,6 +6,7 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 
+import java.io.FileWriter
 import scala.collection.mutable
 
 /*
@@ -138,7 +139,7 @@ abstract class WidgetModule(outer: Widget) extends LazyModuleImp(outer) {
     crRegistry.genHeader(wName.getOrElse(name).toUpperCase, base, sb)
   }
 
-  def printCRs(): Unit = crRegistry.printCRs()
+  def printCRs(ostream: Option[FileWriter] = None): Unit = crRegistry.printCRs(ostream)
 }
 
 // TODO: Need to handle names better; try and stick ctrl IO elaboration in here,

@@ -2,6 +2,7 @@ package composer
 
 import chisel3._
 import chisel3.util._
+import composer.CppGenerationUtils.genMemoryAllocatorDeclaration
 import composer.RoccConstants.FUNC_START
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
@@ -9,27 +10,28 @@ import freechips.rocketchip.tile._
 import freechips.rocketchip.config.Parameters
 import composer.common._
 import composer.common.Util._
+
 import java.io.FileWriter
+import scala.annotation.tailrec
 import scala.language.postfixOps
 
 class ComposerAcc(implicit p: Parameters) extends LazyModule {
 
   val configs = p(ComposerSystemsKey)
   println(configs)
-  val gsystems: Seq[ComposerSystem] = configs.map { c =>
-    LazyModule(new ComposerSystem(c))
+  val system_tups = configs.zipWithIndex.map { case (c: ComposerSystemParams, id: Int) =>
+    (LazyModule(new ComposerSystem(c, id)), id, c)
   }
 
   def sysLookup(opcode: Int): ComposerSystem = {
-    gsystems(configs.indexWhere { ms =>
-      ms.system_id == opcode
-    })
+    system_tups(system_tups.indexWhere(_._2 == opcode))._1
   }
 
-  configs.foreach { c => println("Opcode " + c.system_id + ": " + c.getClass.getCanonicalName) }
+  system_tups foreach { tup =>
+    println("System " + tup._3.name + " has opcode " + tup._2)
+  }
 
-  val system_functs = configs.map(_.system_id.U)
-  val systems = gsystems
+  val systems = system_tups.map(_._1)
 
   val memGroups = systems.map(_.mem).filter(_ nonEmpty)
   val mem = Seq.fill(memGroups.size) {
@@ -86,18 +88,6 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
 }
 
 class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends LazyModuleImp(outer) {
-  // TODO - find a more appropriate place to put this. Note: This might actually be the best place since we have direct access to system in outer.* context
-  // TODO - this might be where we also output core c++ bindings
-  val out = new FileWriter("composer.yaml")
-  out.write("---\n")
-  val sidb = p(SystemIDLengthKey)
-  val cidb = p(CoreIDLengthKey)
-  // this might be throwing an error, just compile code once and it'll work
-  val nameString = composer.BuildInfo.composerBuildKey
-
-  out.write(f" system_id_bits: $sidb%d\n core_id_bits: $cidb%d\n tag: $nameString%s\n")
-  out.close()
-
   val io = IO(new Bundle {
     val cmd = Flipped(Decoupled(new RoCCCommand))
     val resp = Decoupled(new RoCCResponse)
@@ -147,23 +137,23 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   val monitorWaiting = RegInit(false.B)
 
   val systemQueues = outer.systems.map(_ => Module(new Queue(new ComposerRoccCommand, 2)))
-  (outer.systems, outer.system_functs, systemQueues).zipped.foreach { case (s, c, q) =>
-    q.io.enq.valid := (accCmd.valid && system_id === c /* && !monitorWaiting*/)
+  (outer.system_tups, systemQueues).zipped.foreach { case (tup, q) =>
+    q.io.enq.valid := (accCmd.valid && system_id === tup._2.U /* && !monitorWaiting*/)
     q.io.enq.bits := accCmd.bits
-    when(system_id === c) {
+    when(system_id === tup._2.U) {
       accCmd.ready := q.io.enq.ready
     }
-    s.module.io.cmd <> q.io.deq
+    tup._1.module.io.cmd <> q.io.deq
     when(q.io.deq.fire && isStart(q.io.deq.bits)) {
       hostRespFile(q.io.deq.bits.inst.system_id)(q.io.deq.bits.core_id) := q.io.deq.bits.inst.xd
     }
     when(monitorWaiting) {
       q.io.deq.ready := false.B
-      s.module.io.cmd.valid := false.B
+      tup._1.module.io.cmd.valid := false.B
     }
   }
 
-  val anyBusy = outer.gsystems.map(_.module.io.busy).any
+  val anyBusy = outer.system_tups.map(_._1.module.io.busy).any
   when(monitorWaiting === true.B && !anyBusy) {
     monitorWaiting := false.B
   }

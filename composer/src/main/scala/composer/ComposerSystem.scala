@@ -10,11 +10,10 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem.ExtMem
 import freechips.rocketchip.tilelink.{TLBuffer, TLFragmenter, TLIdentityNode, TLXbar}
 
-class ComposerSystem(val systemParams: ComposerSystemParams)(implicit p: Parameters) extends LazyModule {
+class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)(implicit p: Parameters) extends LazyModule {
   val nCores = systemParams.nCores
   val queueDepth = systemParams.channelQueueDepth
   val modularInterface = systemParams.coreParams
-  val system_id = systemParams.system_id
 
   val readLoc = modularInterface.readChannelParams.map(_.location)
   val writeLoc = modularInterface.writeChannelParams.map(_.location)
@@ -22,7 +21,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams)(implicit p: Paramet
   // replace this code with "getorelse"
 
   val all_mems = readLoc ++ writeLoc
-  val hasMem = (all_mems foldLeft[Boolean]false)({case (b: Boolean, s: String) => b || (s == "Mem")})
+  val hasMem = (all_mems foldLeft[Boolean] false) ({ case (b: Boolean, s: String) => b || (s == "Mem") })
   val mem = if (hasMem) {
     Seq.fill(nCores) {
       TLIdentityNode()
@@ -254,20 +253,20 @@ class ComposerSystem(val systemParams: ComposerSystemParams)(implicit p: Paramet
 
 class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) {
   val io = IO(new ComposerSystemIO())
-  val cores = Seq.tabulate(outer.systemParams.nCores){idx: Int =>
-    val cparam = outer.systemParams.coreParams.copy(core_id = idx, system_id = outer.systemParams.system_id)
+  val cores = Seq.tabulate(outer.systemParams.nCores) { idx: Int =>
+    val cparam = outer.systemParams.coreParams.copy(core_id = idx, system_id = outer.system_id)
     outer.systemParams.buildCore(cparam, p)
   }
 
-  // TODO UG: Look at this! Currently, the composer only supports contiguous reads/writes (as supposed to sparse r/w
-  //          that you might find in dynamic data structures, for instance. How long is this contiguous read? Not super
-  //          well thought out here, it's just whatever was in rs2 when the command got sent over. You can command the
-  //          core to stop prematurely but in that case you have both the Reader module AND the user counting when
-  //          they're going to end. I think this needs a better interface. This is an important task to get right
-  cores.zipWithIndex.foreach { case (_, i) =>
-    readLengths(i).foreach(_ := RegNext(cmd.bits.rs2))
-    writeLengths(i).foreach(_ := RegNext(cmd.bits.rs2))
-  }
+  //  // TODO UG: Look at this! Currently, the composer only supports contiguous reads/writes (as supposed to sparse r/w
+  //  //          that you might find in dynamic data structures, for instance. How long is this contiguous read? Not super
+  //  //          well thought out here, it's just whatever was in rs2 when the command got sent over. You can command the
+  //  //          core to stop prematurely but in that case you have both the Reader module AND the user counting when
+  //  //          they're going to end. I think this needs a better interface. This is an important task to get right
+  //  cores.zipWithIndex.foreach { case (_, i) =>
+  //    readLengths(i).foreach(_ := RegNext(cmd.bits.rs2))
+  //    writeLengths(i).foreach(_ := RegNext(cmd.bits.rs2))
+  //  }
 
   val arbiter = Module(new RRArbiter(new ComposerRoccResponse(), outer.systemParams.nCores))
   arbiter.io.in <> cores.map(_.io.resp)
@@ -275,7 +274,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   resp.bits.rd := arbiter.io.out.bits.rd
   resp.bits.core_id := arbiter.io.out.bits.core_id
   resp.bits.data := arbiter.io.out.bits.data
-  resp.bits.system_id := outer.systemParams.system_id.U
+  resp.bits.system_id := outer.system_id.U
   arbiter.io.out.ready := resp.ready
 
   lazy val cmd = Queue(io.cmd)
@@ -308,13 +307,9 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   lazy val resp = Wire(Decoupled(new ComposerRoccResponse())) //Queue(io.resp)
 
   def coreRWReady(c: Int): Bool = {
-    RegNext(outer.readers(c).map(_.module.io.req.ready).fold(true.B) (_ && _) &&
+    RegNext(outer.readers(c).map(_.module.io.req.ready).fold(true.B)(_ && _) &&
       outer.writers(c).map(_.module.io.req.ready).fold(true.B)(_ && _))
   }
-
-  //TODO: Have to assign length manually for now
-  lazy val readLengths: Seq[Seq[UInt]] = outer.readers.map(_.map(_.module.io.req.bits.len))
-  lazy val writeLengths: Seq[Seq[UInt]] = outer.writers.map(_.map(_.module.io.req.bits.len))
 
   lazy val coreReady = cores.zipWithIndex.map { case (core, i) =>
     (core.io.req.ready && coreRWReady(i)) || (coreSelect =/= i.U)
@@ -336,14 +331,14 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     }
   }
 
-
   cmd.ready := funct =/= FUNC_START.U || coreReady
 
   io.busy := cores.map(_.io.busy).any
 
   addrFile.io.write.en := cmd.bits.inst.funct === FUNC_ADDR.U && cmd.fire
-  addrFile.io.write.addr := cmd.bits.rs1 + (numChannels.U * coreSelect)
+  addrFile.io.write.addr := cmd.bits.rs1(7, 0) + (numChannels.U * coreSelect)
   addrFile.io.write.data := cmd.bits.rs2
+  addrFile.io.write.len := cmd.bits.rs1(39, 8)
 
   cores.zipWithIndex.foreach { case (core, i) =>
     // TO-DO: delay until all readers/writers are ready? use DecoupledHelper
@@ -354,32 +349,29 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   }
 
   // scope to separate out read channel stuff
-  {
-    val cmdFireLatch = RegNext(cmd.fire)
-    val cmdBitsLatch = RegNext(cmd.bits)
-    val functLatch = cmdBitsLatch.inst.funct
-    val coreSelectLatch = cmdBitsLatch.core_id
+  val cmdFireLatch = RegNext(cmd.fire)
+  val cmdBitsLatch = RegNext(cmd.bits)
+  val functLatch = cmdBitsLatch.inst.funct
+  val coreSelectLatch = cmdBitsLatch.core_id
 
-    // connect readChannels and writeChannels appropriately
-    cores.zipWithIndex.foreach { case (core, i) =>
+  // connect readChannels and writeChannels appropriately
+  cores.zipWithIndex.foreach { case (core: ComposerCore, i) =>
+    core.readChannels.zipWithIndex.foreach { case (c, j) =>
+      val r = outer.readers(i)(j)
+      r.module.io.channel <> c
+      r.module.io.req.valid := cmdFireLatch && functLatch === FUNC_START.U && coreSelectLatch === i.U
+      r.module.io.req.bits.addr := addrFile.io.addrs_out(i * numChannels + j)
+      r.module.io.req.bits.len := addrFile.io.lens_out(i * numChannels + j)
+      //        c <> SFQueue(outer.queueDepth, outer.modularInterface.readChannelParams(j).widthBytes)(r.module.io.channel)
+    }
 
-      core.readChannels.zipWithIndex.foreach { case (c, j) =>
-        val r = outer.readers(i)(j)
-        //        c.req <> r.module.io.req
-        r.module.io.req.valid := cmdFireLatch && functLatch === FUNC_START.U && coreSelectLatch === i.U
-        r.module.io.req.bits.addr := addrFile.io.values(i * numChannels + j)
-
-        c <> SFQueue(outer.queueDepth, outer.modularInterface.readChannelParams(j).widthBytes)(r.module.io.channel)
-      }
-
-      core.writeChannels.zipWithIndex.foreach { case (c, j) =>
-        val w = outer.writers(i)(j)
-        //        c.req <> w.module.io.req
-        w.module.io.req.valid := cmdFireLatch && functLatch === FUNC_START.U && coreSelectLatch === i.U
-        w.module.io.req.bits.addr := addrFile.io.values(i * numChannels + numReadChannels + j)
-
-        w.module.io.channel <> SFQueue(outer.queueDepth, outer.modularInterface.writeChannelParams(j).widthBytes)(c)
-      }
+    core.writeChannels.zipWithIndex.foreach { case (c, j) =>
+      val w = outer.writers(i)(j)
+      w.module.io.channel <> c
+      w.module.io.req.valid := cmdFireLatch && functLatch === FUNC_START.U && coreSelectLatch === i.U
+      w.module.io.req.bits.addr := addrFile.io.addrs_out(i * numChannels + numReadChannels + j)
+      w.module.io.req.bits.len := addrFile.io.lens_out(i * numChannels + numReadChannels + j)
+      //        w.module.io.channel <> SFQueue(outer.queueDepth, outer.modularInterface.writeChannelParams(j).widthBytes)(c)
     }
   }
 }

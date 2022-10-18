@@ -54,8 +54,6 @@ class AXILWidgetModule(outer: AXILWidget) extends WidgetModule(outer) {
 
   genCRFile()
 
-  printCRs()
-
   io.cmds <> roccCmdFifo.io.deq
   roccRespFifo.io.enq <> io.resp
   io.mem_in <> writeFifo.io.deq

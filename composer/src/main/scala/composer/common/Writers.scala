@@ -52,8 +52,69 @@ abstract class AbstractSequentialWriteChannelModule(outer: AbstractSequentialWri
   lazy val nextAddr = Cat(fullAddr(addressBits - 1, log2Ceil(beatBytes)) + 1.U,
     0.U(log2Ceil(beatBytes).W))
 
-  val xactBusy = RegInit(0.U(nMemXacts.W))
-  val xactOneHot = PriorityEncoderOH(~xactBusy)
+  val txBusyBits = Reg(Vec(nMemXacts, Bool()))
+  val txPriority = PriorityEncoderOH(txBusyBits map (!_))
+  val haveBusyTx = txBusyBits.fold(false.B)(_ || _)
+  val haveNotBusyTx = !txBusyBits.fold(true.B)(_ && _)
+
+
+  def elaborate(): Unit = {
+    // new start request resets the whole state of the sequential writer
+    when(io.req.fire) {
+      initUpdate()
+      // wait for data from the core
+      state := s_data
+    }
+
+    // when the buffers are full of data or the user has signaled that
+    // it's done writing to the buffer then start writing
+    when(state === s_data && buffersFull()) {
+      state := s_mem
+    }
+
+    // when the core data channel fires, put the data in the write
+    // buffer and update buffer maintance state
+    when(io.channel.data.fire) {
+      dataUpdate()
+      when(beatFinished() || dataFinished()) {
+        state := s_mem
+      }
+    }
+
+    // handle TileLink 'a' interface (request to slave)
+
+    when(tl.a.fire) {
+      memUpdate()
+      when(sendFinished()) {
+        state := Mux(memFinished(), s_finishing, s_data)
+        txBusyBits := txBusyBits.zip(txPriority).map{case (a: Bool, b: Bool) => a || b }
+      }
+    }
+    // can't issue more transactions than we have room for
+    tl.a.valid := state === s_mem && haveNotBusyTx
+    tl.a.bits := edge.Put(
+      fromSource = OHToUInt(txPriority),
+      toAddress = fullAddr,
+      lgSize = log2Ceil(beatBytes).U,
+      data = wdata,
+      mask = wmask)._2
+
+    // handle TileLink 'd' interface (response from slave)
+    tl.d.ready := haveBusyTx
+    when(tl.d.fire) {
+      txBusyBits(tl.d.bits.source) := false.B
+    }
+
+    io.req.ready := state === s_idle
+    io.channel.data.ready := state === s_data || state === s_finishing
+    when(state === s_finishing) {
+      when(!io.channel.data.valid && !txBusyBits.fold(false.B)(_ || _)) {
+        state := s_idle
+      }
+    }
+
+    io.busy := state =/= s_idle || haveBusyTx
+  }
 
   def initUpdate(): Unit
 
@@ -69,53 +130,7 @@ abstract class AbstractSequentialWriteChannelModule(outer: AbstractSequentialWri
 
   def sendFinished(): Bool
 
-  def flush(): Bool
-
-  def elaborate(): Unit = {
-    when(io.req.fire) {
-      initUpdate()
-      state := s_data
-    }
-
-    when(state === s_data && flush()) {
-      state := s_mem
-    }
-
-    when(io.channel.data.fire) {
-      dataUpdate()
-      when(beatFinished() || dataFinished()) {
-        state := s_mem
-      }
-    }
-
-    when(tl.a.fire) {
-      memUpdate()
-      when(sendFinished()) {
-        state := Mux(memFinished(), s_finishing, s_data)
-      }
-    }
-
-    val gntId = tl.d.bits.source
-    xactBusy := (xactBusy | Mux(tl.a.fire, xactOneHot, 0.U) & (~Mux(tl.d.fire, UIntToOH(gntId), 0.U)).asUInt)
-    io.req.ready := state === s_idle
-    io.channel.data.ready := state === s_data || state === s_finishing
-    when(state === s_finishing) {
-      when(!io.channel.data.valid && !xactBusy.orR) {
-        state := s_idle
-      }
-    }
-    tl.a.valid := state === s_mem && !xactBusy.andR
-    tl.a.bits := edge.Put(
-      fromSource = OHToUInt(xactOneHot),
-      toAddress = fullAddr,
-      lgSize = log2Ceil(beatBytes).U,
-      data = wdata,
-      mask = wmask)._2
-
-    tl.d.ready := xactBusy.orR
-    io.busy := state =/= s_idle || xactBusy.orR
-  }
-
+  def buffersFull(): Bool
 }
 
 class FixedSequentialWriteRequest(addressBits: Int) extends Bundle {
@@ -203,7 +218,7 @@ class FixedSequentialWriteChannelModule(outer: FixedSequentialWriteChannel, nByt
 
   def sendFinished(): Bool = true.B
 
-  def flush(): Bool = io.channel.finished || finishedBuf
+  def buffersFull(): Bool = io.channel.finished || finishedBuf
 
   when(io.channel.finished) {
     finishedBuf := true.B

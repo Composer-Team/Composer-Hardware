@@ -30,7 +30,7 @@ case class ComposerCoreParams(readChannelParams: Seq[ComposerChannelParams],
 
 case class ComposerSystemParams(coreParams: ComposerCoreParams,
                                 nCores: Int,
-                                system_id: Int,
+                                name: String,
                                 buildCore: (ComposerCoreParams, Parameters) => ComposerCore,
 
                                 /**

@@ -59,15 +59,17 @@ class ColumnReadChannelModule(maxBytes: Int, outer: ColumnReadChannel)(implicit 
   val addressBits = log2Up(edge.manager.maxAddress)
 
   require(isPow2(maxBytes))
-
   val io = IO(new ReadChannelIO(addressBits, maxBytes))
 
   val beatBytes = edge.manager.beatBytes
+  val logBeatBytes = log2Up(beatBytes)
+  val logChannelSize = log2Up(io.channel.data.bits.getWidth) - 3
   val beatsPerBlock = blockBytes / beatBytes
+  println(s"lbb: $logBeatBytes, bpb: $beatsPerBlock, lcs: $logChannelSize")
 
   val addr = Reg(UInt(addressBits.W))
   val blockAddr = Wire(UInt(addressBits.W))
-  val len = Reg(UInt(addressBits.W))
+  val len = Reg(UInt((addressBits-logBeatBytes).W))
 
   val buffer = Reg(Vec(beatsPerBlock, UInt((beatBytes * 8).W)))
   val buffer_pending = RegInit(0.U(beatsPerBlock.W))
@@ -84,7 +86,7 @@ class ColumnReadChannelModule(maxBytes: Int, outer: ColumnReadChannel)(implicit 
     addr := io.req.bits.addr
     byte_offset := io.req.bits.addr(log2Ceil(blockBytes) - 1, 0)
     //size := io.req.bits.size
-    len := io.req.bits.len
+    len := io.req.bits.len >> logChannelSize
     //stride := io.req.bits.stride.getOrElse(0.U)
     state := s_acquire
     shouldStop := false.B
@@ -163,6 +165,7 @@ class ColumnReadChannelModule(maxBytes: Int, outer: ColumnReadChannel)(implicit 
   tl.a.bits := edge.Get(fromSource = 0.U,
     toAddress = blockAddr,
     lgSize = log2Ceil(blockBytes).U)._2
+  println("logblock bytes is " + log2Ceil(blockBytes) + " block bytes is " + blockBytes)
 
   tl.d.ready := buffer_pending.orR
   io.channel.data.valid := (state === s_send) && data_valid

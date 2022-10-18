@@ -13,24 +13,28 @@ import freechips.rocketchip.tile.{RoCCResponse, XLen}
  * @param w The number of bits for each register
  */
 class SettingsFile(n: Int, w: Int) extends Module {
+  val lenLen = math.min(32, w)
   val io = IO(new Bundle {
     // Interface to write into the file
     val write = new Bundle {
       val en = Input(Bool())
       val addr = Input(UInt(log2Up(n).W))
+      val len = Input(UInt(w.W))
       val data = Input(UInt(w.W))
     }
     // The values contained in the register file
-    val values = Output(Vec(n, UInt(w.W)))
+    val addrs_out = Output(Vec(n, UInt(w.W)))
+    val lens_out = Output(Vec(n, UInt(w.W)))
   })
-
-  val values = Reg(Vec(n, UInt(w.W)))
-
+  val addrs = Reg(Vec(n, UInt(w.W)))
+  val lens = Reg(Vec(n, UInt(lenLen.W)))
   when(io.write.en) {
-    values(io.write.addr) := io.write.data
+    addrs(io.write.addr) := io.write.data
+    lens(io.write.addr) := io.write.len
   }
 
-  io.values := values
+  io.addrs_out := addrs
+  io.lens_out := lens
 }
 
 /**
