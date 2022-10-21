@@ -2,7 +2,7 @@ package design
 
 import chipsalliance.rocketchip.config.{Config, Field, Parameters}
 import chisel3.{Data, Module}
-import composer.{ComposerChannelParams, ComposerCoreParams, ComposerSystemParams, ComposerSystemsKey, WithAWSMem, WithComposer}
+import composer.{ComposerChannelParams, ComposerConstructor, ComposerCoreParams, ComposerSystemParams, ComposerSystemsKey, WithAWSMem, WithComposer}
 
 case object LFSRConfigKey extends Field[LFSRConfig]
 case object VectorAdderKey extends Field[VectorConfig]
@@ -16,8 +16,8 @@ class WithLFSR(withNCores: Int) extends Config((site, here, up) => {
       nCores = withNCores,
       name = "LFSRSystem",
       buildCore = {
-        case (coreParams: ComposerCoreParams, parameters: Parameters) =>
-          Module(new LFSRCore(coreParams)(parameters))
+        case (coreParams: ComposerConstructor, parameters: Parameters) =>
+          new LFSRCore(coreParams)(parameters)
       }))
 
   case LFSRConfigKey => LFSRConfig(7, Seq(7, 6, 5, 4))
@@ -32,8 +32,8 @@ class WithALUs(withNCores: Int) extends Config((site, here, up) => {
     nCores = withNCores,
     name = "ALUSystem",
     buildCore = {
-      case (coreParams: ComposerCoreParams, parameters: Parameters) =>
-        Module(new SimpleALU(coreParams)(parameters))
+      case (coreParams: ComposerConstructor, parameters: Parameters) =>
+        new SimpleALU(coreParams)(parameters)
     }))
 })
 
@@ -47,8 +47,8 @@ class WithVectorAdder(withNCores: Int, dataWidth: Int) extends Config((site, her
     nCores = withNCores,
     name = "VectorSystem",
     buildCore = {
-      case (composerCoreParams: ComposerCoreParams, parameters: Parameters) =>
-        Module(new VectorAdder(composerCoreParams)(parameters))
+      case (composerCoreParams: ComposerConstructor, parameters: Parameters) =>
+        new VectorAdder(composerCoreParams)(parameters)
     }
   ))
 

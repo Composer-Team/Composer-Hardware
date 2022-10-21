@@ -3,7 +3,8 @@ package design
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import composer.{ComposerCore, ComposerCoreParams}
+import composer.MemoryStreams.SequentialReader
+import composer.{ComposerConstructor, ComposerCore, ComposerCoreParams}
 
 import scala.util.Random
 
@@ -11,7 +12,7 @@ case class LFSRConfig(length: Int, taps: Seq[Int])
 
 // galois lfsr
 // note to self: look at dramsim2
-class LFSRCore(composerCoreParams: ComposerCoreParams)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
+class LFSRCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
   val s_idle :: s_working :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
   val conf = p(LFSRConfigKey)
@@ -64,7 +65,7 @@ class LFSRCore(composerCoreParams: ComposerCoreParams)(implicit p: Parameters) e
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * Simple ALU Implementation * * * * * * * * * * * * * * * * * * *
 
-class SimpleALU(composerCoreParams: ComposerCoreParams)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
+class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
   val s_idle :: s_working :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
 
@@ -117,14 +118,15 @@ class SimpleALU(composerCoreParams: ComposerCoreParams)(implicit p: Parameters) 
 case class VectorConfig(dWidth: Int, // what is the datatype width?
                        )
 
-class VectorAdder(composerCoreParams: ComposerCoreParams)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
+class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
   val s_idle :: s_load :: s_add :: s_store :: s_finish :: Nil = Enum(5)
   val vConfig = p(VectorAdderKey)
   require(isPow2(vConfig.dWidth), "The vector data width must be a power of two!")
-
+  val myReader = declareSequentialReader(usingReadChannelID = 0, maxBytes = 8)
+  val myWriter = declareSequentialWriter(usingWriteChannelID = 0, maxBytes = 8)
   val state = RegInit(s_idle)
   val toAdd = Reg(UInt(vConfig.dWidth.W))
-  val vDivs = readChannels(0).data.bits.getWidth / vConfig.dWidth
+  val vDivs = myReader.data.bits.getWidth / vConfig.dWidth
   val vLen = Reg(UInt(io.req.bits.rs1.getWidth.W))
   val rfinish = RegInit(false.B)
 
@@ -138,11 +140,11 @@ class VectorAdder(composerCoreParams: ComposerCoreParams)(implicit p: Parameters
   val dArray = Seq.fill(vDivs)(Reg(UInt(vConfig.dWidth.W)))
 
   // user reverse to maintain order
-  writeChannels(0).data.bits := Cat(dArray.reverse)
-  writeChannels(0).finished := false.B
-  writeChannels(0).data.valid := false.B
-  readChannels(0).stop := false.B
-  readChannels(0).data.ready := false.B
+  myWriter.data.bits := Cat(dArray.reverse)
+  myWriter.finished := false.B
+  myWriter.data.valid := false.B
+  myReader.stop := false.B
+  myReader.data.ready := false.B
 
   when(state === s_idle) {
     // don't start if it's a 0-lengthed segment
@@ -155,11 +157,11 @@ class VectorAdder(composerCoreParams: ComposerCoreParams)(implicit p: Parameters
       rdreg := io.req.bits.inst.rd
     }
   }.elsewhen(state === s_load) {
-    readChannels(0).data.ready := true.B
-    when(readChannels(0).data.fire) {
+    myReader.data.ready := true.B
+    when(myReader.data.fire) {
       // break the input into data-sized segments defined by vConfig.dwidth
       dArray.zipWithIndex.foreach { case (reg: UInt, idx: Int) =>
-        reg := readChannels(0).data.bits((idx + 1) * vConfig.dWidth - 1, vConfig.dWidth * idx)
+        reg := myReader.data.bits((idx + 1) * vConfig.dWidth - 1, vConfig.dWidth * idx)
       }
       state := s_add
       vLen := vLen - vDivs.U
@@ -171,8 +173,8 @@ class VectorAdder(composerCoreParams: ComposerCoreParams)(implicit p: Parameters
     dArray.foreach { a: UInt => a := a + toAdd }
     state := s_store
   }.elsewhen(state === s_store) {
-    writeChannels(0).data.valid := true.B
-    when(writeChannels(0).data.fire) {
+    myWriter.data.valid := true.B
+    when(myWriter.data.fire) {
       when(rfinish) {
         state := s_finish
       }.otherwise {

@@ -84,7 +84,9 @@ object CppGenerationUtils {
     }
     f.write(s"static const uint8_t system_id_bits = ${p(SystemIDLengthKey)};\n")
     f.write(s"static const uint8_t core_id_bits = ${p(CoreIDLengthKey)};\n")
-    f.write(s"static const composer::composer_pack_info pack_cfg(system_id_bits, core_id_bits);\n")
+    f.write(s"static const uint8_t numChannelSelectionBits = ${p(ChannelSelectionBitsKey)}," +
+      s" channelTransactionLenBits = ${log2Up(p(MaxChannelTransactionLenKey))};\n")
+    f.write(s"static const composer::composer_pack_info pack_cfg(system_id_bits, core_id_bits, numChannelSelectionBits, channelTransactionLenBits);\n")
     f.write("#endif\n")
     f.close()
   }

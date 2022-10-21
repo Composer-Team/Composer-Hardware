@@ -22,7 +22,7 @@ class HardwareMap(inWidth: Int, outWidth: Int, truth_table: Seq[(Int, Int)]) ext
     val pos = tt_chop.filter(_._2 != 0)
     def toAnds(a: Int): Bool = {
       (0 until inWidth).map{inBit: Int =>
-        if (a & (1 << inWidth) == 1) io.in(inBit)
+        if ((a & (1 << inWidth)) == 1) io.in(inBit)
         else !io.in(inBit)
       }.reduce(_ && _)
     }

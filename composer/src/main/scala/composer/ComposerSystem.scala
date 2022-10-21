@@ -1,14 +1,16 @@
 package composer
 
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3.util._
 import chisel3._
+import composer.MemoryStreams.{ChannelTransactionBundle, FixedSequentialWriteChannel}
 import composer.RoccConstants.{FUNC_ADDR, FUNC_START}
 import composer.common.Util.BoolSeqHelper
 import composer.common._
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.subsystem.ExtMem
-import freechips.rocketchip.tilelink.{TLBuffer, TLFragmenter, TLIdentityNode, TLXbar}
+import freechips.rocketchip.subsystem._
+import freechips.rocketchip.tilelink._
+case object ComposerSystemWrapperKey extends Field[ComposerCoreWrapper]
 
 class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)(implicit p: Parameters) extends LazyModule {
   val nCores = systemParams.nCores
@@ -18,7 +20,12 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
   val readLoc = coreParams.readChannelParams.map(_.location)
   val writeLoc = coreParams.writeChannelParams.map(_.location)
 
-  // replace this code with "getorelse"
+  val cores = Seq.tabulate(systemParams.nCores) { idx: Int =>
+    LazyModule(new ComposerCoreWrapper(systemParams, idx, system_id))
+  }
+
+  val readers = cores.map(_.readers)
+  val writers = cores.map(_.writers)
 
   val all_mems = readLoc ++ writeLoc
   val hasMem = (all_mems foldLeft[Boolean] false) ({ case (b: Boolean, s: String) => b || (s == "Mem") })
@@ -30,17 +37,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
     Seq()
   }
 
-  // TODO Other reader types
-  val readers = Seq.fill(nCores) {
-    coreParams.readChannelParams.map { rch =>
-      LazyModule(new ColumnReadChannel(rch.widthBytes)(p))
-    }
-  }
-  val writers = Seq.fill(nCores) {
-    coreParams.writeChannelParams.map { wch =>
-      LazyModule(new FixedSequentialWriteChannel(wch.widthBytes, coreParams.nMemXacts)(p))
-    }
-  }
+  val blockBytes = p(CacheBlockBytes)
 
   val maxBufSize = 1024 * 4 * 4
   // TODO UG: use parameters for this
@@ -111,18 +108,18 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
       // wlist(i) is one writer
       if ((wloc contains "Local") && (wloc contains "Mem")) {
         val split = LazyModule(new TLXbar)
-        split.node := wlist(i).node
+        split.node := wlist(i)
         (Some(split.node), Some(split.node), None)
       } else if ((wloc contains "Remote") && (wloc contains "Mem")) {
         val split = LazyModule(new TLXbar)
-        split.node := wlist(i).node
+        split.node := wlist(i)
         (Some(split.node), None, Some(split.node))
       } else if (wloc contains "Mem") {
-        (Some(wlist(i).node), None, None)
+        (Some(wlist(i)), None, None)
       } else if (wloc contains "Local") {
-        (None, Some(wlist(i).node), None)
+        (None, Some(wlist(i)), None)
       } else if (wloc contains "Remote") {
-        (None, None, Some(wlist(i).node))
+        (None, None, Some(wlist(i)))
       } else {
         (None, None, None)
       }
@@ -136,18 +133,18 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
       // rlist(i) is one reader
       if ((rloc contains "Remote") && (rloc contains "Mem")) {
         val split = LazyModule(new TLXbar)
-        split.node := rlist(i).node
+        split.node := rlist(i)
         (Some(split.node), None, Some(split.node))
       } else if ((rloc contains "Local") && (rloc contains "Mem")) {
         val split = LazyModule(new TLXbar)
-        split.node := rlist(i).node
+        split.node := rlist(i)
         (Some(split.node), Some(split.node), None)
       } else if (rloc contains "Mem") {
-        (Some(rlist(i).node), None, None)
+        (Some(rlist(i)), None, None)
       } else if (rloc contains "Remote") {
-        (None, None, Some(rlist(i).node))
+        (None, None, Some(rlist(i)))
       } else if (rloc contains "Local") {
-        (None, Some(rlist(i).node), None)
+        (None, Some(rlist(i)), None)
       } else {
         (None, None, None)
       }
@@ -254,12 +251,9 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
 
 class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) {
   val io = IO(new ComposerSystemIO())
-  val cores = Seq.tabulate(outer.systemParams.nCores) { idx: Int =>
-    val cparam = outer.systemParams.coreParams.copy(core_id = idx, system_id = outer.system_id)
-    outer.systemParams.buildCore(cparam, p)
-  }
-
   val arbiter = Module(new RRArbiter(new ComposerRoccResponse(), outer.systemParams.nCores))
+  val cores = outer.cores.map(_.module)
+
   arbiter.io.in <> cores.map(_.io.resp)
   resp.valid := arbiter.io.out.valid
   resp.bits.rd := arbiter.io.out.bits.rd
@@ -292,18 +286,12 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
 
   lazy val numReadChannels = outer.readLoc.length
   lazy val numWriteChannels = outer.writeLoc.length
-  lazy val numChannels = numReadChannels + numWriteChannels
-  lazy val addrFile = Module(new SettingsFile(numChannels * cores.length, addressBits))
 
   lazy val resp = Wire(Decoupled(new ComposerRoccResponse())) //Queue(io.resp)
 
-  def coreRWReady(c: Int): Bool = {
-    RegNext(outer.readers(c).map(_.module.io.req.ready).fold(true.B)(_ && _) &&
-      outer.writers(c).map(_.module.io.req.ready).fold(true.B)(_ && _))
-  }
-
+  // can't this be done much easier with a mux?
   lazy val coreReady = cores.zipWithIndex.map { case (core, i) =>
-    (core.io.req.ready && coreRWReady(i)) || (coreSelect =/= i.U)
+    core.io.req.ready || coreSelect =/= i.U
   }.reduce(_ && _)
 
   // connect cores to mem
@@ -326,10 +314,11 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
 
   io.busy := cores.map(_.io.busy).any
 
-  addrFile.io.write.en := cmd.bits.inst.funct === FUNC_ADDR.U && cmd.fire
-  addrFile.io.write.addr := cmd.bits.rs1(7, 0) + (numChannels.U * coreSelect)
-  addrFile.io.write.data := cmd.bits.rs2
-  addrFile.io.write.len := cmd.bits.rs1(39, 8)
+  val nChannelBits = p(ChannelSelectionBitsKey)
+  val lenBits = log2Up(p(MaxChannelTransactionLenKey))
+
+  val channelSelect = cmd.bits.rs1(nChannelBits-1, 1)
+  val channelRead = cmd.bits.rs1(0)
 
   cores.zipWithIndex.foreach { case (core, i) =>
     // TO-DO: delay until all readers/writers are ready? use DecoupledHelper
@@ -345,30 +334,30 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   val functLatch = cmdBitsLatch.inst.funct
   val coreSelectLatch = cmdBitsLatch.core_id
 
-  // connect readChannels and writeChannels appropriately
-  cores.zipWithIndex.foreach { case (core: ComposerCore, i) =>
-    core.readChannels.zipWithIndex.foreach { case (c, j) =>
-      val r = outer.readers(i)(j)
-      r.module.io.channel <> c
-      r.module.io.req.valid := cmdFireLatch && functLatch === FUNC_START.U && coreSelectLatch === i.U
-      r.module.io.req.bits.addr := addrFile.io.addrs_out(i * numChannels + j)
-      r.module.io.req.bits.len := addrFile.io.lens_out(i * numChannels + j)
-      //        c <> SFQueue(outer.queueDepth, outer.modularInterface.readChannelParams(j).widthBytes)(r.module.io.channel)
-    }
+  val addr_func_live = cmd.bits.inst.funct === FUNC_ADDR.U && cmd.fire
 
-    core.writeChannels.zipWithIndex.foreach { case (c, j) =>
-      val w = outer.writers(i)(j)
-      w.module.io.channel <> c
-      w.module.io.req.valid := cmdFireLatch && functLatch === FUNC_START.U && coreSelectLatch === i.U
-      w.module.io.req.bits.addr := addrFile.io.addrs_out(i * numChannels + numReadChannels + j)
-      w.module.io.req.bits.len := addrFile.io.lens_out(i * numChannels + numReadChannels + j)
-      //        w.module.io.channel <> SFQueue(outer.queueDepth, outer.modularInterface.writeChannelParams(j).widthBytes)(c)
-    }
+  // connect readChannels and writeChannels appropriately
+  // TODO don't do this for sparse readers/writers
+  if (cores(0).read_ios.nonEmpty) {
+    cores(0).read_ios(0)._2.valid := false.B
+    cores(0).write_ios(0)._2.valid := true.B
   }
-  val fields = cores(0).getClass.getDeclaredFields
-  if (fields.isEmpty) println("no fields??")
-  fields foreach {f =>
-    println(s"field ${f.getName} is class ${f.getAnnotatedType}")
+  println(s"FIND ME: $nChannelBits")
+  val txLenFromCmd = cmd.bits.rs1(nChannelBits + lenBits - 1, nChannelBits)
+  cores.zipWithIndex.foreach { case (core: ComposerCore, i) =>
+    def pairWithAddrStore(id: Int, interface: DecoupledIO[ChannelTransactionBundle], condition: Bool): Unit = {
+      val tx_len = Reg(UInt(log2Up(p(MaxChannelTransactionLenKey)).W))
+      val tx_addr_start = Reg(UInt(addressBits.W))
+      when(addr_func_live && coreSelect === i.U && channelSelect === id.U && condition) {
+        tx_len := txLenFromCmd
+        tx_addr_start := cmd.bits.rs2(addressBits - 1, 0)
+      }
+      interface.valid := cmdFireLatch && functLatch === FUNC_START.U && coreSelectLatch === i.U
+      interface.bits.addr := tx_addr_start
+      interface.bits.len := tx_len
+    }
+    core.read_ios.foreach(a => pairWithAddrStore(a._1, a._2, channelRead))
+    core.write_ios.foreach(a => pairWithAddrStore(a._1, a._2, !channelRead))
   }
 }
 

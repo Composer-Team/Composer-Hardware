@@ -1,39 +1,26 @@
-package composer.common
-
-import composer._
+package composer.MemoryStreams
 
 import chisel3._
 import chisel3.util._
-
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.subsystem.CacheBlockBytes
+import composer._
 import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.subsystem.CacheBlockBytes
+import freechips.rocketchip.tilelink._
 
-// TODO CHRIS & UG:
-abstract class SequentialWriteChannelIO(maxBytes: Int) extends Bundle {
-  val req: DecoupledIO[Data]
+
+class SequentialWriteChannelIO(addressBits: Int, maxBytes: Int)(implicit p: Parameters) extends Bundle {
+  val req = Flipped(Decoupled(new ChannelTransactionBundle(addressBits)))
   val channel = Flipped(new DataChannelIO(maxBytes))
   val busy = Output(Bool())
 }
-
-abstract class AbstractSequentialWriteChannel(nMemXacts: Int)(implicit p: Parameters)
-  extends LazyModule {
-  val lineSize = p(CacheBlockBytes)
-  val node = TLClientNode(Seq(TLMasterPortParameters.v1(
-    Seq(TLMasterParameters.v1(
-      name = "FixedSeqWriteChannel",
-      sourceId = IdRange(0, nMemXacts),
-      supportsProbe = TransferSizes(1, lineSize),
-      supportsPutFull = TransferSizes(1, lineSize)
-    )))))
-  val module: AbstractSequentialWriteChannelModule
-}
-
-abstract class AbstractSequentialWriteChannelModule(outer: AbstractSequentialWriteChannel, nMemXacts: Int)
-                                                   (implicit p: Parameters) extends LazyModuleImp(outer) {
+abstract class AbstractSequentialWriteChannelModule(tlparams: TLBundleParameters, edge: TLEdgeOut)
+                                                   (implicit p: Parameters) extends Module {
 
   def io: SequentialWriteChannelIO
+
+
+  val tl = IO(new TLBundle(tlparams))
 
   val s_idle :: s_data :: s_mem :: s_finishing :: Nil = Enum(4)
   val state = RegInit(s_idle)
@@ -41,8 +28,6 @@ abstract class AbstractSequentialWriteChannelModule(outer: AbstractSequentialWri
   val fullAddr: UInt
   val wdata: UInt
   val wmask: UInt
-
-  val (tl, edge) = outer.node.out(0)
 
   // get TL parameters from edge
   val beatBytes = edge.manager.beatBytes
@@ -52,7 +37,7 @@ abstract class AbstractSequentialWriteChannelModule(outer: AbstractSequentialWri
   lazy val nextAddr = Cat(fullAddr(addressBits - 1, log2Ceil(beatBytes)) + 1.U,
     0.U(log2Ceil(beatBytes).W))
 
-  val txBusyBits = Reg(Vec(nMemXacts, Bool()))
+  val txBusyBits = Reg(Vec(p(MaxMemTxsKey), Bool()))
   val txPriority = PriorityEncoderOH(txBusyBits map (!_))
   val haveBusyTx = txBusyBits.fold(false.B)(_ || _)
   val haveNotBusyTx = !txBusyBits.fold(true.B)(_ && _)
@@ -85,10 +70,11 @@ abstract class AbstractSequentialWriteChannelModule(outer: AbstractSequentialWri
 
     when(tl.a.fire) {
       memUpdate()
-      when(sendFinished()) {
-        state := Mux(memFinished(), s_finishing, s_data)
-        txBusyBits := txBusyBits.zip(txPriority).map{case (a: Bool, b: Bool) => a || b }
-      }
+      // hardcoded to true.B
+//      when(sendFinished()) {
+      state := Mux(memFinished(), s_finishing, s_data)
+      txBusyBits := txBusyBits.zip(txPriority).map{case (a: Bool, b: Bool) => a || b }
+//      }
     }
     // can't issue more transactions than we have room for
     tl.a.valid := state === s_mem && haveNotBusyTx
@@ -132,34 +118,19 @@ abstract class AbstractSequentialWriteChannelModule(outer: AbstractSequentialWri
 
   def buffersFull(): Bool
 }
-
-class FixedSequentialWriteRequest(addressBits: Int) extends Bundle {
-  /** The address to start writing at */
-  val addr = UInt(addressBits.W)
-  /** The number of items to write */
-  val len = UInt(addressBits.W)
-}
-
-class FixedSequentialWriteChannel(nBytes: Int, nMemXacts: Int)(implicit p: Parameters)
-  extends AbstractSequentialWriteChannel(nMemXacts)(p) {
-  override lazy val module = new FixedSequentialWriteChannelModule(this, nBytes, nMemXacts)
-}
-
-class FixedSequentialWriteIO(maxBytes: Int, addressBits: Int) extends SequentialWriteChannelIO(maxBytes) {
-  val req = Flipped(Decoupled(new FixedSequentialWriteRequest(addressBits)))
-}
-
 /**
  * Writes out a set number of fixed-size items sequentially to memory.
  *
  * @param nBytes    the number of bytes in a single item
- * @param nMemXacts the number of outstanding writes that can be sent at a time
  */
-class FixedSequentialWriteChannelModule(outer: FixedSequentialWriteChannel, nBytes: Int, nMemXacts: Int)
-                                       (implicit p: Parameters) extends AbstractSequentialWriteChannelModule(outer, nMemXacts)(p) {
+class FixedSequentialWriteChannel(nBytes: Int, tlparams: TLBundleParameters, tledge: TLEdgeOut)
+                                 (implicit p: Parameters) extends AbstractSequentialWriteChannelModule(tlparams, tledge) {
 
   private val nBits = nBytes * 8
-  val io = IO(new FixedSequentialWriteIO(nBytes, addressBits))
+  val io = IO(new SequentialWriteChannelIO(addressBits, nBytes))
+
+  // TODO figure out a sane value for this
+  io.channel.stop := false.B
 
   require(nBytes >= 1)
   require(nBytes <= beatBytes)
@@ -167,7 +138,7 @@ class FixedSequentialWriteChannelModule(outer: FixedSequentialWriteChannel, nByt
 
   val wordsPerBeat = beatBytes / nBytes
 
-  val req = Reg(new FixedSequentialWriteRequest(addressBits))
+  val req = Reg(new ChannelTransactionBundle(addressBits))
   val idx = Reg(UInt(log2Ceil(wordsPerBeat).W))
 
   val dataBuf = Reg(Vec(wordsPerBeat, UInt(nBits.W)))

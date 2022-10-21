@@ -10,7 +10,7 @@ import freechips.rocketchip.tile._
 
 // can configure this to add whatever features of a channel we want. Location should probably be an enum...
 // TODO UG: Channels should be named. The user shouldn't have to know the order of the channels and remember in both
-//          the software and the hardware! There should be a similar "Key" system that gets put into the composer.yaml
+//          the software and the hardware! There should be a similar "Key" system that gets put into the composer header export
 //          and manifests in software that way or per haps we just generate the C++ enum and code stubs here...
 //          This is a more design-focused task and I may end up doing it myself but you are more than welcome to propose
 //          a solution - but it has to be good because this is an interface that is end-user-facing.
@@ -19,6 +19,8 @@ import freechips.rocketchip.tile._
 //                  to a more intuitive interface.
 case class ComposerChannelParams(widthBytes: Int = 8,
                                  location: String = "Mem")
+
+case class ComposerConstructor(composerCoreParams: ComposerCoreParams, composerCoreWrapper: ComposerCoreWrapper)
 
 case class ComposerCoreParams(readChannelParams: Seq[ComposerChannelParams],
                               writeChannelParams: Seq[ComposerChannelParams],
@@ -31,7 +33,7 @@ case class ComposerCoreParams(readChannelParams: Seq[ComposerChannelParams],
 case class ComposerSystemParams(coreParams: ComposerCoreParams,
                                 nCores: Int,
                                 name: String,
-                                buildCore: (ComposerCoreParams, Parameters) => ComposerCore,
+                                buildCore: (ComposerConstructor, Parameters) => ComposerCore,
 
                                 /**
                                   * In elements, per write channel, scaled by the number of bytes
@@ -87,6 +89,9 @@ class WithComposer extends Config((site, here, up) => {
   case ComposerSystemsKey => Seq()
   case SystemIDLengthKey => 4
   case CoreIDLengthKey => 8
+  case MaxMemTxsKey => 1
+  case ChannelSelectionBitsKey => 3
+  case MaxChannelTransactionLenKey => 1 << 30
   // Tile parameters
   case PgLevels => if (site(XLen) == 64) 3 /* Sv39 */
   else 2 /* Sv32 */
