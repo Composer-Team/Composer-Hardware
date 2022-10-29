@@ -21,7 +21,6 @@ class TestHarness(implicit p: Parameters) extends Module {
   dut.ocl <> io.ocl
 
   // connect sim axi mem to ddr channels
-  val nMemChannels = p(NMemChan)
   private val externalMemParams = p(ExtMem).get
 //  private val lineSize = p(CacheBlockBytes)
 //  private val device = new MemoryDevice

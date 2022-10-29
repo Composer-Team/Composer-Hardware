@@ -1,41 +1,24 @@
 # Recommended Setup
-As a recommended do not clone this repo. Instead, clone the parent repo: [Composer](https://github.com/ChrisKjellqvist/Composer).
-Regardless, we provide installation instructions for this repo as well which may be useful if you are developing for the Composer.
+***DO NOT CLONE THIS REPO*** unless you know what you're doing
 
-All that is necessary to get Composer-Hardware up and running is clone the repo and run the setup script.
-The setup script clones dependencies, patches them, and sets up some environment variables.
-The install script may tell you to add some variables to your path after installation so pay attention for those messages.
-```bash
-git clone https://github.com/ChrisKjellqvist/Composer-Hardware.git
-./setup.sh
-```
-
-### Backend: AWS-FPGA
-Clone the [Amazon AWS FPGA SDK](https://github.com/aws/aws-fpga) alongside the Composer-Hardware (this) and
-[Composer-Software](https://github.com/ChrisKjellqvist/Composer-Software) repositories.
-```shell
-git clone --recursive https://github.com/aws/aws-fpga.git
-```
-In order for the Composer tools to find the SDK, export the installation path to the `COMPOSER_AWS_SDK_DIR` variable
-within your `.bashrc` file.
-```shell
-echo "export COMPOSER_AWS_SDK_DIR=<path_to_sdk>" >> .bashrc
-```
+This is a sub-repo used by the top-level [Composer](https://github.com/ChrisKjellqvist/Composer) repo.
+Please clone that repo instead as it comes with necessary tool installs, and setup instructions.
 
 # Developing a Core
 Developing a core for the composer is super easy.
-It is broken into two parts: the core itself and the system configuration.
+It is broken into two parts: the core itself(what does your functional unit do) and the system configuration
+(how do we tie it into a bigger system).
 
-### Hardware Declarations
+## Hardware Declarations
 How do we design a core for deployment in Composer?
 First, develop a module in Chisel to implement the desired functionality. 
-For this step, refer to the [LFSRCore](src/main/scala/design/LFSRCore.scala) module.
+For this step, refer to the [SimpleALU](src/main/scala/design/Examples.scala) module.
 
 Your design should be a `ComposerCore`.
-The declaration of a top-level core module should like the following code-block and will not change much at all from design to design. 
+The declaration of a top-level core module should look like the following code-block and will not change much at all from design to design. 
 ```scala
-class MyTemplateCore(composerCoreParms: ComposerCoreParms)(implicit p: Parameters)
-  extends ComposerCore(composerCoreParms)(p) {
+class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters) 
+  extends ComposerCore(composerCoreParams) {
 ```
 
 The core design needs to drive the IO interface of the core, defined by `ComposerCoreIO` (see [source](composer/src/main/scala/composer/ComposerCore.scala)).
@@ -43,36 +26,32 @@ The IO is discussed in more depth in the [Composer-Software](https://github.com/
 
 Besides correctly driving the IO pins and extending `ComposerCore`, that's all it takes to develop a module compatible with the Composer!
 
-[//]: # (Composer exposes a number of interfaces to simplify reading/writing to DRAM or across AXI interfaces. See )
+### Memory IO 
 
-[//]: # ([template.scala]&#40;composer/src/main/scala/composer/templates/template.scala&#41; on line 58-60:)
+Composer simplifies the interface to main memory to a simple `DecoupledIO` interface.
+Consult the [VectorAdder](src/main/scala/design/Examples.scala) module for an example.
+The Composer structure that exposes this interface is called a "Channel" and currently comes in two flavors: Sparse and Contiguous.
+These names are subject to change but the functionalities will remain.
+The biggest difference between Sparse and Contiguous accesses is 'who' provides the base address.
 
-[//]: # (```scala)
+Contiguous channels are maintained by user-software (as supposed to user-defined hardware) and the channel infrastructure.
+A contiguous channel communicates with software using the `rocc_cmd::addr_command` interface which provides a start address and access length.
+Whenever a kernel is started on a core, all contiguous channels for that core are reset to start reading from the provided start address.
+Once the defined segment is done reading, the channel will enter a finished state and will not continue accessing memory.
+This channel type can be used for reading/writing from/to memory and is useful when the developer does not want the hardware to deal with address translation.
 
-[//]: # (val input_M1 = readChannels&#40;0&#41;)
+Sparse channels put the burden of address computation on hardware.
+Address commands will not impact the state of sparse channels and attempts to access them via software are no-ops.
+In addition to the decoupled data interface for providing data to/from the user hardware module, the hardware must provide the start address and length of the segment to read.
+Currently, there are some alignment requirements, but those are easily dealt with and will not be present in future versions.
+This channel type is useful when performing operations on dynamic data structures.
 
-[//]: # (val input_M2 = readChannels&#40;1&#41;)
-
-[//]: # (val output = writeChannels&#40;0&#41;)
-
-[//]: # (```)
-
-[//]: # (These readChannels are independently operating lines to DRAM &#40;or another memory interface&#41; that a core can use with a)
-
-[//]: # (simple `Decoupled` interface as supposed to the _real_ DRAM interface which is much more complicated. How do we )
-
-[//]: # (declare these channels? And how do we specify how many we need or the width of them? More on that later... but for now,)
-
-[//]: # (know that all you need to do to define a core that can fit into the Composer is to extend `ComposerCore` like in the)
-
-[//]: # (following example:)
-
-### Configuration Declarations
+## Configuration Declarations
 But how do we take this design and integrate it into a larger system? We provide a configuration!
 Let's discuss some terminology first.
 A Composer core is an unique instantiation of the `ComposerCore` class.
 A Composer system is a collection of Composer cores of the same specialization. 
-For instance, the `TemplateCore` above is a specialization that implements some user function on top of the existing `ComposerCore` framework.
+For instance, the `VectorAdder` a specialization that implements some user function on top of the existing `ComposerCore` framework.
 If you were developing a linear algebra accelerator you might have a `ComposerCore` definition for a sparse matrix multiply and a separate definition for a dense matrix multiply.
 You would have a system containing multiple sparse matrix multiply cores and likewise a system containing multiple dense matrix multiply cores.
 
@@ -80,26 +59,26 @@ Since we've now defined a core, we need to tell Composer how to build a system o
 A top-level configuration will look something like this.
 
 ```scala
-class MyTemplateConfig extends Config(
-  new WithTemplate(1) ++
-    new WithAWSMem ++
-    new WithComposer
+class exampleConfig extends Config (
+  new withVectorAdders(4) ++ new WithComposer() ++ new WithAWSMem
 )
 
-class WithTemplate(withNCores: Int) extends Config((site, here, up) => {
+class WithVectorAdder(withNCores: Int, dataWidth: Int) extends Config((site, here, up) => {
   case ComposerSystemsKey => up(ComposerSystemsKey, site) ++ Seq(ComposerSystemParams(
     coreParams = ComposerCoreParams(
-      nMemXacts = 1,
-      readChannelParams = Seq.fill(2)(ComposerChannelParams()),
+      readChannelParams = Seq(ComposerChannelParams()),
       writeChannelParams = Seq(ComposerChannelParams())
     ),
     nCores = withNCores,
-    system_id = 0,
-    buildCore = { case (systemParams: ComposerSystemParams, parameters: Parameters) =>
-      Module(new TemplateCore(systemParams.coreParams)(parameters))
-    }))
+    name = "VectorSystem",
+    buildCore = {
+      case (composerCoreParams: ComposerConstructor, parameters: Parameters) =>
+        new VectorAdder(composerCoreParams)(parameters)
+    }
+  ))
 
-  case TemplateCoreParamKey => TemplateConfig(8, 8)
+  // use 8-bit data divisions
+  case VectorAdderKey => VectorConfig(dWidth = dataWidth)
 })
 ```
 

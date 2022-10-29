@@ -52,7 +52,7 @@ class WithAWSMem extends Config((site, here, up) => {
     size = 0x400000000L,
     beatBytes = 64,
     idBits = 12
-  ), 1))
+  ), 4))
 
   //------------------------------------------------------
   // need dummy parameters to trick rocketchip.
@@ -70,7 +70,6 @@ class WithAWSMem extends Config((site, here, up) => {
 
   // rocc data length
   case XLen => 64
-  case NMemChan => 1
 })
 
 /*TODO: copy over template and change names to match the name of the scala file
