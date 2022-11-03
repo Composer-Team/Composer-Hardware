@@ -10,6 +10,7 @@ import freechips.rocketchip.tile._
 import freechips.rocketchip.config.Parameters
 import composer.common._
 import composer.common.Util._
+import freechips.rocketchip.subsystem.ExtMem
 
 import java.io.FileWriter
 import scala.annotation.tailrec
@@ -189,7 +190,7 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
 
 class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
 
-  val nMemChannels = p(NMemChan)
+  val nMemChannels = p(ExtMem).get.nMemoryChannels
   println(nMemChannels + " ddr channels")
 
   val hostmem = TLIdentityNode()

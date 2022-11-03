@@ -2,9 +2,6 @@ package composer
 
 import freechips.rocketchip.config.Field
 
-// Number of external DDR channels
-case object NMemChan extends Field[Int] // ddr channels 
-
 //noinspection DuplicatedCode
 case object ProducerBuffers extends Field[Map[Seq[(Int, Int)], Seq[(Int, Int)]]]
 

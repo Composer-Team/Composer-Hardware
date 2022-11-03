@@ -75,14 +75,11 @@ $(generated_dir)/composer.v $(generated_dir)/%.conf: $(generated_dir)/composer.f
 verilog: $(generated_dir)/composer.v
 # End Verilog Generation
 
-vsim: verilog ${COMPOSER_ROOT}/Composer_Verilator/*.cc ${COMPOSER_ROOT}/Composer_Verilator/*.h
-	composer-make
-
-all: vsim
+all: verilog
 
 clean:
 	rm -rf $(junk) simv* csrc *.key DVE* *.h *.a *.daidir $(generated_dir) $(ROCKET_CHIP_JAR)
 
 
 
-.PHONY: default all debug clean
+.PHONY: default all debug clean verilog

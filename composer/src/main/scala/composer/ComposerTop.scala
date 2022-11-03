@@ -17,7 +17,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   private val externalMemParams: MemoryPortParams = p(ExtMem).get
   private val lineSize = p(CacheBlockBytes)
-  private val nMemChannels = p(NMemChan)
+  private val nMemChannels = externalMemParams.nMemoryChannels
   private val device = new MemoryDevice
 
   // AXI-L Port - commands come through here
@@ -102,7 +102,12 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   val ocl = IO(Flipped(HeterogeneousBag.fromNode(ocl_port.out)))
   (ocl zip ocl_port.out) foreach { case (o, (i, _)) => i <> o }
 
-  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
+  val axi4_mem: Seq[AXI4Bundle] = dram_ports.in.map(a => {
+    val q: AXI4BundleParameters = a._1.params
+    println("qos bits: " + q.qosBits)
+    IO(new AXI4Bundle(a._1.params))
+  })
+//  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
   (axi4_mem zip dram_ports.in) foreach { case (i, (o, _)) => i <> o }
 
   //add thing to here

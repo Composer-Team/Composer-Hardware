@@ -8,8 +8,3 @@ class ChannelTransactionBundle(addressBits: Int)(implicit p: Parameters) extends
   val addr = UInt(addressBits.W)
   val len = UInt(log2Up(p(MaxChannelTransactionLenKey)).W)
 }
-
-object MemoryChannelClass extends Enumeration {
-  type MemoryChannelClass = Value
-  val Mon, Tue, Wed, Thu, Fri, Sat, Sun = Value
-}
