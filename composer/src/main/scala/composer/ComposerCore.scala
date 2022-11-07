@@ -43,9 +43,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
         supportsProbe = TransferSizes(1, blockBytes),
         supportsPutFull = TransferSizes(1, blockBytes)
       )))))
-
   )
-
   lazy val module = composerSystemParams.buildCore(ComposerConstructor(composerSystemParams.coreParams, this), p)
 }
 
