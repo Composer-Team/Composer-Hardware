@@ -65,6 +65,11 @@ class LFSRCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters) 
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * Simple ALU Implementation * * * * * * * * * * * * * * * * * * *
 
+class ALUInput extends Bundle {
+  val inputA = Wire(UInt(3.W))
+  val inputB = Wire(UInt(3.W))
+  val op = Wire(Bool())
+}
 class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
   val s_idle :: s_working :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)

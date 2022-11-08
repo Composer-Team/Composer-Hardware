@@ -3,7 +3,7 @@ mkdir -p project
 echo "sbt.version=1.3.13" > project/build.properties 
 
 # rocket-chip
-git clone -q https://github.com/chipsalliance/rocket-chip.git && cd rocket-chip && git checkout f6e0f0e -q && git submodule update --init -q && cd ..
+git clone -q https://github.com/chipsalliance/rocket-chip.git && cd rocket-chip && git submodule update --init -q && cd ..
 
 rcpluglen=$(wc -l rocket-chip/project/plugins.sbt | grep -o "[0-9]*")
 if test -e project/plugins.sbt ;
@@ -19,18 +19,12 @@ then
 	echo "addSbtPlugin(\"org.jetbrains.scala\" % \"sbt-ide-settings\" % \"1.1.1\")" >> project/plugins.sbt
 fi
 
-patch=composerToTL.patch
+patch=scripts/composerToTL.patch
 cp $patch rocket-chip/
 cd rocket-chip
 git apply composerToTL.patch &> /dev/null
 cd ..
 export MAKEFLAGS="$MAKEFLAGS -j8"
-echo "-------------------------------"
-echo "Composer set up is complete. Make sure to add the following lines to your bash profile (.bashrc/.zshrc/...)"
-echo "export COMPOSER_HARDWARE_DIR=\$COMPOSER_HARDWARE_DIR:`pwd`"
-echo "export XDG_CONFIG_HOME=`pwd`/.config"
-
-echo "You must do this for every separate Composer-Hardware directory you set up!"
 
 # rocket-tools + riscv installation
 # Chris notes: You might be asking why all this sed is necessary. For some reason the writers of these scripts

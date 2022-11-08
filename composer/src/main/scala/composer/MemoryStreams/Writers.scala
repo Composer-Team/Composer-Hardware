@@ -14,20 +14,22 @@ class SequentialWriteChannelIO(addressBits: Int, maxBytes: Int)(implicit p: Para
   val channel = Flipped(new DataChannelIO(maxBytes))
   val busy = Output(Bool())
 }
-abstract class AbstractSequentialWriteChannelModule(tlparams: TLBundleParameters, edge: TLEdgeOut)
-                                                   (implicit p: Parameters) extends Module {
 
-  def io: SequentialWriteChannelIO
+/**
+  * Writes out a set number of fixed-size items sequentially to memory.
+  *
+  * @param nBytes the number of bytes in a single item
+  */
+class FixedSequentialWriteChannel(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOut)
+                                 (implicit p: Parameters) extends Module {
 
+  private val nBits = nBytes * 8
+  val io = IO(new SequentialWriteChannelIO(addressBits, nBytes))
 
   val tl = IO(new TLBundle(tlparams))
 
   val s_idle :: s_data :: s_mem :: s_finishing :: Nil = Enum(4)
   val state = RegInit(s_idle)
-
-  val fullAddr: UInt
-  val wdata: UInt
-  val wmask: UInt
 
   // get TL parameters from edge
   val beatBytes = edge.manager.beatBytes
@@ -71,10 +73,10 @@ abstract class AbstractSequentialWriteChannelModule(tlparams: TLBundleParameters
     when(tl.a.fire) {
       memUpdate()
       // hardcoded to true.B
-//      when(sendFinished()) {
+      //      when(sendFinished()) {
       state := Mux(memFinished(), s_finishing, s_data)
-      txBusyBits := txBusyBits.zip(txPriority).map{case (a: Bool, b: Bool) => a || b }
-//      }
+      txBusyBits := txBusyBits.zip(txPriority).map { case (a: Bool, b: Bool) => a || b }
+      //      }
     }
     // can't issue more transactions than we have room for
     tl.a.valid := state === s_mem && haveNotBusyTx
@@ -101,34 +103,6 @@ abstract class AbstractSequentialWriteChannelModule(tlparams: TLBundleParameters
 
     io.busy := state =/= s_idle || haveBusyTx
   }
-
-  def initUpdate(): Unit
-
-  def dataUpdate(): Unit
-
-  def memUpdate(): Unit
-
-  def beatFinished(): Bool
-
-  def dataFinished(): Bool
-
-  def memFinished(): Bool
-
-  def sendFinished(): Bool
-
-  def buffersFull(): Bool
-}
-/**
- * Writes out a set number of fixed-size items sequentially to memory.
- *
- * @param nBytes    the number of bytes in a single item
- */
-class FixedSequentialWriteChannel(nBytes: Int, tlparams: TLBundleParameters, tledge: TLEdgeOut)
-                                 (implicit p: Parameters) extends AbstractSequentialWriteChannelModule(tlparams, tledge) {
-
-  private val nBits = nBytes * 8
-  val io = IO(new SequentialWriteChannelIO(addressBits, nBytes))
-
   // TODO figure out a sane value for this
   io.channel.stop := false.B
 
@@ -198,88 +172,3 @@ class FixedSequentialWriteChannel(nBytes: Int, tlparams: TLBundleParameters, tle
   elaborate()
 }
 
-/*
-class ParallelFixedSequentialWriteChannel(nBytes: Int, nMemXacts: Int)(implicit p: Parameters)
-  extends AbstractSequentialWriteChannel(nMemXacts)(p) {
-  override lazy val module = new ParallelFixedSequentialWriteChannelModule(this, nBytes, nMemXacts)
-}
-
-class ParallelFixedSequentialWriteIO(w: Int, addressBits: Int) extends SequentialWriteChannelIO(w) {
-  val req = Flipped(Decoupled(new FixedSequentialWriteRequest(addressBits)))
-  val data = Flipped(Decoupled(Vec(256 / w, UInt(w.W))))
-
-  override def cloneType = new ParallelFixedSequentialWriteIO(w, addressBits).asInstanceOf[this.type]
-}
-
-
-class ParallelFixedSequentialWriteChannelModule(outer: ParallelFixedSequentialWriteChannel, nBytes: Int, nMemXacts: Int)
-                                               (implicit p: Parameters) extends AbstractSequentialWriteChannelModule(outer, nMemXacts)(p) {
-
-  private val nBits = nBytes * 8
-  val io = IO(new ParallelFixedSequentialWriteIO(nBits, addressBits))
-
-  require(nBytes >= 1)
-  require(nBytes < beatBytes)
-  require(isPow2(nBytes))
-
-  val elementsPerBeat = beatBytes / nBytes
-
-  val req = Reg(new FixedSequentialWriteRequest(addressBits))
-  //val idx = Reg(UInt(log2Ceil(wordsPerBeat).W))
-
-  val dataBuf = Reg(Vec(elementsPerBeat, UInt(nBits.W)))
-  //val dataValid = Reg(Bool())
-
-  val fullAddr = req.addr
-
-  val wdata = dataBuf.asUInt
-  val wmask = FillInterleaved(beatBytes, 1.U)
-
-  val finishedBuf = RegInit(false.B)
-
-
-  def initUpdate() {
-    //idx := io.req.bits.addr(log2Ceil(beatBytes), log2Ceil(nBytes))
-    req := io.req.bits
-    finishedBuf := false.B
-
-    if (nBytes > 1) {
-      assert(io.req.bits.addr(log2Ceil(nBytes) - 1, 0) === 0.U,
-        "FixedSequentialWriteChannel: Unaligned request")
-    }
-  }
-
-  def dataUpdate() {
-    dataBuf := io.data.bits
-    //dataValid := dataValid | UIntToOH(idx)
-    //idx := idx + 1.U
-    when(req.len < elementsPerBeat.U) {
-      req.len := 0.U
-    }.otherwise {
-      req.len := req.len - elementsPerBeat.U
-    }
-  }
-
-  def memUpdate() {
-    req.addr := nextAddr
-    //idx := 0.U
-    //dataValid := 0.U
-  }
-
-  def beatFinished(): Bool = true.B
-
-  def dataFinished(): Bool = req.len <= elementsPerBeat.U || io.finished || finishedBuf
-
-  def memFinished(): Bool = req.len === 0.U || io.finished || finishedBuf
-
-  def sendFinished(): Bool = true.B
-
-  def flush(): Bool = io.finished || finishedBuf
-
-  when(io.finished) {
-    finishedBuf := true.B
-  }
-
-  elaborate()
-}
-*/

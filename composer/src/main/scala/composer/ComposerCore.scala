@@ -49,6 +49,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
 
 class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Parameters) extends
   LazyModuleImp(composerConstructor.composerCoreWrapper) {
+
   val composerCoreParams = composerConstructor.composerCoreParams
   val io = IO(new ComposerCoreIO())
 
@@ -62,7 +63,6 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   io.resp.bits.core_id := composerCoreParams.core_id.U
 
   private def exposeRWModule(read: Boolean, connectToAddrFile: Boolean, id: Int, maxBytes: Int): (DataChannelIO, DecoupledIO[ChannelTransactionBundle]) = {
-    // TODO test this
     require(!activeChannelIds.contains((id, read)),
       "Error: It appears that you're re-declaring a sequential reader/writer under the same channel ID. " +
         "Use another channel ID.")

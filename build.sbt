@@ -1,4 +1,4 @@
-ThisBuild / scalaVersion := "2.12.12"
+ThisBuild / scalaVersion := "2.12.15"
 ThisBuild / version := "0.1.0"
 val composerBuildKey: SettingKey[String] = settingKey[String](
   "In case there are multiple Composer builds on a system, this key allows the software" +
@@ -10,14 +10,13 @@ addSbtPlugin("org.xerial.sbt" % "sbt-pack" % "0.14")
 addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "1.2.0")
 
 lazy val rocketchip = project in file("rocket-chip")
-lazy val testchip = (project in file("testchipip")).dependsOn(rocketchip)
 lazy val composer = (project in file("composer")).enablePlugins(BuildInfoPlugin).settings(
   name := "composer_tools",
   buildInfoKeys := Seq[BuildInfoKey](ThisBuild / composerBuildKey),
   buildInfoPackage := "composer",
   libraryDependencies ++= Seq(
-    "edu.berkeley.cs" %% "chisel3" % "3.5.2",
-    "edu.berkeley.cs" %% "chiseltest" % "0.5.2" % "test"
+    "edu.berkeley.cs" %% "chisel3" % "3.5.4",
+    "edu.berkeley.cs" %% "chiseltest" % "0.5.4" % "test"
   ),
   scalacOptions ++= Seq(
     "-Xsource:2.11",
@@ -33,9 +32,9 @@ lazy val composer = (project in file("composer")).enablePlugins(BuildInfoPlugin)
 lazy val root = (project in file(".")).settings(
   name := "Composer",
   libraryDependencies ++= Seq(
-    "edu.berkeley.cs" %% "chisel3" % "3.5.2",
-    "edu.berkeley.cs" %% "chiseltest" % "0.5.2" % "test",
-    "org.json4s" %% "json4s-jackson" % "3.6.1",
+    "edu.berkeley.cs" %% "chisel3" % "3.5.4",
+    "edu.berkeley.cs" %% "chiseltest" % "0.5.4" % "test",
+    "org.json4s" %% "json4s-jackson" % "4.0.6",
     "edu.berkeley.cs" %% "dsptools" % "1.5.4"
   ),
   scalacOptions ++= Seq(
