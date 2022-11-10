@@ -3,7 +3,7 @@ package composer
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3.util._
 import chisel3._
-import composer.MemoryStreams.{ChannelTransactionBundle, FixedSequentialWriteChannel}
+import composer.MemoryStreams.{ChannelTransactionBundle, SequentialWriter}
 import composer.RoccConstants.{FUNC_ADDR, FUNC_START}
 import composer.common.Util.BoolSeqHelper
 import composer.common._

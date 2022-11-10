@@ -20,10 +20,14 @@ class SequentialWriteChannelIO(addressBits: Int, maxBytes: Int)(implicit p: Para
   *
   * @param nBytes the number of bytes in a single item
   */
-class FixedSequentialWriteChannel(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOut)
-                                 (implicit p: Parameters) extends Module {
+class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOut)
+                      (implicit p: Parameters) extends Module {
 
   private val nBits = nBytes * 8
+  // get TL parameters from edge
+  val beatBytes = edge.manager.beatBytes
+  val addressBits = log2Up(edge.manager.maxAddress)
+
   val io = IO(new SequentialWriteChannelIO(addressBits, nBytes))
 
   val tl = IO(new TLBundle(tlparams))
@@ -31,10 +35,6 @@ class FixedSequentialWriteChannel(nBytes: Int, tlparams: TLBundleParameters, edg
   val s_idle :: s_data :: s_mem :: s_finishing :: Nil = Enum(4)
   val state = RegInit(s_idle)
 
-  // get TL parameters from edge
-  val beatBytes = edge.manager.beatBytes
-  val addressBits = log2Up(edge.manager.maxAddress)
-  val sizeBits = edge.bundle.sizeBits
 
   lazy val nextAddr = Cat(fullAddr(addressBits - 1, log2Ceil(beatBytes)) + 1.U,
     0.U(log2Ceil(beatBytes).W))

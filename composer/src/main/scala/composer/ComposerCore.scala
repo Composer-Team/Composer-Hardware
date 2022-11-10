@@ -2,7 +2,7 @@ package composer
 
 import chisel3._
 import chisel3.util._
-import composer.MemoryStreams.{ChannelTransactionBundle, FixedSequentialWriteChannel, SequentialReader}
+import composer.MemoryStreams.{ChannelTransactionBundle, SequentialWriter, SequentialReader}
 import freechips.rocketchip.util._
 import freechips.rocketchip.config.{Field, Parameters}
 import composer.common._
@@ -88,7 +88,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       }
       (m.tl, m.io.channel, m.io.req)
     } else {
-      val m = Module(new FixedSequentialWriteChannel(maxBytes, tl.params, edge))
+      val m = Module(new SequentialWriter(maxBytes, tl.params, edge))
       //noinspection DuplicatedCode
       if (connectToAddrFile) {
         m.io.req <> newio.get

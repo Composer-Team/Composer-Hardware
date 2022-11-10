@@ -34,7 +34,7 @@ lazy val root = (project in file(".")).settings(
   libraryDependencies ++= Seq(
     "edu.berkeley.cs" %% "chisel3" % "3.5.4",
     "edu.berkeley.cs" %% "chiseltest" % "0.5.4" % "test",
-    "org.json4s" %% "json4s-jackson" % "4.0.6",
+    "org.json4s" %% "json4s-jackson" % "3.6.1",
     "edu.berkeley.cs" %% "dsptools" % "1.5.4"
   ),
   scalacOptions ++= Seq(

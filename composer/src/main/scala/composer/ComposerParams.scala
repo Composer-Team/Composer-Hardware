@@ -17,8 +17,7 @@ import freechips.rocketchip.tile._
 
 // TODO UG & Chris: Is the current address scheme for read/write channels good? May consider re-doing the whole thing
 //                  to a more intuitive interface.
-case class ComposerChannelParams(widthBytes: Int = 8,
-                                 location: String = "Mem")
+case class ComposerChannelParams(location: String = "Mem")
 
 case class ComposerConstructor(composerCoreParams: ComposerCoreParams, composerCoreWrapper: ComposerCoreWrapper)
 
@@ -52,19 +51,23 @@ class WithAWSMem extends Config((site, here, up) => {
     size = 0x400000000L,
     beatBytes = 64,
     idBits = 12
-  ), 4))
+  ), 1))
 
   //------------------------------------------------------
   // need dummy parameters to trick rocketchip.
   // none of these are needed but they are
   // uninitialized by default and will cause
   // a compile error. ignore these
+
+  // NOT NECESSARY FOR COMPILER BUT IS NECESSARY FOR VERILATOR
   case MonitorsEnabled => false
+  // Necessary for compile
   case TileKey => RocketTileParams()
-  case RocketCrossingKey => List(RocketCrossingParams(
-    crossingType = SynchronousCrossing(),
-    master = TileMasterPortParams(cork = Some(true))
-  ))
+  // unneeded in newer versions of RocketChip
+//  case RocketCrossingKey => List(RocketCrossingParams(
+//    crossingType = SynchronousCrossing(),
+//    master = TileMasterPortParams(cork = Some(true))
+//  ))
   //  case ForceFanoutKey => ForceFanoutParams(false, false, false, false, false)
   //------------------------------------------------------
 

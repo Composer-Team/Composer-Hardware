@@ -40,7 +40,6 @@ class WithALUs(withNCores: Int) extends Config((site, here, up) => {
 class WithVectorAdder(withNCores: Int, dataWidth: Int) extends Config((site, here, up) => {
   case ComposerSystemsKey => up(ComposerSystemsKey, site) ++ Seq(ComposerSystemParams(
     coreParams = ComposerCoreParams(
-      // just use default parameters, widthBytes=8 bytes
       readChannelParams = Seq(ComposerChannelParams()),
       writeChannelParams = Seq(ComposerChannelParams())
     ),
