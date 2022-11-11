@@ -44,7 +44,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   val addrBBase = Reg(UInt(addrWidth.W))
   input_B_req.valid := state === s_addr2_commit
   input_B_req.bits.addr := addrBBase
-  input_B_req.bits.len := (matrixSizeBytes).U
+  input_B_req.bits.len := matrixSizeBytes.U
   input_B.stop := state === s_idle
 
   val input_A = Seq.tabulate(coreP.rowParallelism) { a: Int =>
@@ -85,25 +85,29 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   val OAccs_valid = Reg(Bool())
   // 🍞🥖
   val bread = Reg(UInt(log2Up(elemsPerArithUnit).W))
-  val active_bread = Reg(Bool())
 
   val output_addrs = Seq.fill(coreP.rowParallelism)(Reg(UInt(addrWidth.W)))
   val output = Seq.tabulate(coreP.rowParallelism)(declareSparseWriter(_, dataWidthBytes * arithUnits))
   (output, output_addrs).zipped foreach { case (chan, addr) =>
     chan._2.bits.addr := addr
     chan._2.bits.len := (coreP.dataWidthBytes * coreP.rowColDim).U
-    chan._2.valid := state === s_addr2_commit
+    chan._2.valid := state === s_commit
     chan._1.finished := state === s_idle
 
   }
   OAccs zip output foreach { case (acc, out) =>
-    out._1.data.bits := Cat(acc)
+    out._1.data.bits := Cat(acc.reverse)
     out._1.data.valid := false.B // overset later
   }
   OCache.zip(OAccs).foreach { case (ocache_row: Seq[SyncReadMem[SInt]], oacc_row: Seq[SInt]) =>
     ocache_row zip oacc_row map { case (oc: SyncReadMem[SInt], oa: SInt) =>
-      val cache_read = oc.read(b_loadidx, (state === s_acc && OAccs_valid && active_bread) || (state === s_writeback_1)) // 1 cy
-      oa := Mux(OAccs_valid, cache_read, 0.S) // 2 cy
+      val do_read = (state === s_acc && OAccs_valid) || (state === s_writeback_1)
+      val cache_read = Wire(SInt(dataWidthBits.W))
+      cache_read := Mux(OAccs_valid, oc.read(bread, do_read), 0.S)
+      // 1 cy
+      when (RegNext(do_read)) {
+        oa := cache_read // 2 cy
+      }
     }
   }
 
@@ -122,32 +126,33 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   // after 1 cy
   val bread_val = Seq.fill(arithUnits)(Wire(SInt(dataWidthBits.W)))
   bread_val zip BCache foreach { case (bwire, mem) =>
-    bwire := mem.read(bread, active_bread)
+    bwire := mem.read(bread, state === s_acc)
   }
 
   // avail after 2 cy
   val o_mul = current_a.flatMap { row_a =>
     bread_val map { arith_b =>
-      RegNext(row_a * arith_b)
+      // do this to over-ride inferred width
+      val o_mul_ = Reg(SInt(dataWidthBits.W))
+      o_mul_ := row_a * arith_b
+      o_mul_
     }
   }
 
 
-  // on 3rd cycle
+  // after 2cy, on 3rd cycle
   val o_acc = o_mul zip OAccs.flatten map { case (o_mul_dat, o_acc_old_dat) =>
     o_mul_dat + o_acc_old_dat
   }
-  val addr = Pipe(active_bread, b_loadidx, 2)
-  val write_en = Pipe(true.B, active_bread, 2)
+  val addr = Pipe(state === s_acc, bread, 2)
+  val do_write = RegNext(RegNext(state === s_acc))
   o_acc zip OCache.flatten foreach { case (o_acc_dat, ocache) =>
-    when(write_en.bits) {
+    when(do_write) {
       ocache.write(addr.bits, o_acc_dat)
     }
   }
 
   val on_last = bread === maxBCounter.U
-  active_bread := active_bread && !on_last
-  val isDone = RegNext(RegNext(on_last && state === s_acc))
 
   /*
    * END DATA PIPELINE
@@ -229,7 +234,10 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       when(input_B.data.fire) {
         b_loadidx := b_loadidx + 1.U
         BCache.zipWithIndex.foreach { case (mem, a) =>
-          mem.write(b_loadidx, input_B.data.bits(input_B.data.bits((a + 1) * dataWidthBits - 1, a * dataWidthBits)).asSInt)
+          val end = (a+1) * dataWidthBits - 1
+          val start = a * dataWidthBits
+          println(a + " -> (" + end + ", " + start + ")")
+          mem.write(b_loadidx, input_B.data.bits(end, start).asSInt)
         }
         when(b_loadidx === maxBCounter.U) {
           b_loaded := true.B
@@ -247,7 +255,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
     }
     is(s_acc) {
       bread := bread + 1.U
-      when(isDone) {
+      when(bread === maxBCounter.U) {
         // multiplied this element of matrix A row with everything in matrix B row, move on to another A ele, B row pair
         OAccs_valid := true.B
         when(currentBRow === maxRowColDim.U) {
@@ -319,10 +327,5 @@ class WithGemm(withNCores: Int,
 })
 
 class GemmConfig extends Config (
-  new WithGemm(1, GemmParam(4, 16, 1, 1)) ++ new WithComposer() ++ new WithAWSMem()
+  new WithGemm(1, GemmParam(4, 16, 2, 2)) ++ new WithComposer() ++ new WithAWSMem(4)
 )
-
-class MyModuleBundle extends Bundle {
-  val a = SInt(13.W)
-  val payload = VecInit(Seq.fill(25)(UInt(60.W)))
-}

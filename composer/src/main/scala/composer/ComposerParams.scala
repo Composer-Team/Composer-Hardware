@@ -43,15 +43,14 @@ case class ComposerSystemParams(coreParams: ComposerCoreParams,
                                 channelQueueDepth: Int = 32,
                                )
 
-class WithAWSMem extends Config((site, here, up) => {
+class WithAWSMem(nMemoryChannels: Int) extends Config((site, here, up) => {
   case CacheBlockBytes => 128
-  // TODO this is where we would change # of AWS Mem Channels!
   case ExtMem => Some(MemoryPortParams(MasterPortParams(
     base = 0,
-    size = 0x400000000L,
+    size = 0x400000000L * nMemoryChannels,
     beatBytes = 64,
     idBits = 12
-  ), 1))
+  ), nMemoryChannels))
 
   //------------------------------------------------------
   // need dummy parameters to trick rocketchip.

@@ -32,11 +32,14 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   // AXI4 DRAM Ports
   val dram_ports = AXI4SlaveNode(Seq.tabulate(nMemChannels) { channel =>
+    // put consecutive lines on different devices
     val base = AddressSet(externalMemParams.master.base, externalMemParams.master.size - 1)
     val filter = AddressSet(channel * lineSize, ~((nMemChannels - 1) * lineSize))
+    val addr = base.intersect(filter).toList
+    println(addr)
     AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
-        address = base.intersect(filter).toList,
+        address = addr,
         resources = device.reg,
         regionType = RegionType.UNCACHED,
         supportsWrite = TransferSizes(1, lineSize),
