@@ -81,6 +81,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     else None
     val (modtl, modchannel, modreq) = if (read) {
       val m = Module(new SequentialReader(maxBytes, tl.params, edge))
+      m.suggestName("Reader_" + (if (connectToAddrFile) "contig_" else "sparse_") + "id_" + id)
       //noinspection DuplicatedCode
       if (connectToAddrFile) {
         m.io.req <> newio.get
