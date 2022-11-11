@@ -1,6 +1,7 @@
 #!/bin/bash
 mkdir -p project
 echo "sbt.version=1.3.13" > project/build.properties 
+mkdir -p vsim/generated-src
 
 # rocket-chip
 git clone -q https://github.com/chipsalliance/rocket-chip.git && cd rocket-chip && git checkout f6e0f0e -q && git submodule update --init -q && cd ..
