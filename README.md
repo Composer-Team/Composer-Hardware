@@ -17,7 +17,7 @@ For this step, refer to the [SimpleALU](src/main/scala/design/Examples.scala) mo
 Your design should be a `ComposerCore`.
 The declaration of a top-level core module should look like the following code-block and will not change much at all from design to design. 
 ```scala
-class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters) 
+class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameters) 
   extends ComposerCore(composerCoreParams) {
 ```
 
@@ -59,8 +59,8 @@ Since we've now defined a core, we need to tell Composer how to build a system o
 A top-level configuration will look something like this.
 
 ```scala
-class exampleConfig extends Config (
-  new withVectorAdders(4) ++ new WithComposer() ++ new WithAWSMem
+class VectorConfig extends Config (
+  new WithVectorAdder(4,16) ++ new WithComposer ++ new WithAWSMem
 )
 
 class WithVectorAdder(withNCores: Int, dataWidth: Int) extends Config((site, here, up) => {
@@ -82,8 +82,9 @@ class WithVectorAdder(withNCores: Int, dataWidth: Int) extends Config((site, her
 })
 ```
 
-First, let's look at `WithTemplate(withNCores: Int)`.
-This is a configuration fragment that defines a system of `withNCores` `TemplateCore`s.
+First, let's look at `WithVectorAdder(withNCores: Int, dataWidth: Int)`.
+This is a configuration fragment that defines a system of `withNCores` `WithVectorAdder`s each 
+having a data size of `dataWidth`.
 The first thing we see is `case ComposerSystemsKey => ...`. 
 Composer borrows Rocket-Chip's parameter framework (among other things) and uses it to help parameterize the system.
 `ComposerSystemsKey` is defined below.
@@ -93,20 +94,19 @@ case object ComposerSystemsKey extends Field[Seq[ComposerSystemParams]]
 
 This object is used to store and read the parameters for all the systems in the system.
 This type description means that whenever we access the `CompsoerSystemsKey` `Field` within the parameter object, we will get a `Seq[ComposerSystemParams]`.
-You can see `(implicit p: Parameters)` above in the definition of `TemplateCore`.
+You can see `(implicit p: Parameters)` above in the definition of `VectorAdder`.
 
-Within our case statement above, we're saying that `WithTemplate` takes the existing definition of `ComposerSystemsKey` (by accessing `up`),
+Within our case statement above, we're saying that `WithVectorAdder` takes the existing definition of `ComposerSystemsKey` (by accessing `up`),
 and appends a new `ComposerSystemParams` to the end of the sequence.
 The `ComposerSystemParams` contains the parameters for a single system.
 The `coreParams` field is a `ComposerCoreParams` object that contains the parameters for a single core.
 The `nCores` field is the number of cores in the system.
 The `system_id` field is a unique identifier for the system used within the Composer instruction format.
 The `buildCore` field is a function that takes the system parameters and the global parameters and returns a `Module` that implements the core (in short, it exposes your module's constructor).
-You can see an example above where we create a new `TemplateCore` within the `buildCore` lambda.
+You can see an example above where we create a new `VectorAdder` within the `buildCore` lambda.
 Nothing complicated needs to happen there.
 
 Within `ComposerCoreParams` we have several fields.
-The `nMemXacts` field is the number of memory transactions that can be outstanding at any given time.
 The `readChannelParams` and `writeChannelParams` fields are the parameters for the read and write channels, respectively.
 For this example, our core has two read channels and one write channel, though your core may have a different parameterization.
 In the `LFSRCore` example within the `src` directory, there are no read or write channels.
@@ -114,10 +114,10 @@ In the `LFSRCore` example within the `src` directory, there are no read or write
 Now that we've discussed how to write the complicated part of the config, we need to make a final top-level config:
 
 ```scala
-class MyTemplateConfig extends Config(
-  new WithTemplate(1) ++
-    new WithAWSMem ++
-    new WithComposer
+class VectorAdderConfig extends Config(
+  new WithVectorAdder(4,16) ++
+    new WithComposer ++
+    new WithAWSMem
 )
 ```
 
@@ -150,28 +150,32 @@ simpler than the previous Composer interface, so any contributions you have to i
 appreciated.
 ### Software Declarations
 
-See the [Composer software repository](github.com/ChrisKjellqvist/Composer-Software) for more information.
+To run programs on the hardware created, software must be built to run on it. 
+See the [Composer software repository](https://github.com/ChrisKjellqvist/Composer-Software) for more information.
 
 # Building
 
-To build the verilog sources from Chisel. To build the hardware associated with `MyTemplateConfig`, run the following:
+To build the hardware associated with `VectorAdderConfig`, run the following:
 ```shell
 cd vsim
-make verilog CONFIG=<package>.<my-top-level-config>
+make verilog CONFIG=<package>.VectorAdderConfig
 ```
 
 Now, the verilog sources corresponding to the accelerator design should be in the generated-src directory found within
-vsim. Some additional steps are necessary to preparing these sources for F1 image creation. **NOTE**: this should be
+vsim.
+
+Some additional steps are necessary to preparing these sources for F1 image creation. **NOTE**: this should be
 scripted away before release to the public.
 
 # Simulation
 
-Once you've built the verilog sources, you can simulate them using the following command:
+Once you've built the verilog sources, you can simulate them using the following sequence of command:
 ```shell
 composer-make
 verilator/Composer_Verilator 
 ```
-It's as simple as that! To simulate though, you'll need to write a user-program to simulate it, but you should look at the [Composer-Software](https://github.com/ChrisKjellqvist/Composer-Software) repo for that.
+This causes the simulator to run, however no inputs are being sent to it. 
+To simulate, you'll need to write a user-program, and you should look at the [Composer-Software](https://github.com/ChrisKjellqvist/Composer-Software) repo for more info.
 
 
 [//]: # (Hooking into the AWS top-level module is currently a subject of improvement and currently only supports 1 DDR)
