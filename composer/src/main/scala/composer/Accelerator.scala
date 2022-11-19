@@ -10,6 +10,7 @@ import freechips.rocketchip.tile._
 import freechips.rocketchip.config.Parameters
 import composer.common._
 import composer.common.Util._
+import freechips.rocketchip.amba.axi4.{AXI4Buffer, AXI4IdentityNode, AXI4ToTL}
 import freechips.rocketchip.subsystem.ExtMem
 
 import java.io.FileWriter
@@ -193,24 +194,25 @@ class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
   val nMemChannels = p(ExtMem).get.nMemoryChannels
   println(nMemChannels + " ddr channels")
 
+  val dmaTL = TLIdentityNode()
+
+
   val hostmem = TLIdentityNode()
   val mem = Seq.fill(nMemChannels) {
     TLIdentityNode()
   }
   val dummyTL = p.alterPartial({
-    //      case TileVisibilityNodeKey => mem.head.edges.out.head
     case TileVisibilityNodeKey => mem.head
   })
   lazy val acc = LazyModule(new ComposerAcc()(dummyTL))
 
   lazy val crossbar = LazyModule(new TLXbar)
-  acc.mem.foreach {
-    crossbar.node := _
-  }
+  crossbar.node := dmaTL
+  acc.mem.foreach (crossbar.node := _)
+  // what happens if we get rid of this?
   crossbar.node := hostmem
-  mem.foreach {
-    _ := crossbar.node
-  }
+
+  mem.foreach ( _ := crossbar.node)
 
   lazy val module = new ComposerAccSystemModule(this)
 }

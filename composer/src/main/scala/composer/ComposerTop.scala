@@ -56,24 +56,31 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     case TileVisibilityNodeKey => acc.mem.head
   })
 
+
   val dma_port = AXI4MasterNode(Seq(AXI4MasterPortParameters(
-    masters =  Seq(AXI4MasterParameters(
+    masters = Seq(AXI4MasterParameters(
       name = "dma",
+      maxFlight = Some(8),
+      aligned = true
     ))
   )))
 
+  acc.dmaTL :=
+    TLFIFOFixer() :=
+    TLBuffer() :=
+    TLWidthWidget(32):=
+    AXI4ToTL() :=
+    AXI4Buffer() :=
+    AXI4UserYanker() :=
+    dma_port
+
   // We have to share shell DDR ports with DMA bus (which is AXI4). Use RocketChip utils to do that instead of the
   // whole shebang with instantiating strange encrypted Xilinx IPs'
-  val axixbar = AXI4Xbar()
-
-  dram_ports := axixbar
-
-  axixbar := dma_port
 
   acc.mem.foreach { m =>
-    (axixbar
+    (dram_ports
       := AXI4Buffer()
-      := AXI4UserYanker() // generated verilog doesn't appear to have user bits...
+      := AXI4UserYanker()
       //:= AXI4IdIndexer(idBits = 9)
       := TLToAXI4()
       := TLBuffer() // necessary? TODO measure impact of having buffers?
@@ -82,7 +89,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   }
 
   val cmd_resp_axilhub = LazyModule(new AXILHub()(dummyTL))
-
 
   // connect axil hub to external axil port
   cmd_resp_axilhub.node := ocl_port
@@ -127,7 +133,7 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   val dma = IO(Flipped(new AXI4Bundle(outer.dram_ports.in(0)._1.params)))
   outer.dma_port.out(0)._1 <> dma
 
-//  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
+  //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
   (mem zip dram_ports.in) foreach { case (i, (o, _)) => i <> o }
 
   //add thing to here

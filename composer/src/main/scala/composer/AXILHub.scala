@@ -211,7 +211,6 @@ class AXILAggregatorModule(outer: AXILAggregator)(implicit p: Parameters) extend
 }
 
 class AXILHub(implicit p: Parameters) extends LazyModule {
-  // TODO FIGURE OUT
   val axil_aggregator = LazyModule(new AXILAggregator())
   // Widget contains MMIO stuff
   val axil_widget = LazyModule(new AXILWidget()(p))
