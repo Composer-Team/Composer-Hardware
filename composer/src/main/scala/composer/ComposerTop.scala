@@ -56,9 +56,22 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     case TileVisibilityNodeKey => acc.mem.head
   })
 
+  val dma_port = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+    masters =  Seq(AXI4MasterParameters(
+      name = "dma",
+    ))
+  )))
+
+  // We have to share shell DDR ports with DMA bus (which is AXI4). Use RocketChip utils to do that instead of the
+  // whole shebang with instantiating strange encrypted Xilinx IPs'
+  val axixbar = AXI4Xbar()
+
+  dram_ports := axixbar
+
+  axixbar := dma_port
 
   acc.mem.foreach { m =>
-    (dram_ports
+    (axixbar
       := AXI4Buffer()
       := AXI4UserYanker() // generated verilog doesn't appear to have user bits...
       //:= AXI4IdIndexer(idBits = 9)
@@ -101,17 +114,21 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   genMemoryAllocatorDeclaration(outer.cmd_resp_axilhub.axil_widget.module.crRegistry, acc.acc)
 
 
-  // TODO what in the world does this do?
   val ocl = IO(Flipped(HeterogeneousBag.fromNode(ocl_port.out)))
   (ocl zip ocl_port.out) foreach { case (o, (i, _)) => i <> o }
 
-  val axi4_mem: Seq[AXI4Bundle] = dram_ports.in.map(a => {
+  val mem: Seq[AXI4Bundle] = dram_ports.in.map(a => {
     val q: AXI4BundleParameters = a._1.params
     println("qos bits: " + q.qosBits)
     IO(new AXI4Bundle(a._1.params))
   })
+
+  // make incoming dma port and connect it
+  val dma = IO(Flipped(new AXI4Bundle(outer.dram_ports.in(0)._1.params)))
+  outer.dma_port.out(0)._1 <> dma
+
 //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
-  (axi4_mem zip dram_ports.in) foreach { case (i, (o, _)) => i <> o }
+  (mem zip dram_ports.in) foreach { case (i, (o, _)) => i <> o }
 
   //add thing to here
   val arCnt = RegInit(0.U(64.W))
