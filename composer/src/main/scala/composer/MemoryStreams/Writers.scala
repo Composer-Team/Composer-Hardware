@@ -39,70 +39,13 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
   lazy val nextAddr = Cat(fullAddr(addressBits - 1, log2Ceil(beatBytes)) + 1.U,
     0.U(log2Ceil(beatBytes).W))
 
-  val txBusyBits = Reg(Vec(p(MaxMemTxsKey), Bool()))
+//  val txBusyBits = RegInit(VecInit(Seq(p(MaxMemTxsKey))(false.B)))
+  val txBusyBits = RegInit(VecInit(Seq.fill(p(MaxMemTxsKey))(false.B)))
   val txPriority = PriorityEncoderOH(txBusyBits map (!_))
   val haveBusyTx = txBusyBits.fold(false.B)(_ || _)
   val haveNotBusyTx = !txBusyBits.fold(true.B)(_ && _)
 
 
-  def elaborate(): Unit = {
-    // new start request resets the whole state of the sequential writer
-    when(io.req.fire) {
-      initUpdate()
-      // wait for data from the core
-      state := s_data
-    }
-
-    // when the buffers are full of data or the user has signaled that
-    // it's done writing to the buffer then start writing
-    when(state === s_data && buffersFull()) {
-      state := s_mem
-    }
-
-    // when the core data channel fires, put the data in the write
-    // buffer and update buffer maintance state
-    when(io.channel.data.fire) {
-      dataUpdate()
-      when(beatFinished() || dataFinished()) {
-        state := s_mem
-      }
-    }
-
-    // handle TileLink 'a' interface (request to slave)
-
-    when(tl.a.fire) {
-      memUpdate()
-      // hardcoded to true.B
-      //      when(sendFinished()) {
-      state := Mux(memFinished(), s_finishing, s_data)
-      txBusyBits := txBusyBits.zip(txPriority).map { case (a: Bool, b: Bool) => a || b }
-      //      }
-    }
-    // can't issue more transactions than we have room for
-    tl.a.valid := state === s_mem && haveNotBusyTx
-    tl.a.bits := edge.Put(
-      fromSource = OHToUInt(txPriority),
-      toAddress = fullAddr,
-      lgSize = log2Ceil(beatBytes).U,
-      data = wdata,
-      mask = wmask)._2
-
-    // handle TileLink 'd' interface (response from slave)
-    tl.d.ready := haveBusyTx
-    when(tl.d.fire) {
-      txBusyBits(tl.d.bits.source) := false.B
-    }
-
-    io.req.ready := state === s_idle
-    io.channel.data.ready := state === s_data || state === s_finishing
-    when(state === s_finishing) {
-      when(!io.channel.data.valid && !txBusyBits.fold(false.B)(_ || _)) {
-        state := s_idle
-      }
-    }
-
-    io.busy := state =/= s_idle || haveBusyTx
-  }
   // TODO figure out a sane value for this
   io.channel.stop := false.B
 
@@ -125,8 +68,12 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
 
   val finishedBuf = RegInit(false.B)
 
+  when(io.channel.finished) {
+    finishedBuf := true.B
+  }
 
-  def initUpdate(): Unit = {
+  // new start request resets the whole state of the sequential writer
+  when(io.req.fire) {
     if (nBytes == beatBytes) {
       idx := 0.U
     } else {
@@ -140,35 +87,60 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
       assert(io.req.bits.addr(log2Ceil(nBytes) - 1, 0) === 0.U,
         "FixedSequentialWriteChannel: Unaligned request")
     }
+    // wait for data from the core
+    state := s_data
   }
 
-  def dataUpdate(): Unit = {
+  // when the buffers are full of data or the user has signaled that
+  // it's done writing to the buffer then start writing
+  when(state === s_data && io.channel.finished || finishedBuf) {
+    state := s_mem
+  }
+
+  // when the core data channel fires, put the data in the write
+  // buffer and update buffer maintance state
+  when(io.channel.data.fire) {
     dataBuf(idx) := io.channel.data.bits
     dataValid := dataValid | UIntToOH(idx)
     idx := idx + 1.U
     req.len := req.len - 1.U
+    when(idx === (wordsPerBeat - 1).U || req.len === 1.U || io.channel.finished || finishedBuf) {
+      state := s_mem
+    }
   }
 
-  def memUpdate(): Unit = {
+  // handle TileLink 'a' interface (request to slave)
+
+  when(tl.a.fire) {
     req.addr := nextAddr
     idx := 0.U
     dataValid := 0.U
+    state := Mux(req.len === 0.U || io.channel.finished || finishedBuf, s_finishing, s_data)
+    txBusyBits := txBusyBits.zip(txPriority).map { case (a: Bool, b: Bool) => a || b }
+  }
+  // can't issue more transactions than we have room for
+  tl.a.valid := state === s_mem && haveNotBusyTx
+  tl.a.bits := edge.Put(
+    fromSource = OHToUInt(txPriority),
+    toAddress = fullAddr,
+    lgSize = log2Ceil(beatBytes).U,
+    data = wdata,
+    mask = wmask)._2
+
+  // handle TileLink 'd' interface (response from slave)
+  tl.d.ready := haveBusyTx
+  when(tl.d.fire) {
+    txBusyBits(tl.d.bits.source) := false.B
   }
 
-  def beatFinished(): Bool = idx === (wordsPerBeat - 1).U
-
-  def dataFinished(): Bool = req.len === 1.U || io.channel.finished || finishedBuf
-
-  def memFinished(): Bool = req.len === 0.U || io.channel.finished || finishedBuf
-
-  def sendFinished(): Bool = true.B
-
-  def buffersFull(): Bool = io.channel.finished || finishedBuf
-
-  when(io.channel.finished) {
-    finishedBuf := true.B
+  io.req.ready := state === s_idle
+  io.channel.data.ready := state === s_data || state === s_finishing
+  when(state === s_finishing) {
+    when(!io.channel.data.valid && !txBusyBits.fold(false.B)(_ || _)) {
+      state := s_idle
+    }
   }
 
-  elaborate()
+  io.busy := state =/= s_idle || haveBusyTx
 }
 
