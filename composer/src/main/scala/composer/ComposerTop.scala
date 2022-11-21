@@ -71,9 +71,12 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   )))
 
   acc.dmaTL :=
+    TLBuffer() :=
     TLFIFOFixer() :=
     TLWidthWidget(64) :=
+    TLBuffer() :=
     AXI4ToTL() :=
+    AXI4Buffer() :=
     dma_port
 
   // We have to share shell DDR ports with DMA bus (which is AXI4). Use RocketChip utils to do that instead of the
