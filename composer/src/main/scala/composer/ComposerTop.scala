@@ -17,6 +17,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   private val externalMemParams: MemoryPortParams = p(ExtMem).get
   private val lineSize = p(CacheBlockBytes)
+  println("line size is " + lineSize)
   private val nMemChannels = externalMemParams.nMemoryChannels
   private val device = new MemoryDevice
 

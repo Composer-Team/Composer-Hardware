@@ -44,7 +44,8 @@ case class ComposerSystemParams(coreParams: ComposerCoreParams,
                                )
 
 class WithAWSMem(nMemoryChannels: Int) extends Config((site, here, up) => {
-  case CacheBlockBytes => 128
+// why did this ever become 128? It's 2X the bus width... That doesn't seem to make much sense...
+//  case CacheBlockBytes => 128
   case ExtMem => Some(MemoryPortParams(MasterPortParams(
     base = 0,
     size = 0x400000000L * nMemoryChannels,
