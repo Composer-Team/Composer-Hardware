@@ -70,20 +70,17 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     ))
   )))
 
-  acc.dmaTL :=
-    TLBuffer() :=
-    TLFIFOFixer() :=
-    TLWidthWidget(64) :=
-    TLBuffer() :=
-    AXI4ToTL() :=
-    AXI4Buffer() :=
-    dma_port
+  val dram_channel_xbar = AXI4Xbar()
+
+  dram_ports := dram_channel_xbar
+  // TODO think about IDs overlapping....
+  dram_channel_xbar := dma_port
 
   // We have to share shell DDR ports with DMA bus (which is AXI4). Use RocketChip utils to do that instead of the
   // whole shebang with instantiating strange encrypted Xilinx IPs'
 
   acc.mem.foreach { m =>
-    (dram_ports
+    (dram_channel_xbar
       := AXI4Buffer()
       := AXI4UserYanker()
       //:= AXI4IdIndexer(idBits = 9)
