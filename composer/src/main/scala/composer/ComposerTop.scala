@@ -70,10 +70,12 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   acc.dmaTL :=
     TLFIFOFixer() :=
-    TLWidthWidget(32):=
+    TLWidthWidget(32) :=
     AXI4ToTL() :=
     AXI4UserYanker(Some(8)) :=
     AXI4Fragmenter() :=
+    AXI4IdIndexer(5) := // TODO make these numbers part of config parameters
+                        // ALSO weird that specifying 5 bits elaborates a module with 6b ID field... should be 5b right?
     AXI4Buffer() :=
     dma_port
 
