@@ -72,6 +72,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   acc.dmaTL :=
     TLFIFOFixer() :=
+    TLWidthWidget(64) :=
     AXI4ToTL() :=
     dma_port
 
@@ -85,6 +86,8 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       //:= AXI4IdIndexer(idBits = 9)
       := TLToAXI4()
       := TLBuffer() // necessary? TODO measure impact of having buffers?
+      // TODO CHECK WITH LISA - This component shrinks TL transactions down to 32B at a time, allowing less resource
+      //  usage in readers/writers?
       := TLWidthWidget(32)
       := m)
   }
