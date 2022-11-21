@@ -6,7 +6,7 @@ import firrtl.stage.FirrtlMain
 
 object TestDriver extends App {
 
-  val config = new GemmConfig
+  val config = new exampleConfig
   val c_dir = System.getProperty("user.dir")
   val hw_idr = c_dir + "/vsim/generated-src/"
   val full_name = config.getClass.getCanonicalName

@@ -164,7 +164,9 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   input_B.data.ready := false.B
   io.resp.bits.data := 0.U
   io.resp.valid := false.B
-  io.req.ready := state === s_idle && (input_A map { ioa => ioa._2.ready } reduce (_ && _))
+  io.req.ready := state === s_idle && (input_A map { ioa => ioa._2.ready } reduce (_ && _)) &&
+    input_B_req.ready &&
+    (output map { io => io._2.ready } reduce (_ && _) )
 
   def hook_thing_up(a: Seq[UInt], rs2: UInt): Unit = {
     a.zipWithIndex foreach { case (addr, idx) =>
@@ -174,6 +176,9 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
     }
   }
   val output_committed = Seq.fill(coreP.rowParallelism)(RegInit(false.B))
+
+  // make sure we can pack all the addresses together into one instruction
+  require(io.req.bits.rs1.getWidth + io.req.bits.rs2.getWidth >= input_B_req.bits.addr.getWidth*3)
 
   switch(state) {
     is(s_idle) {
