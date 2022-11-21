@@ -66,7 +66,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       name = "dma",
       maxFlight = Some(8),
       aligned = true,
-      id = IdRange(0, 1 << 5),
+      id = IdRange(0, 1),
     ))
   )))
 
