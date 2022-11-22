@@ -88,7 +88,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       := TLBuffer() // necessary? TODO measure impact of having buffers?
       // TODO CHECK WITH LISA - This component shrinks TL transactions down to 32B at a time, allowing less resource
       //  usage in readers/writers?
-      := TLWidthWidget(32)
+      := TLWidthWidget(64)
       := m)
   }
 
