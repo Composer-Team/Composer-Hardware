@@ -40,7 +40,7 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
     TLIdentityNode()
   }
 
-  (mem, memGroups).zipped.foreach { case (acc_channel, unit_channels) =>
+  mem zip memGroups foreach { case (acc_channel, unit_channels) =>
     val usize = unit_channels.size
     println(s"unit channels size = $usize")
     if (unit_channels nonEmpty) {
@@ -52,39 +52,39 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
 
   // type2type wiring
   val producerList = p(ProducerBuffers)
-  for ((writelist, readlist) <- producerList) {
-
-    // nWriteChannels x nReadChannels crossbar
-    val arb = LazyModule(new TLXbar)
-    writelist.foreach { case (write, chIdx) =>
-      val lmem = sysLookup(write).localWrite(chIdx)
-      if (lmem isEmpty) println("WRITE not defined " + write + " , " + chIdx)
-      lmem.get := TLBuffer() := arb.node
-    }
-    readlist.foreach { case (read, chIdx) =>
-      val rmem = sysLookup(read).remoteRead(chIdx)
-      if (rmem isEmpty) println("READ not defined " + read + " , " + chIdx)
-      arb.node := TLBuffer() := rmem.get
-    }
-
-  }
-  val consumerList = p(ConsumerBuffers)
-  for ((writelist, readlist) <- consumerList) {
-
-    // nWriteChannels x nReadChannels crossbar
-    val arb = LazyModule(new TLXbar)
-    writelist.foreach { case (write, chIdx) =>
-      val rmem = sysLookup(write).remoteWrite(chIdx)
-      if (rmem isEmpty) println("WRITE not defined " + write + " , " + chIdx)
-      arb.node := TLBuffer() := rmem.get
-    }
-    readlist.foreach { case (read, chIdx) =>
-      val lmem = sysLookup(read).localRead(chIdx)
-      if (lmem isEmpty) println("READ not defined " + read + " , " + chIdx)
-      lmem.get := TLBuffer() := arb.node
-    }
-
-  }
+//  for ((writelist, readlist) <- producerList) {
+//
+//    // nWriteChannels x nReadChannels crossbar
+//    val arb = LazyModule(new TLXbar)
+//    writelist.foreach { case (write, chIdx) =>
+//      val lmem = sysLookup(write).localWrite(chIdx)
+//      if (lmem isEmpty) println("WRITE not defined " + write + " , " + chIdx)
+//      lmem.get := TLBuffer() := arb.node
+//    }
+//    readlist.foreach { case (read, chIdx) =>
+//      val rmem = sysLookup(read).remoteRead(chIdx)
+//      if (rmem isEmpty) println("READ not defined " + read + " , " + chIdx)
+//      arb.node := TLBuffer() := rmem.get
+//    }
+//
+//  }
+//  val consumerList = p(ConsumerBuffers)
+//  for ((writelist, readlist) <- consumerList) {
+//
+//    // nWriteChannels x nReadChannels crossbar
+//    val arb = LazyModule(new TLXbar)
+//    writelist.foreach { case (write, chIdx) =>
+//      val rmem = sysLookup(write).remoteWrite(chIdx)
+//      if (rmem isEmpty) println("WRITE not defined " + write + " , " + chIdx)
+//      arb.node := TLBuffer() := rmem.get
+//    }
+//    readlist.foreach { case (read, chIdx) =>
+//      val lmem = sysLookup(read).localRead(chIdx)
+//      if (lmem isEmpty) println("READ not defined " + read + " , " + chIdx)
+//      lmem.get := TLBuffer() := arb.node
+//    }
+//
+//  }
 
   lazy val module = new ComposerAccModule(this)
 }
@@ -139,7 +139,7 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   val monitorWaiting = RegInit(false.B)
 
   val systemQueues = outer.systems.map(_ => Module(new Queue(new ComposerRoccCommand, 2)))
-  (outer.system_tups, systemQueues).zipped.foreach { case (tup, q) =>
+  outer.system_tups zip systemQueues foreach { case (tup, q) =>
     q.io.enq.valid := (accCmd.valid && system_id === tup._2.U /* && !monitorWaiting*/)
     q.io.enq.bits := accCmd.bits
     when(system_id === tup._2.U) {

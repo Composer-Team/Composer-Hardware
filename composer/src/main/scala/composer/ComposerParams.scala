@@ -92,6 +92,7 @@ class WithComposer extends Config((site, here, up) => {
   case SystemIDLengthKey => 4
   case CoreIDLengthKey => 8
   case MaxMemTxsKey => 1
+  case TLInterconnectWidthBytes => 16
   case ChannelSelectionBitsKey => 3
   case MaxChannelTransactionLenKey => 1 << 30
   // Tile parameters

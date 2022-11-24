@@ -39,7 +39,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     //    do that, so we should be able to do that ourselves. Consecutive addresses usually live on different DRAM
     //    DIMMs for performance reasons. But I support putting them in the same bank is fine too :( Bank conflicts
     //    are a serialization point
-    val base = Seq(AddressSet(externalMemParams.master.base | (1L << 34) * channel, (1L << 34) - 1))
+    val base = Seq(AddressSet((1L << 34) * channel, (1L << 34) - 1))
     println(base)
     AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
@@ -64,22 +64,24 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   val dma_port = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     masters = Seq(AXI4MasterParameters(
       name = "dma",
-      maxFlight = Some(8),
+      maxFlight = Some(2),
       aligned = true,
       id = IdRange(0, 1),
     ))
   )))
 
-  val dram_channel_xbar = AXI4Xbar()
+  val dram_channel_xbars = Seq.fill(nMemChannels)(AXI4Xbar())
+  val dmaxbar = AXI4Xbar()
+  dmaxbar := dma_port
 
-  dram_ports := dram_channel_xbar
+  dram_channel_xbars foreach ( dram_ports := _)
+  dram_channel_xbars foreach { _ := dmaxbar }
   // TODO think about IDs overlapping....
-  dram_channel_xbar := dma_port
 
   // We have to share shell DDR ports with DMA bus (which is AXI4). Use RocketChip utils to do that instead of the
   // whole shebang with instantiating strange encrypted Xilinx IPs'
 
-  acc.mem.foreach { m =>
+  acc.mem zip dram_channel_xbars foreach { case (m, dram_channel_xbar) =>
     (dram_channel_xbar
       := AXI4Buffer()
       := AXI4UserYanker()

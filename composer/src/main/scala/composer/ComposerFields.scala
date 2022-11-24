@@ -26,3 +26,5 @@ case object ChannelSelectionBitsKey extends Field[Int]
 case object MaxChannelTransactionLenKey extends Field[Int]
 
 case object MaxMemTxsKey extends Field[Int]
+
+case object TLInterconnectWidthBytes extends Field[Int]

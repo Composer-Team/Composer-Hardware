@@ -59,7 +59,7 @@ class MCRFileMap() {
     case (e: RegisterEntry, addr) => mcrIO.bindReg(e, addr)
   }
 
-  def genHeader(prefix: String, base: BigInt, sb: StringBuilder): Unit = {
+  def genHeader(prefix: String, base: BigInt, sb: mutable.StringBuilder): Unit = {
     name2addr.toList foreach { case (regName, idx) =>
       val fullName = s"${prefix}_$regName"
       val address = base + idx
@@ -68,7 +68,7 @@ class MCRFileMap() {
   }
 
   // A variation of above which dumps the register map as a series of arrays
-  def genArrayHeader(prefix: String, base: BigInt, sb: StringBuilder): Unit = {
+  def genArrayHeader(prefix: String, base: BigInt, sb: mutable.StringBuilder): Unit = {
     def emitArrays(regs: Seq[(MCRMapEntry, BigInt)], prefix: String): Unit = {
       sb.append(genConstStatic(s"${prefix}_num_registers", UInt32(regs.size)))
       sb.append(genArray(s"${prefix}_names", regs.map { x => CStrLit(x._1.name) }))
@@ -78,8 +78,8 @@ class MCRFileMap() {
     val regAddrs = regList map (reg => reg -> (base + lookupAddress(reg.name).get))
     val readRegs = regAddrs filter (_._1.permissions.readable)
     val writeRegs = regAddrs filter (_._1.permissions.writeable)
-    emitArrays(readRegs, prefix + "_R")
-    emitArrays(writeRegs, prefix + "_W")
+    emitArrays(readRegs.toSeq, prefix + "_R")
+    emitArrays(writeRegs.toSeq, prefix + "_W")
   }
 
   // Returns a copy of the current register map
