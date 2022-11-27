@@ -50,7 +50,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   require(isPow2(coreP.rowParallelism))
 
 
-  val s_idle :: s_addr_comp :: s_addr_wait_buffers :: s_load_buffer1 :: s_load_buffer2 ::  s_addr_wait_AB :: s_addr_commit :: s_load :: s_acc :: s_writeback_1 :: s_writeback_2 :: s_commit :: s_finish :: Nil = Enum(13)
+  val s_idle :: s_addr_comp :: s_addr_wait_buffers :: s_load_buffer1 :: s_load_buffer2 :: s_addr_wait_AB :: s_addr_commit :: s_load :: s_acc :: s_writeback_1 :: s_writeback_2 :: s_commit :: s_finish :: Nil = Enum(13)
 
   // since we're doing GeMM, we're only operating on a subset of both the A and B matrix. This means between different
   // subrows of B, we're going to skip a whole bunch of elements. The difference _should_ be bus aligned (512b)
@@ -69,7 +69,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   }
   // these channels will read both the buffers and the A Matrix
   val (dataChannelRow, reqChannelRow) = {
-    val q = List.tabulate(coreP.rowParallelism){ a: Int => declareSparseReader(1+a, dataWidthBytes)}
+    val q = List.tabulate(coreP.rowParallelism) { a: Int => declareSparseReader(1 + a, dataWidthBytes) }
     (q.map(_._1), q.map(_._2))
   }
 
@@ -106,7 +106,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   val row_loaded = Seq.fill(coreP.rowParallelism)(Reg(Bool()))
   val ACounter = Reg(UInt(rowBits.W))
   println("ACounter is " + rowBits + "b")
-  val lastA = (coreP.rowColDim / coreP.rowParallelism)-1
+  val lastA = (coreP.rowColDim / coreP.rowParallelism) - 1
   println("Needs to represent at least " + lastA)
   // this is ad-hoc but hopefully we have a better interface for this soon ala Brendan
 
@@ -130,7 +130,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   }
   OCache.zip(OAccs).foreach { case (ocache_row: Seq[SyncReadMem[SInt]], oacc_row: Seq[SInt]) =>
     ocache_row zip oacc_row map { case (oc: SyncReadMem[SInt], oa: SInt) =>
-      val do_read = (state === s_acc ) || (state === s_writeback_1)
+      val do_read = (state === s_acc) || (state === s_writeback_1)
       val cache_read = Wire(SInt(dataWidthBits.W))
       cache_read := oc.read(bread, do_read)
       // 1 cy
@@ -262,7 +262,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
         state := s_load_buffer1
       }
     }
-    is (s_load_buffer1) {
+    is(s_load_buffer1) {
       reqChannelRow zip OutputAddr foreach { case (io, oaddr) =>
         io.bits.addr := oaddr
         io.valid := true.B
@@ -270,9 +270,9 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       bread := 0.U
       state := s_load_buffer2
     }
-    is (s_load_buffer2) {
-      when (dataChannelRow map (_.data.valid) reduce (_ && _)) {
-        when (!arithCounter.andR) {
+    is(s_load_buffer2) {
+      when(dataChannelRow map (_.data.valid) reduce (_ && _)) {
+        when(!arithCounter.andR) {
           arithCounter := arithCounter + 1.U
         }.otherwise {
           arithCounter := 0.U
@@ -391,16 +391,16 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       }
     }
     is(s_finish) {
-      when(ACounter === lastA.U) {
-        io.resp.valid := true.B
-        io.resp.bits.data := 1.U
-        when(io.resp.fire) {
-          state := s_idle
-          ACounter := 0.U
-        }
-      }.otherwise {
-        dataChannelOut.foreach(_.finished := true.B)
-        when(dataChannelOut.map (_.stop) reduce (_ && _)) {
+      dataChannelOut.foreach(_.finished := true.B)
+      when(dataChannelOut.map(_.stop) reduce (_ && _)) {
+        when(ACounter === lastA.U) {
+          io.resp.valid := true.B
+          io.resp.bits.data := 1.U
+          when(io.resp.fire) {
+            state := s_idle
+            ACounter := 0.U
+          }
+        }.otherwise {
           currentBRow := 1.U
           b_loadidx := 0.U
           b_loaded := false.B
