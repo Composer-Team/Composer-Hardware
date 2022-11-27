@@ -12,6 +12,7 @@ import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 
+import scala.annotation.tailrec
 import scala.language.implicitConversions
 
 
@@ -19,13 +20,15 @@ object ComposerTop {
   def getAddressSet(ddrChannel: Int)(implicit p: Parameters): AddressSet = {
     /**
       * Get the address mask given the desired address space size (per DIMM) in bytes and the mask for channel bits
+ *
       * @param addrBits total number of address bits per DIMM
       * @param baseTotal mask for the channel bits - address bits are masked out for this
       * @param idx DO NOT DEFINE - recursive parameter
       * @param acc DO NOT DEFINE - recursive parameter
       * @return
       */
-    def getAddressMask(addrBits: Int, baseTotal: Long, idx: Int = 0, acc: Long = 0): Long = {
+    @tailrec
+def getAddressMask(addrBits: Int, baseTotal: Long, idx: Int = 0, acc: Long = 0): Long = {
       if (addrBits == 0) acc
       else if (((baseTotal >> idx) & 1) != 0) getAddressMask(addrBits, baseTotal, idx + 1, acc)
       else getAddressMask(addrBits - 1, baseTotal, idx + 1, acc | (1L << idx))
@@ -104,7 +107,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   val dmaxbar = AXI4Xbar()
   dmaxbar := dma_port
 
-  dram_channel_xbars foreach ( dram_ports := _)
+  dram_channel_xbars foreach ( dram_ports := AXI4Buffer() :=  _)
   dram_channel_xbars foreach { _ := dmaxbar }
   // TODO think about IDs overlapping....
 
