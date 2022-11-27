@@ -67,19 +67,19 @@ object CppGenerationUtils {
 
   def genComment(str: String): String = "// %s\n".format(str)
 
-  def genMemoryAllocatorDeclaration(cr: MCRFileMap, acc: ComposerAcc)(implicit p: Parameters): Unit = {
+  def genCPPHeader(cr: MCRFileMap, acc: ComposerAcc)(implicit p: Parameters): Unit = {
     // we might have multiple address spaces...
     val f = new FileWriter("vsim/generated-src/composer_allocator_declaration.h")
     val mem = p(ExtMem).get
-      f.write("// Automatically generated memory-allocator declaration from Composer-Hardware:CppGeneration\n" +
-        "#include <composer/alloc.h>\n" +
-        "#include <composer/rocc_cmd.h>\n" +
-        "#include <cinttypes>\n" +
-        "#ifndef COMPOSER_ALLOCATOR_GEN\n" +
-        "#define COMPOSER_ALLOCATOR_GEN\n" +
-        "#define NUM_DDR_CHANNELS " + mem.nMemoryChannels + "\n" +
-        "using composer_allocator=composer::device_allocator<" + mem.master.size + ">;\n")
-      cr.printCRs(Some(f))
+    f.write("// Automatically generated memory-allocator declaration from Composer-Hardware:CppGeneration\n" +
+      "#include <composer/alloc.h>\n" +
+      "#include <composer/rocc_cmd.h>\n" +
+      "#include <cinttypes>\n" +
+      "#ifndef COMPOSER_ALLOCATOR_GEN\n" +
+      "#define COMPOSER_ALLOCATOR_GEN\n" +
+      "#define NUM_DDR_CHANNELS " + mem.nMemoryChannels + "\n" +
+      "using composer_allocator=composer::device_allocator<" + mem.master.size + ">;\n")
+    cr.printCRs(Some(f))
     acc.system_tups foreach { tup =>
       f.write(s"const uint8_t ${tup._3.name}_ID = ${tup._2};\n")
     }
@@ -88,10 +88,11 @@ object CppGenerationUtils {
     f.write(s"static const uint8_t numChannelSelectionBits = ${p(ChannelSelectionBitsKey)}," +
       s" channelTransactionLenBits = ${log2Up(p(MaxChannelTransactionLenKey))};\n")
     f.write(s"static const composer::composer_pack_info pack_cfg(system_id_bits, core_id_bits, numChannelSelectionBits, channelTransactionLenBits);\n")
+    val addrSet = ComposerTop.getAddressSet(0)
+    f.write(s"static const uint64_t addrMask = ${addrSet.mask};\n")
     f.write("#endif\n")
     f.close()
   }
-
 }
 
 

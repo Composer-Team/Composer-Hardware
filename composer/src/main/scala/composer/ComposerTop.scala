@@ -2,7 +2,8 @@ package composer
 
 import chisel3._
 import chisel3.util._
-import composer.CppGenerationUtils.genMemoryAllocatorDeclaration
+import composer.ComposerTop.getAddressSet
+import composer.CppGenerationUtils.genCPPHeader
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
@@ -13,6 +14,24 @@ import freechips.rocketchip.util._
 
 import scala.language.implicitConversions
 
+
+object ComposerTop {
+  def getAddressSet(ddrChannel: Int)(implicit p: Parameters): AddressSet = {
+    def getAddressMask(addrBits: Int, baseTotal: Long, idx: Int = 0, acc: Long = 0): Long = {
+      if (addrBits == 0) acc
+      else if (((baseTotal >> idx) & 1) != 0) getAddressMask(addrBits, baseTotal, idx + 1, acc)
+      else getAddressMask(addrBits - 1, baseTotal, idx + 1, acc | (1L << idx))
+    }
+
+    val nMemChannels = p(ExtMem).get.nMemoryChannels
+//    val lineSize = p(CacheBlockBytes)
+    val lineSize = 1L << 34;
+    val baseTotal = (nMemChannels - 1) * lineSize
+    println(baseTotal)
+    val amask = getAddressMask(log2Up(p(ExtMem).get.master.size), baseTotal)
+    AddressSet(lineSize * ddrChannel, amask)
+  }
+}
 class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   private val externalMemParams: MemoryPortParams = p(ExtMem).get
@@ -39,11 +58,11 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     //    do that, so we should be able to do that ourselves. Consecutive addresses usually live on different DRAM
     //    DIMMs for performance reasons. But I support putting them in the same bank is fine too :( Bank conflicts
     //    are a serialization point
-    val base = Seq(AddressSet((1L << 34) * channel, (1L << 34) - 1))
-    println(base)
+    val as = getAddressSet(channel)
+    println(as)
     AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
-        address = base,
+        address = Seq(as),
         resources = device.reg,
         regionType = RegionType.UNCACHED,
         supportsWrite = TransferSizes(1, lineSize),
@@ -83,11 +102,10 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   acc.mem zip dram_channel_xbars foreach { case (m, dram_channel_xbar) =>
     (dram_channel_xbar
-      := AXI4Buffer()
       := AXI4UserYanker()
       //:= AXI4IdIndexer(idBits = 9)
+      := AXI4Deinterleaver(64)
       := TLToAXI4()
-      := TLBuffer() // necessary? TODO measure impact of having buffers?
       // TODO CHECK WITH LISA - This component shrinks TL transactions down to 32B at a time, allowing less resource
       //  usage in readers/writers?
       := TLWidthWidget(64)
@@ -123,7 +141,7 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   acc.module.io.cmd <> axil_hub.module.io.rocc_in
   axil_hub.module.io.rocc_out <> acc.module.io.resp
 
-  genMemoryAllocatorDeclaration(outer.cmd_resp_axilhub.axil_widget.module.crRegistry, acc.acc)
+  genCPPHeader(outer.cmd_resp_axilhub.axil_widget.module.crRegistry, acc.acc)
 
 
   val ocl = IO(Flipped(HeterogeneousBag.fromNode(ocl_port.out)))

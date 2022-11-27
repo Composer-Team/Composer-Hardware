@@ -2,7 +2,7 @@ package composer
 
 import chisel3._
 import chisel3.util._
-import composer.CppGenerationUtils.genMemoryAllocatorDeclaration
+import composer.CppGenerationUtils.genCPPHeader
 import composer.RoccConstants.FUNC_START
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
