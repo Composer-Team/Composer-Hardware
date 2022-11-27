@@ -17,6 +17,14 @@ import scala.language.implicitConversions
 
 object ComposerTop {
   def getAddressSet(ddrChannel: Int)(implicit p: Parameters): AddressSet = {
+    /**
+      * Get the address mask given the desired address space size (per DIMM) in bytes and the mask for channel bits
+      * @param addrBits total number of address bits per DIMM
+      * @param baseTotal mask for the channel bits - address bits are masked out for this
+      * @param idx DO NOT DEFINE - recursive parameter
+      * @param acc DO NOT DEFINE - recursive parameter
+      * @return
+      */
     def getAddressMask(addrBits: Int, baseTotal: Long, idx: Int = 0, acc: Long = 0): Long = {
       if (addrBits == 0) acc
       else if (((baseTotal >> idx) & 1) != 0) getAddressMask(addrBits, baseTotal, idx + 1, acc)
@@ -24,12 +32,15 @@ object ComposerTop {
     }
 
     val nMemChannels = p(ExtMem).get.nMemoryChannels
-//    val lineSize = p(CacheBlockBytes)
-    val lineSize = 1L << 34;
-    val baseTotal = (nMemChannels - 1) * lineSize
+    // this one is the defuault for rocket chip. Each new cache line (size def by CacheBlockBytes) is on another
+    // DIMM. This makes fetching 4 contiguous cache blocks completely parallelized. Should be way faster...
+    val continuity = p(CacheBlockBytes)
+    //  this one splits the DIMMS into contiguous address spaces. Not sure what that's good for...
+//    val continuity = 1L << 34;
+    val baseTotal = (nMemChannels - 1) * continuity
     println(baseTotal)
     val amask = getAddressMask(log2Up(p(ExtMem).get.master.size), baseTotal)
-    AddressSet(lineSize * ddrChannel, amask)
+    AddressSet(continuity * ddrChannel, amask)
   }
 }
 class ComposerTop(implicit p: Parameters) extends LazyModule() {
@@ -102,9 +113,12 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   acc.mem zip dram_channel_xbars foreach { case (m, dram_channel_xbar) =>
     (dram_channel_xbar
+      := AXI4Buffer()
       := AXI4UserYanker()
+      := AXI4Buffer()
       //:= AXI4IdIndexer(idBits = 9)
       := AXI4Deinterleaver(64)
+      := AXI4Buffer()
       := TLToAXI4()
       // TODO CHECK WITH LISA - This component shrinks TL transactions down to 32B at a time, allowing less resource
       //  usage in readers/writers?
