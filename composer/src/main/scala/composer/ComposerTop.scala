@@ -37,9 +37,10 @@ def getAddressMask(addrBits: Int, baseTotal: Long, idx: Int = 0, acc: Long = 0):
     val nMemChannels = p(ExtMem).get.nMemoryChannels
     // this one is the defuault for rocket chip. Each new cache line (size def by CacheBlockBytes) is on another
     // DIMM. This makes fetching 4 contiguous cache blocks completely parallelized. Should be way faster...
-    val continuity = p(CacheBlockBytes)
+//    val continuity = p(CacheBlockBytes)
     //  this one splits the DIMMS into contiguous address spaces. Not sure what that's good for...
-//    val continuity = 1L << 34;
+    //  but it seems anyways that it won't work UNLESS it's like this!
+    val continuity = 1L << 34
     val baseTotal = (nMemChannels - 1) * continuity
     println(baseTotal)
     val amask = getAddressMask(log2Up(p(ExtMem).get.master.size), baseTotal)
