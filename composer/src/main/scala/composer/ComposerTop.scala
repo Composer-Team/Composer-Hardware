@@ -105,7 +105,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   val dram_channel_xbars = Seq.fill(nMemChannels)(AXI4Xbar())
   val dmaxbar = AXI4Xbar()
-  dmaxbar := dma_port
+  dmaxbar := AXI4Buffer() := dma_port
 
   dram_channel_xbars foreach ( dram_ports := AXI4Buffer() :=  _)
   dram_channel_xbars foreach { _ := dmaxbar }

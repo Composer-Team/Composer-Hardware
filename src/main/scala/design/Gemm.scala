@@ -174,11 +174,11 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   val o_acc = o_mul zip OAccs.flatten map { case (o_mul_dat, o_acc_old_dat) =>
     o_mul_dat + o_acc_old_dat
   }
-  val addr = Pipe(state === s_acc, bread, 2)
+  val addr = RegNext(RegNext(bread))
   val do_write = RegNext(RegNext(state === s_acc))
   o_acc zip OCache.flatten foreach { case (o_acc_dat, ocache) =>
     when(do_write) {
-      ocache.write(addr.bits, o_acc_dat)
+      ocache.write(addr, o_acc_dat)
     }
   }
 
