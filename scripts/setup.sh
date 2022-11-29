@@ -3,9 +3,12 @@ mkdir -p project
 echo "sbt.version=1.3.13" > project/build.properties 
 
 # rocket-chip
+rm -rf rocket-chip
 git clone -q https://github.com/chipsalliance/rocket-chip.git && cd rocket-chip && git submodule update --init -q && cd ..
 
 rcpluglen=$(wc -l rocket-chip/project/plugins.sbt | grep -o "[0-9]*")
+# In case there's an update to rocket-chip, we need to cleanse some stuff
+rm -rf project
 if test -e project/plugins.sbt ;
 then
 	echo "plugins.sbt already exists, not copying rocket-chip plugins..."
