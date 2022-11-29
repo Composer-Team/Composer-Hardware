@@ -146,7 +146,7 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
 
   // user reverse to maintain order
   myWriter.data.bits := Cat(dArray.reverse)
-  myWriter.finished := false.B
+  myWriter.finished := state === s_idle
   myWriter.data.valid := false.B
   myReader.stop := false.B
   myReader.data.ready := false.B
