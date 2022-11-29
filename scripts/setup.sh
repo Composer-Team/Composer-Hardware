@@ -9,13 +9,9 @@ git clone -q https://github.com/chipsalliance/rocket-chip.git && cd rocket-chip 
 rcpluglen=$(wc -l rocket-chip/project/plugins.sbt | grep -o "[0-9]*")
 # In case there's an update to rocket-chip, we need to cleanse some stuff
 rm -rf project
-if test -e project/plugins.sbt ;
-then
-	echo "plugins.sbt already exists, not copying rocket-chip plugins..."
-else
-	touch project/plugins.sbt
-	cat rocket-chip/project/plugins.sbt >> project/plugins.sbt
-fi
+mkdir project
+touch project/plugins.sbt
+cat rocket-chip/project/plugins.sbt >> project/plugins.sbt
 
 if test $rcpluglen -eq $(wc -l project/plugins.sbt | grep -o "[0-9]*") ;
 then
