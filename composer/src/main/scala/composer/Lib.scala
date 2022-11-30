@@ -189,11 +189,12 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
 
   in.r.valid := readState === sPublishRead
   in.r.bits.data := io.mcr.read(readAddr).bits
-  in.r.bits.resp := DontCare
+  in.r.bits.resp := 0.U
+  in.r.bits.last := 1.U
   in.r.bits.id := readID
 
   in.b.valid := writeState === sWriteResp
-  in.b.bits.resp := 2.U
+  in.b.bits.resp := 0.U
 
   switch(writeState) {
     is(sWriteIdle) {
