@@ -448,8 +448,3 @@ class WithGemmFloat(withNCores: Int,
         new GemmFloatCore(coreParams, gp)(parameters)
     }))
 })
-
-class GemmFloatConfig extends Config(
-  new WithGemmFloat(1, GemmFloatParam(256, 8, 4, 1024)) ++ new WithVectorAdder(1, 16) ++
-    new WithALUs(1) ++ new WithComposer() ++ new WithAWSMem(4)
-)

@@ -8,6 +8,23 @@ import freechips.rocketchip.rocket.PgLevels
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
 
+
+case object ProducerBuffers extends Field[Map[Seq[(Int, Int)], Seq[(Int, Int)]]]
+case object ConsumerBuffers extends Field[Map[Seq[(Int, Int)], Seq[(Int, Int)]]]
+case object ComposerSystemsKey extends Field[Seq[ComposerSystemParams]]
+/* TODO UG: How many bits we are using to identify a system. Ensure that no system has the same ID and the largest ID
+ *           can be represented with this many bits
+ */
+case object SystemIDLengthKey extends Field[Int]
+/* TODO UG: How many bits are we using to identify a core. Ensure that no system has more cores than can be uniquely
+ *           identified by this many bits.
+ */
+case object CoreIDLengthKey extends Field[Int]
+case object ChannelSelectionBitsKey extends Field[Int]
+case object MaxChannelTransactionLenKey extends Field[Int]
+case object MaxMemTxsKey extends Field[Int]
+case object TLInterconnectWidthBytes extends Field[Int]
+case object HasDMA extends Field[Boolean]
 // can configure this to add whatever features of a channel we want. Location should probably be an enum...
 // TODO UG: Channels should be named. The user shouldn't have to know the order of the channels and remember in both
 //          the software and the hardware! There should be a similar "Key" system that gets put into the composer header export
@@ -46,34 +63,33 @@ case class ComposerSystemParams(coreParams: ComposerCoreParams,
 class WithAWSMem(nMemoryChannels: Int) extends Config((site, here, up) => {
 // why did this ever become 128? It's 2X the bus width... That doesn't seem to make much sense...
 //  case CacheBlockBytes => 128
+  case ExtMem => {
+    val q = Some(MemoryPortParams(MasterPortParams(
+      base = 0,
+      size = 0x400000000L,
+      beatBytes = 64,
+      idBits = 12
+    ), nMemoryChannels))
+    require(1 <= nMemoryChannels && nMemoryChannels <= 4)
+    q
+  }
+  case HasDMA => true
+})
+
+class WithKriaMem extends Config((_, _, _) => {
   case ExtMem => Some(MemoryPortParams(MasterPortParams(
     base = 0,
-    size = 0x400000000L,
+    size = 0x100000000L,
     beatBytes = 64,
-    idBits = 12
-  ), nMemoryChannels))
-
-  //------------------------------------------------------
-  // need dummy parameters to trick rocketchip.
-  // none of these are needed but they are
-  // uninitialized by default and will cause
-  // a compile error. ignore these
-
-  // NOT NECESSARY FOR COMPILER BUT IS NECESSARY FOR VERILATOR
-  case MonitorsEnabled => false
-  // Necessary for compile
-  case TileKey => RocketTileParams()
-  // unneeded in newer versions of RocketChip
-//  case RocketCrossingKey => List(RocketCrossingParams(
-//    crossingType = SynchronousCrossing(),
-//    master = TileMasterPortParams(cork = Some(true))
-//  ))
-  //  case ForceFanoutKey => ForceFanoutParams(false, false, false, false, false)
-  //------------------------------------------------------
-
-  // rocc data length
-  case XLen => 64
+    idBits = 4
+  ), 1))
+  case HasDMA => false
 })
+
+
+// TODO work DMA into Trait
+// TODO work Kria Memory (4GB) into Trait
+// TODO MMIO between CPU & Composer very doable
 
 /*TODO: copy over template and change names to match the name of the scala file
  * Make sure CoreParams matches what is in the scala file
@@ -129,5 +145,20 @@ class WithComposer extends Config((site, here, up) => {
   case TLNetworkTopologyLocated(InSubsystem) => List(
     JustOneBusTopologyParams(sbus = site(SystemBusKey))
   )
+  // NOT NECESSARY FOR COMPILER BUT IS NECESSARY FOR VERILATOR
+  case MonitorsEnabled => false
+  // Necessary for compile
+  case TileKey => RocketTileParams()
+  // unneeded in newer versions of RocketChip
+  //  case RocketCrossingKey => List(RocketCrossingParams(
+  //    crossingType = SynchronousCrossing(),
+  //    master = TileMasterPortParams(cork = Some(true))
+  //  ))
+  //  case ForceFanoutKey => ForceFanoutParams(false, false, false, false, false)
+  //------------------------------------------------------
+
+  // rocc data length
+  case XLen => 64
+
 
 })

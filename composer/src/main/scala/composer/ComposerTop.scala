@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import composer.ComposerTop.getAddressSet
 import composer.CppGenerationUtils.genCPPHeader
+import freechips.rocketchip.amba.axi4
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
@@ -20,15 +21,15 @@ object ComposerTop {
   def getAddressSet(ddrChannel: Int)(implicit p: Parameters): AddressSet = {
     /**
       * Get the address mask given the desired address space size (per DIMM) in bytes and the mask for channel bits
- *
-      * @param addrBits total number of address bits per DIMM
+      *
+      * @param addrBits  total number of address bits per DIMM
       * @param baseTotal mask for the channel bits - address bits are masked out for this
-      * @param idx DO NOT DEFINE - recursive parameter
-      * @param acc DO NOT DEFINE - recursive parameter
+      * @param idx       DO NOT DEFINE - recursive parameter
+      * @param acc       DO NOT DEFINE - recursive parameter
       * @return
       */
     @tailrec
-def getAddressMask(addrBits: Int, baseTotal: Long, idx: Int = 0, acc: Long = 0): Long = {
+    def getAddressMask(addrBits: Int, baseTotal: Long, idx: Int = 0, acc: Long = 0): Long = {
       if (addrBits == 0) acc
       else if (((baseTotal >> idx) & 1) != 0) getAddressMask(addrBits, baseTotal, idx + 1, acc)
       else getAddressMask(addrBits - 1, baseTotal, idx + 1, acc | (1L << idx))
@@ -37,7 +38,7 @@ def getAddressMask(addrBits: Int, baseTotal: Long, idx: Int = 0, acc: Long = 0):
     val nMemChannels = p(ExtMem).get.nMemoryChannels
     // this one is the defuault for rocket chip. Each new cache line (size def by CacheBlockBytes) is on another
     // DIMM. This makes fetching 4 contiguous cache blocks completely parallelized. Should be way faster...
-//    val continuity = p(CacheBlockBytes)
+    //    val continuity = p(CacheBlockBytes)
     //  this one splits the DIMMS into contiguous address spaces. Not sure what that's good for...
     //  but it seems anyways that it won't work UNLESS it's like this!
     val continuity = 1L << 34
@@ -47,6 +48,7 @@ def getAddressMask(addrBits: Int, baseTotal: Long, idx: Int = 0, acc: Long = 0):
     AddressSet(continuity * ddrChannel, amask)
   }
 }
+
 class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   private val externalMemParams: MemoryPortParams = p(ExtMem).get
@@ -94,29 +96,28 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     case TileVisibilityNodeKey => acc.mem.head
   })
 
+  val dma_port =  if (p(HasDMA)) {
+    val dma_node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+      masters = Seq(AXI4MasterParameters(
+        name = "dma",
+        maxFlight = Some(2),
+        aligned = true,
+        id = IdRange(0, 1),
+      ))
+    )))
+    Some(dma_node)
+  } else {
+    None
+  }
 
-  val dma_port = AXI4MasterNode(Seq(AXI4MasterPortParameters(
-    masters = Seq(AXI4MasterParameters(
-      name = "dma",
-      maxFlight = Some(2),
-      aligned = true,
-      id = IdRange(0, 1),
-    ))
-  )))
-
-  val dram_channel_xbars = Seq.fill(nMemChannels)(AXI4Xbar())
-  val dmaxbar = AXI4Xbar()
-  dmaxbar := AXI4Buffer() := dma_port
-
-  dram_channel_xbars foreach ( dram_ports := AXI4Buffer() :=  _)
-  dram_channel_xbars foreach { _ := dmaxbar }
   // TODO think about IDs overlapping....
 
   // We have to share shell DDR ports with DMA bus (which is AXI4). Use RocketChip utils to do that instead of the
   // whole shebang with instantiating strange encrypted Xilinx IPs'
 
-  acc.mem zip dram_channel_xbars foreach { case (m, dram_channel_xbar) =>
-    (dram_channel_xbar
+  val composer_mems = Seq.fill(nMemChannels)(AXI4IdentityNode())
+  acc.mem zip composer_mems foreach { case (m, x) =>
+    (  x
       := AXI4Buffer()
       := AXI4UserYanker()
       := AXI4Buffer()
@@ -128,6 +129,19 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       //  usage in readers/writers?
       := TLWidthWidget(64)
       := m)
+  }
+
+  if (p(HasDMA)) {
+    val dma_mem_xbar = Seq.fill(nMemChannels)(AXI4Xbar())
+    val dma = AXI4Xbar()
+    dma := AXI4Buffer() := dma_port.get
+    dma_mem_xbar zip composer_mems foreach { case (xb, cm) =>
+      xb := cm
+      xb := dma
+    }
+    dma_mem_xbar foreach (dram_ports := _)
+  } else {
+    composer_mems foreach (dram_ports := _)
   }
 
   val cmd_resp_axilhub = LazyModule(new AXILHub()(dummyTL))
@@ -172,8 +186,14 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   })
 
   // make incoming dma port and connect it
-  val dma = IO(Flipped(new AXI4Bundle(outer.dram_ports.in(0)._1.params)))
-  outer.dma_port.out(0)._1 <> dma
+
+  val dma = if (p(HasDMA)) {
+    val q = IO(Flipped(new AXI4Bundle(outer.dram_ports.in(0)._1.params)))
+    outer.dma_port.get.out(0)._1 <> q
+    Some(q)
+  } else {
+    None
+  }
 
   //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
   (mem zip dram_ports.in) foreach { case (i, (o, _)) => i <> o }

@@ -5,7 +5,7 @@ import chipsalliance.rocketchip.config.Config
 import chisel3.{UInt, _}
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
-import composer.{ComposerChannelParams, ComposerConstructor, ComposerCore, ComposerCoreParams, ComposerSystemParams, ComposerSystemsKey, WithAWSMem, WithComposer}
+import composer.{ComposerChannelParams, ComposerConstructor, ComposerCore, ComposerCoreParams, ComposerSystemParams, ComposerSystemsKey, WithAWSMem, WithComposer, WithKriaMem}
 import design.GemmCore.splitPayload
 import freechips.rocketchip.subsystem.ExtMem
 
@@ -434,5 +434,6 @@ class WithGemm(withNCores: Int,
 
 class GemmConfig extends Config(
   new WithGemm(4, GemmParam(4, 1024, 8, 4, 4096)) ++ new WithVectorAdder(1, 16) ++
-    new WithALUs(1) ++ new WithComposer() ++ new WithAWSMem(4)
+    new WithALUs(1) ++ new WithComposer() ++
+    new WithKriaMem()
 )
