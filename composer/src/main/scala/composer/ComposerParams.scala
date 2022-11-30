@@ -81,8 +81,8 @@ class WithKriaMem extends Config((_, _, _) => {
   case ExtMem => Some(MemoryPortParams(MasterPortParams(
     base = 0,
     size = 0x100000000L,
-    beatBytes = 64,
-    idBits = 4
+    beatBytes = 16,
+    idBits = 6
   ), 1))
   case HasDMA => false
   case HasAXILExternalMMIO => false // use full AXI4
