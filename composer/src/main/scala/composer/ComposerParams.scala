@@ -81,7 +81,7 @@ class WithKriaMem extends Config((_, _, _) => {
   case ExtMem => Some(MemoryPortParams(MasterPortParams(
     base = 0,
     size = 0x100000000L,
-    beatBytes = 8,
+    beatBytes = 4,
     idBits = 6
   ), 1))
   case HasDMA => false
