@@ -147,7 +147,11 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   val cmd_resp_axilhub = LazyModule(new AXILHub()(dummyTL))
 
   // connect axil hub to external axil port
-  cmd_resp_axilhub.node := ocl_port
+  if (p(HasAXILExternalMMIO)) {
+    cmd_resp_axilhub.node := ocl_port
+  } else {
+    cmd_resp_axilhub.node := AXI4Fragmenter() := ocl_port
+  }
   // connect axil hub to accelerator
 
   (acc.hostmem
@@ -187,14 +191,10 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
 
   // make incoming dma port and connect it
 
-  val dma = if (p(HasDMA)) {
+  if (p(HasDMA)) {
     val q = IO(Flipped(new AXI4Bundle(outer.dram_ports.in(0)._1.params)))
     outer.dma_port.get.out(0)._1 <> q
-    Some(q)
-  } else {
-    None
   }
-
   //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
   (mem zip dram_ports.in) foreach { case (i, (o, _)) => i <> o }
 

@@ -214,8 +214,7 @@ class AXILHub(implicit p: Parameters) extends LazyModule {
   val axil_aggregator = LazyModule(new AXILAggregator())
   // Widget contains MMIO stuff
   val axil_widget = LazyModule(new AXILWidget()(p))
-
-  val node = AXI4IdentityNode()
+  val node = AXI4IdentityNode() // ocl-port
   val mem_out = AXI4IdentityNode()
 
   mem_out := axil_aggregator.node
@@ -228,7 +227,7 @@ class AXILHubModule(outer: AXILHub)(implicit p: Parameters) extends LazyModuleIm
     val rocc_in = Decoupled(new RoCCCommand)
     val rocc_out = Flipped(Decoupled(new RoCCResponse))
   })
-  val axil_aggregator:AXILAggregatorModule = outer.axil_aggregator.module
+  val axil_aggregator = outer.axil_aggregator.module
   val axil_widget = outer.axil_widget.module
 
   val axil_rocc_converter = Module(new AXILRoccConverter)

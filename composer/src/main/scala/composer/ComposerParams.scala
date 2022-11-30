@@ -25,6 +25,7 @@ case object MaxChannelTransactionLenKey extends Field[Int]
 case object MaxMemTxsKey extends Field[Int]
 case object TLInterconnectWidthBytes extends Field[Int]
 case object HasDMA extends Field[Boolean]
+case object HasAXILExternalMMIO extends Field[Boolean]
 // can configure this to add whatever features of a channel we want. Location should probably be an enum...
 // TODO UG: Channels should be named. The user shouldn't have to know the order of the channels and remember in both
 //          the software and the hardware! There should be a similar "Key" system that gets put into the composer header export
@@ -63,7 +64,7 @@ case class ComposerSystemParams(coreParams: ComposerCoreParams,
 class WithAWSMem(nMemoryChannels: Int) extends Config((site, here, up) => {
 // why did this ever become 128? It's 2X the bus width... That doesn't seem to make much sense...
 //  case CacheBlockBytes => 128
-  case ExtMem => {
+  case ExtMem =>
     val q = Some(MemoryPortParams(MasterPortParams(
       base = 0,
       size = 0x400000000L,
@@ -72,8 +73,8 @@ class WithAWSMem(nMemoryChannels: Int) extends Config((site, here, up) => {
     ), nMemoryChannels))
     require(1 <= nMemoryChannels && nMemoryChannels <= 4)
     q
-  }
   case HasDMA => true
+  case HasAXILExternalMMIO => true
 })
 
 class WithKriaMem extends Config((_, _, _) => {
@@ -84,6 +85,7 @@ class WithKriaMem extends Config((_, _, _) => {
     idBits = 4
   ), 1))
   case HasDMA => false
+  case HasAXILExternalMMIO => false // use full AXI4
 })
 
 
