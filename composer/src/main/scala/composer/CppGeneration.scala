@@ -104,7 +104,8 @@ object CppGenerationUtils {
         }
         f.write(s"#ifdef SIM\n" +
           s"#include <verilated.h>\n" +
-          s"using ComposerMemAddressSimDtype=${addrDtype};\n" +
+          s"using ComposerMemAddressSimDtype=$addrDtype;\n" +
+          s"#define DATA_BUS_WIDTH ${p(ExtMem).get.master.beatBytes * 8}\n" +
           s"#endif\n")
       case None =>
         f.write("// No memory detected, not defining Address Sim Dtype\n")

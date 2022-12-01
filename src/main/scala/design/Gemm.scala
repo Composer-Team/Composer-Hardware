@@ -430,7 +430,7 @@ class WithGemm(withNCores: Int,
 })
 
 class GemmConfig extends Config(
-  new WithGemm(2, GemmParam(4, 128, 8, 4, 4096)) ++ new WithVectorAdder(1, 16) ++
+  new WithGemm(2, GemmParam(4, 128, 4, 4, 4096)) ++ new WithVectorAdder(1, 16) ++
     new WithALUs(1) ++ new WithComposer() ++
     new WithKriaMem()
 )
