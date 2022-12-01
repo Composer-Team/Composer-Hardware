@@ -147,11 +147,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   val cmd_resp_axilhub = LazyModule(new AXILHub()(dummyTL))
 
   // connect axil hub to external axil port
-  if (p(HasAXILExternalMMIO)) {
-    cmd_resp_axilhub.node := ocl_port
-  } else {
-    cmd_resp_axilhub.node := AXI4Fragmenter() := ocl_port
-  }
+  cmd_resp_axilhub.node := ocl_port
   // connect axil hub to accelerator
 
   (acc.hostmem

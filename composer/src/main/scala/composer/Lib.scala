@@ -154,8 +154,8 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
 
   val (in, _) = outer.node.in(0)
 
-  val sWriteIdle :: sGetWrite :: sDoWrite :: sWriteResp :: Nil = Enum(4)
-  val sReadIdle :: sGetReadData :: sPublishRead :: Nil = Enum(3)
+  val sWriteIdle :: sGetWrite :: sDoWrite :: sWriteResp :: sWriteErrorWait :: sWriteErrorWb :: Nil = Enum(6)
+  val sReadIdle :: sGetReadData :: sPublishRead :: sReadError :: Nil = Enum(4)
 
   val writeState = RegInit(sWriteIdle)
   val writeAddr = Reg(UInt(log2Up(numRegs).W))
@@ -172,7 +172,7 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
 
   in.ar.ready := readState === sReadIdle
   in.aw.ready := writeState === sWriteIdle
-  in.w.ready := writeState === sGetWrite
+  in.w.ready := writeState === sGetWrite || writeState === sWriteErrorWait
 
   // initialize read/write value wires
   io.mcr.read.foreach { rChannel =>
@@ -190,7 +190,7 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
   in.r.valid := readState === sPublishRead
   in.r.bits.data := io.mcr.read(readAddr).bits
   in.r.bits.resp := 0.U
-  in.r.bits.last := 1.U
+  in.r.bits.last := readLen === 0.U
   in.r.bits.id := readID
 
   in.b.valid := writeState === sWriteResp
@@ -202,7 +202,11 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
         writeAddr := (in.aw.bits.addr >> 2)(log2Up(numRegs) - 1, 0)
         writeState := sGetWrite
         writeLen := in.aw.bits.len
+        // this only actually asserts during simulation. During a real execution, we return errors for each beat instead
         assert(in.aw.bits.len === 0.U, "Currently only support single word writes")
+        when(in.aw.bits.len =/= 0.U) {
+          writeState := sWriteErrorWait
+        }
         writeId := in.aw.bits.id
       }
     }
@@ -231,6 +235,22 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
         writeState := sWriteIdle
       }
     }
+    is(sWriteErrorWait) {
+      when (in.w.fire) {
+        when (writeLen === 0.U) {
+          writeState := sWriteErrorWb
+        }.otherwise {
+          writeLen := writeLen - 1.U
+        }
+      }
+    }
+    is(sWriteErrorWb) {
+      in.b.bits.resp := 2.U // slave error
+      in.b.valid := true.B
+      when (in.b.fire) {
+        writeState := sWriteIdle
+      }
+    }
   }
 
   switch(readState) {
@@ -241,6 +261,9 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
         readLen := in.ar.bits.len
         readID := in.ar.bits.id
         assert(in.ar.bits.len === 0.U, "Currently only support single word reads")
+        when (in.ar.bits.len =/= 0.U) {
+          readState := sReadError
+        }
       }
     }
     is (sGetReadData){
@@ -251,6 +274,18 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
       }
     }
     is(sPublishRead) {
+      in.r.valid := true.B
+      when(in.r.fire) {
+        when (readLen === 0.U) {
+          readState := sReadIdle
+        }.otherwise {
+          readLen := readLen - 1.U
+        }
+      }
+    }
+    is (sReadError) {
+      in.r.bits.data := DontCare
+      in.r.bits.resp := 2.U // slave error
       in.r.valid := true.B
       when(in.r.fire) {
         when (readLen === 0.U) {

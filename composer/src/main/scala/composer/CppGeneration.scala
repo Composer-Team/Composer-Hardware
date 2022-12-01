@@ -90,6 +90,25 @@ object CppGenerationUtils {
     f.write(s"static const composer::composer_pack_info pack_cfg(system_id_bits, core_id_bits, numChannelSelectionBits, channelTransactionLenBits);\n")
     val addrSet = ComposerTop.getAddressSet(0)
     f.write(s"static const uint64_t addrMask = ${addrSet.mask};\n")
+    // this next stuff is just for simulation
+    if (p(HasDMA)) {
+      f.write("#define COMPOSER_HAS_DMA\n")
+    }
+    p(ExtMem) match {
+      case Some(a) =>
+        val addrWid = log2Up(a.master.size)
+        val addrDtype = {
+          if (addrWid <= 8) "CData"
+          else if (addrWid <= 32) "IData"
+          else "QData"
+        }
+        f.write(s"#ifdef SIM\n" +
+          s"#include <verilated.h>\n" +
+          s"using ComposerMemAddressSimDtype=${addrDtype};\n" +
+          s"#endif\n")
+      case None =>
+        f.write("// No memory detected, not defining Address Sim Dtype\n")
+    }
     f.write("#endif\n")
     f.close()
   }
