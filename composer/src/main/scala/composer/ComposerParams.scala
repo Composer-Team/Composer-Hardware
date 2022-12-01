@@ -80,7 +80,7 @@ class WithAWSMem(nMemoryChannels: Int) extends Config((site, here, up) => {
 class WithKriaMem extends Config((_, _, _) => {
   case ExtMem => Some(MemoryPortParams(MasterPortParams(
     base = 0,
-    size = 0x100000000L,
+    size = 1L << 49,
     beatBytes = 4,
     idBits = 6
   ), 1))
