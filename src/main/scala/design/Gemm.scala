@@ -198,9 +198,6 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
 
   val buffer_valid = Seq.fill(coreP.rowParallelism)(RegInit(false.B))
 
-  // make sure we can pack all the addresses together into one instruction
-  require(io.req.bits.rs1.getWidth + io.req.bits.rs2.getWidth >= reqChannelB.bits.addr.getWidth * 3)
-
   switch(state) {
     is(s_idle) {
       when(io.req.fire) {

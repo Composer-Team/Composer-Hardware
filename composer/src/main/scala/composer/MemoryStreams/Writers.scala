@@ -26,7 +26,7 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
   val beatBytes = edge.manager.beatBytes
   val addressBits = log2Up(edge.manager.maxAddress)
   val addressBitsChop = addressBits - log2Up(beatBytes)
-
+  println("AddressBits in Writer: " + addressBits)
   val io = IO(new SequentialWriteChannelIO(addressBits, nBytes))
 
   val tl = IO(new TLBundle(tlparams))
@@ -60,7 +60,9 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
   val wordsPerBeat = beatBytes / nBytes
 
   val req_addr = Reg(UInt(addressBitsChop.W))
-  val req_len = Reg(UInt(log2Up(p(MaxChannelTransactionLenKey)/nBytes).W))
+  val req_tx_max_length_beats = p(MaxChannelTransactionLenKey)/nBytes
+  val req_tx_mlb_bits = log2Up(req_tx_max_length_beats)
+  val req_len = Reg(UInt(req_tx_mlb_bits.W))
 
   val nextAddr = req_addr + 1.U
 
@@ -92,7 +94,7 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
         } else {
           idx := io.req.bits.addr(log2Ceil(beatBytes), log2Ceil(nBytes))
         }
-        req_len := io.req.bits.len.head(addressBitsChop)
+        req_len := io.req.bits.len.head(req_tx_mlb_bits)
         req_addr := io.req.bits.addr.head(addressBitsChop)
         dataValid := 0.U
         finishedBuf := false.B

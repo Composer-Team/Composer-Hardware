@@ -114,8 +114,10 @@ class WithComposer extends Config((site, here, up) => {
   case ChannelSelectionBitsKey => 3
   case MaxChannelTransactionLenKey => 1 << 30
   // Tile parameters
-  case PgLevels => if (site(XLen) == 64) 3 /* Sv39 */
-  else 2 /* Sv32 */
+  // Page table levels. We set it higher than rocket chip default because we need to support large virtual addresses
+  // spaces for some targets (e.g. Kria). Increasing the # of page table levels supports this, but makes no difference
+  // in elaboration
+  case PgLevels => 5
   case XLen => 64 // Applies to all cores
   case MaxHartIdBits => 1 // log2Up(site(TilesLocated(InSubsystem)).map(_.tileParams.hartId).max+1)
   // Interconnect parameters
@@ -158,9 +160,4 @@ class WithComposer extends Config((site, here, up) => {
   //  ))
   //  case ForceFanoutKey => ForceFanoutParams(false, false, false, false, false)
   //------------------------------------------------------
-
-  // rocc data length
-  case XLen => 64
-
-
 })
