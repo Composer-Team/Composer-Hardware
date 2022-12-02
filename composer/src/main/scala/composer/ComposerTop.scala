@@ -2,7 +2,7 @@ package composer
 
 import chisel3._
 import chisel3.util._
-import composer.ComposerTop.getAddressSet
+import composer.ComposerTop.{getAddressMask, getAddressSet}
 import composer.CppGenerationUtils.genCPPHeader
 import freechips.rocketchip.amba.axi4
 import freechips.rocketchip.amba.axi4._
@@ -18,22 +18,23 @@ import scala.language.implicitConversions
 
 
 object ComposerTop {
+  /**
+    * Get the address mask given the desired address space size (per DIMM) in bytes and the mask for channel bits
+    *
+    * @param addrBits  total number of address bits per DIMM
+    * @param baseTotal mask for the channel bits - address bits are masked out for this
+    * @param idx       DO NOT DEFINE - recursive parameter
+    * @param acc       DO NOT DEFINE - recursive parameter
+    * @return
+    */
+  @tailrec
+  def getAddressMask(addrBits: Int, baseTotal: Long, idx: Int = 0, acc: Long = 0): Long = {
+    if (addrBits == 0) acc
+    else if (((baseTotal >> idx) & 1) != 0) getAddressMask(addrBits, baseTotal, idx + 1, acc)
+    else getAddressMask(addrBits - 1, baseTotal, idx + 1, acc | (1L << idx))
+  }
+
   def getAddressSet(ddrChannel: Int)(implicit p: Parameters): AddressSet = {
-    /**
-      * Get the address mask given the desired address space size (per DIMM) in bytes and the mask for channel bits
-      *
-      * @param addrBits  total number of address bits per DIMM
-      * @param baseTotal mask for the channel bits - address bits are masked out for this
-      * @param idx       DO NOT DEFINE - recursive parameter
-      * @param acc       DO NOT DEFINE - recursive parameter
-      * @return
-      */
-    @tailrec
-    def getAddressMask(addrBits: Int, baseTotal: Long, idx: Int = 0, acc: Long = 0): Long = {
-      if (addrBits == 0) acc
-      else if (((baseTotal >> idx) & 1) != 0) getAddressMask(addrBits, baseTotal, idx + 1, acc)
-      else getAddressMask(addrBits - 1, baseTotal, idx + 1, acc | (1L << idx))
-    }
 
     val nMemChannels = p(ExtMem).get.nMemoryChannels
     // this one is the defuault for rocket chip. Each new cache line (size def by CacheBlockBytes) is on another
@@ -60,7 +61,8 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     masters = Seq(AXI4MasterParameters(
       name = "ocl",
       //      aligned = false, // could be true?
-      maxFlight = Some(1)
+      maxFlight = Some(1),
+      id = IdRange(0, 1 << 16)
     )),
     //    userBits = 0
   )))
@@ -76,7 +78,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       val q = getAddressSet(channel)
       if (p(MMIOBaseAddress).isDefined) {
         val base = p(MMIOBaseAddress).get
-        val mmio = AddressSet(base, 0x3F)
+        val mmio = AddressSet(base, getAddressMask(47, base))
         q.subtract(mmio)
       } else Seq(q)
     }
