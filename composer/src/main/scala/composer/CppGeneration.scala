@@ -116,6 +116,12 @@ object CppGenerationUtils {
       case None =>
         f.write("// No memory detected, not defining Address Sim Dtype\n")
     }
+    p(MMIOBaseAddress) match {
+      case Some(a) =>
+        f.write("const uint64_t ComposerMMIOOffset = " + a + "L;\n")
+      case _ =>
+        f.write("#define COMPOSER_NO_MMIO\n")
+    }
     f.write("#endif\n")
     f.close()
   }
