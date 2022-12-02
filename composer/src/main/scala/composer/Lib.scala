@@ -133,9 +133,10 @@ class MCRIO(numCRs: Int)(implicit p: Parameters) extends ParameterizedBundle()(p
 }
 
 class MCRFile(numRegs: Int)(implicit p: Parameters) extends LazyModule {
+
   val node = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
     slaves = Seq(AXI4SlaveParameters(
-      address = List(AddressSet(0, 0x3F)),
+      address = List(AddressSet(if(p(MMIOBaseAddress).isDefined) p(MMIOBaseAddress).get else 0L, 0x3F)),
       regionType = RegionType.UNCACHED,
       supportsWrite = TransferSizes(1, 4),
       supportsRead = TransferSizes(1, 4)

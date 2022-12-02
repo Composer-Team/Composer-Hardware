@@ -64,7 +64,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     )),
     //    userBits = 0
   )))
-
   // AXI4 DRAM Ports
   val dram_ports = AXI4SlaveNode(Seq.tabulate(nMemChannels) { channel =>
     // TODO Brendan? DDR Controllers on F1 are oblivious to address mappings
@@ -73,10 +72,19 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     //    do that, so we should be able to do that ourselves. Consecutive addresses usually live on different DRAM
     //    DIMMs for performance reasons. But I support putting them in the same bank is fine too :( Bank conflicts
     //    are a serialization point
-    val as = getAddressSet(channel)
+    val as = {
+      val q = getAddressSet(channel)
+      if (p(MMIOBaseAddress).isDefined) {
+        val base = p(MMIOBaseAddress).get
+        val mmio = AddressSet(base, 0x3F)
+        q.subtract(mmio)
+      } else Seq(q)
+    }
+    println(as)
+
     AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
-        address = Seq(as),
+        address = as,
         resources = device.reg,
         regionType = RegionType.UNCACHED,
         supportsWrite = TransferSizes(1, lineSize),

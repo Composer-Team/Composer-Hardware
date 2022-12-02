@@ -8,6 +8,7 @@ import freechips.rocketchip.rocket.PgLevels
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
 
+case object MMIOBaseAddress extends Field[Option[Long]]
 
 case object ProducerBuffers extends Field[Map[Seq[(Int, Int)], Seq[(Int, Int)]]]
 case object ConsumerBuffers extends Field[Map[Seq[(Int, Int)], Seq[(Int, Int)]]]
@@ -75,6 +76,7 @@ class WithAWSMem(nMemoryChannels: Int) extends Config((site, here, up) => {
     q
   case HasDMA => true
   case HasAXILExternalMMIO => true
+  case MMIOBaseAddress => None // MMIO is not real, it's just a PCIE bus transaction that pretends to be MMIO
 })
 
 class WithKriaMem extends Config((_, _, _) => {
@@ -84,6 +86,8 @@ class WithKriaMem extends Config((_, _, _) => {
     beatBytes = 4,
     idBits = 6
   ), 1))
+  // MMIO is real - part of the address space is reserved for MMIO communications
+  case MMIOBaseAddress => Some(0xB0000000L)
   case HasDMA => false
   case HasAXILExternalMMIO => false // use full AXI4
 })
@@ -145,7 +149,7 @@ class WithComposer extends Config((site, here, up) => {
   case DebugModuleKey => Some(DefaultDebugModuleParams(site(XLen)))
   case CLINTKey => Some(CLINTParams())
   case PLICKey => Some(PLICParams())
-  // Copying WithJustOneBus - TODO consider if this is the best?
+  // Copying WithJustOneBus
   case TLNetworkTopologyLocated(InSubsystem) => List(
     JustOneBusTopologyParams(sbus = site(SystemBusKey))
   )
