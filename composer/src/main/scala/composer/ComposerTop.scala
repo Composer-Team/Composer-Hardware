@@ -43,7 +43,6 @@ object ComposerTop {
     //  but it seems anyways that it won't work UNLESS it's like this!
     val continuity = 1L << 34
     val baseTotal = (nMemChannels - 1) * continuity
-    println(baseTotal)
     val amask = getAddressMask(log2Up(p(ExtMem).get.master.size), baseTotal)
     AddressSet(continuity * ddrChannel, amask)
   }
@@ -53,7 +52,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   private val externalMemParams: MemoryPortParams = p(ExtMem).get
   private val lineSize = p(CacheBlockBytes)
-  println("line size is " + lineSize)
   private val nMemChannels = externalMemParams.nMemoryChannels
   private val device = new MemoryDevice
 
@@ -76,7 +74,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     //    DIMMs for performance reasons. But I support putting them in the same bank is fine too :( Bank conflicts
     //    are a serialization point
     val as = getAddressSet(channel)
-    println(as)
     AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
         address = Seq(as),
@@ -181,7 +178,6 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
 
   val mem: Seq[AXI4Bundle] = dram_ports.in.map(a => {
     val q: AXI4BundleParameters = a._1.params
-    println("qos bits: " + q.qosBits)
     IO(new AXI4Bundle(a._1.params))
   })
 

@@ -20,17 +20,12 @@ import scala.language.postfixOps
 class ComposerAcc(implicit p: Parameters) extends LazyModule {
 
   val configs = p(ComposerSystemsKey)
-  println(configs)
   val system_tups = configs.zipWithIndex.map { case (c: ComposerSystemParams, id: Int) =>
     (LazyModule(new ComposerSystem(c, id)), id, c)
   }
 
   def sysLookup(opcode: Int): ComposerSystem = {
     system_tups(system_tups.indexWhere(_._2 == opcode))._1
-  }
-
-  system_tups foreach { tup =>
-    println("System " + tup._3.name + " has opcode " + tup._2)
   }
 
   val systems = system_tups.map(_._1)
@@ -42,7 +37,6 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
 
   mem zip memGroups foreach { case (acc_channel, unit_channels) =>
     val usize = unit_channels.size
-    println(s"unit channels size = $usize")
     if (unit_channels nonEmpty) {
       val arb = LazyModule(new TLXbar)
       unit_channels.foreach { c => arb.node := c }
@@ -192,7 +186,6 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
 class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
 
   val nMemChannels = p(ExtMem).get.nMemoryChannels
-  println(nMemChannels + " ddr channels")
 
   val hostmem = TLIdentityNode()
   val mem = Seq.fill(nMemChannels) {

@@ -102,9 +102,15 @@ object CppGenerationUtils {
           else if (addrWid <= 32) "IData"
           else "QData"
         }
+        val strobeDtype = p(ExtMem).get.master.beatBytes match {
+          case x if x <= 8 => "CData"
+          case x if x <= 32 => "IData"
+          case _ => "QData"
+        }
         f.write(s"#ifdef SIM\n" +
           s"#include <verilated.h>\n" +
           s"using ComposerMemAddressSimDtype=$addrDtype;\n" +
+          s"using ComposerStrobeSimDtype=$strobeDtype;\n" +
           s"#define DATA_BUS_WIDTH ${p(ExtMem).get.master.beatBytes * 8}\n" +
           s"#endif\n")
       case None =>

@@ -285,9 +285,6 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   //    ++ outer.localRead.filter(_.isDefined).map(_.get)
   //    ++ outer.remoteRead.filter(_.isDefined).map(_.get)
 
-
-  println("Address is " + addressBits + "b wide")
-
   lazy val numReadChannels = outer.readLoc.length
   lazy val numWriteChannels = outer.writeLoc.length
 
@@ -346,7 +343,6 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     cores(0).read_ios(0)._2.valid := false.B
     cores(0).write_ios(0)._2.valid := true.B
   }
-  println(s"FIND ME: $nChannelBits")
   val txLenFromCmd = cmd.bits.rs1(nChannelBits + lenBits - 1, nChannelBits)
   cores.zipWithIndex.foreach { case (core: ComposerCore, i) =>
     def pairWithAddrStore(id: Int, interface: DecoupledIO[ChannelTransactionBundle], condition: Bool): Unit = {

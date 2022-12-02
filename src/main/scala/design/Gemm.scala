@@ -58,7 +58,6 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   val realRowBits = log2Up(coreP.maxRCDim) + 1
   val realRowLength = Reg(UInt(realRowBits.W))
   val realRowBytes = Cat(realRowLength, 0.U(log2Up(dataWidthBytes).W))
-  println("realRowBytes shift" + log2Up(dataWidthBytes))
 
   val state = RegInit(s_idle)
 
@@ -105,9 +104,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   val current_a = Seq.fill(coreP.rowParallelism)(Reg(SInt(dataWidthBits.W)))
   val row_loaded = Seq.fill(coreP.rowParallelism)(Reg(Bool()))
   val ACounter = Reg(UInt(rowBits.W))
-  println("ACounter is " + rowBits + "b")
   val lastA = (coreP.rowColDim / coreP.rowParallelism) - 1
-  println("Needs to represent at least " + lastA)
   // this is ad-hoc but hopefully we have a better interface for this soon ala Brendan
 
   // cache row of B in BCache and intermediate results in OCache "output cache"
@@ -430,7 +427,6 @@ class WithGemm(withNCores: Int,
 })
 
 class GemmConfig extends Config(
-  new WithGemm(2, GemmParam(4, 128, 4, 4, 4096)) ++ new WithVectorAdder(1, 16) ++
-    new WithALUs(1) ++ new WithComposer() ++
-    new WithKriaMem()
+  new WithGemm(1, GemmParam(4, 16, 2, 2, 1024)) ++
+  new WithVectorAdder(1, 16) ++ new WithComposer() ++ new WithKriaMem()
 )

@@ -55,7 +55,6 @@ class SequentialReader(maxBytes: Int, tlparams: TLBundleParameters, tledge: TLEd
   val logChannelsPerBeat = log2Up(channelsPerBeat)
   require(beatBytes >= maxBytes, "Size of channel cannot be wider than AXI bus. If this functionality is" +
   " necessary, please buffer your reads/writes")
-  println(s"lbb: $logBeatBytes, bpb: $beatsPerBlock, lcs: $logChannelSize")
 
   val addr = Reg(UInt(addressBits.W))
   val blockAddr = Cat(addr(addressBits-1, log2Up(blockBytes)), 0.U(log2Up(blockBytes).W))
