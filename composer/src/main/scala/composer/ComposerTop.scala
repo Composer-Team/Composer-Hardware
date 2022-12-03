@@ -194,8 +194,8 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   // make incoming dma port and connect it
 
   if (p(HasDMA)) {
-    val q = IO(Flipped(new AXI4Bundle(outer.dram_ports.in(0)._1.params)))
-    outer.dma_port.get.out(0)._1 <> q
+    val dma = IO(Flipped(new AXI4Bundle(outer.dram_ports.in(0)._1.params)))
+    outer.dma_port.get.out(0)._1 <> dma
   }
   //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
   (mem zip dram_ports.in) foreach { case (i, (o, _)) => i <> o }

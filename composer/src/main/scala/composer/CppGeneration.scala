@@ -94,23 +94,27 @@ object CppGenerationUtils {
     if (p(HasDMA)) {
       f.write("#define COMPOSER_HAS_DMA\n")
     }
+
+    def getVerilatorDtype(width: Int): String = {
+      width match {
+        case x if x <= 8 => "CData"
+        case x if x <= 16 => "SData"
+        case x if x <= 32 => "IData"
+        case x if x <= 64 => "QData"
+        case _ => "ERROR"
+      }
+    }
     p(ExtMem) match {
       case Some(a) =>
+        val strobeDtype = getVerilatorDtype(p(ExtMem).get.master.beatBytes)
         val addrWid = log2Up(a.master.size)
-        val addrDtype = {
-          if (addrWid <= 8) "CData"
-          else if (addrWid <= 32) "IData"
-          else "QData"
-        }
-        val strobeDtype = p(ExtMem).get.master.beatBytes match {
-          case x if x <= 8 => "CData"
-          case x if x <= 32 => "IData"
-          case _ => "QData"
-        }
+        val addrDtype = getVerilatorDtype(addrWid)
+        val idDtype = getVerilatorDtype(p(ExtMem).get.master.idBits)
         f.write(s"#ifdef SIM\n" +
           s"#include <verilated.h>\n" +
           s"using ComposerMemAddressSimDtype=$addrDtype;\n" +
           s"using ComposerStrobeSimDtype=$strobeDtype;\n" +
+          s"using ComposerMemIDDtype=$idDtype;\n" +
           s"#define DATA_BUS_WIDTH ${p(ExtMem).get.master.beatBytes * 8}\n" +
           s"#endif\n")
       case None =>

@@ -99,7 +99,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   val arithCounter = Reg(UInt(log2Up(arithUnits).W))
 
   // iterate through matrix B 1 row at a time
-  val currentBRow = Reg(UInt(rowBits.W))
+  val currentBRow = Reg(UInt((rowBits+1).W))
   // Matrix A state for each duplicated accumulator system
   val current_a = Seq.fill(coreP.rowParallelism)(Reg(SInt(dataWidthBits.W)))
   val row_loaded = Seq.fill(coreP.rowParallelism)(Reg(Bool()))
@@ -429,4 +429,10 @@ class WithGemm(withNCores: Int,
 class GemmConfig extends Config(
   new WithGemm(1, GemmParam(4, 16, 2, 2, 1024)) ++
   new WithVectorAdder(1, 16) ++ new WithALUs(1) ++ new WithComposer() ++ new WithKriaMem()
+)
+
+class GemmTestF1 extends Config(
+  new WithGemm(2, GemmParam(4, 16, 4, 16, 2048)) ++
+    new WithVectorAdder(1, 16) ++
+    new WithALUs(2) ++ new WithComposer() ++ new WithAWSMem(1)
 )
