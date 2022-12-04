@@ -436,3 +436,7 @@ class GemmTestF1 extends Config(
     new WithVectorAdder(1, 16) ++
     new WithALUs(2) ++ new WithComposer() ++ new WithAWSMem(1)
 )
+
+class GemmTestF1Big extends Config(
+  new WithGemm(8, GemmParam(4, 512, 16, 16, 2048)) ++ new WithComposer() ++ new WithAWSMem(1)
+)
