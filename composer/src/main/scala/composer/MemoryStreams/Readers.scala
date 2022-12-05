@@ -91,13 +91,7 @@ class SequentialReader(maxBytes: Int, tlparams: TLBundleParameters, tledge: TLEd
 
         val mask = (1.U << log2Ceil(maxBytes).U).asUInt - 1.U
         //val mask = (1.U << io.req.bits.size) - 1.U
-        assert((io.req.bits.addr & mask) === 0.U,
-          "ColumnReadChannel: unaligned address")
-        /*if (strided) {
-          assert((io.req.bits.stride.get & mask) === 0.U,
-            "ColumnReadChannel: unaligned stride")
-         }*/
-
+        assert((io.req.bits.addr & mask) === 0.U, "ColumnReadChannel: unaligned address")
         when(io.req.bits.len === 0.U) {
           state := s_idle
         }
@@ -107,14 +101,18 @@ class SequentialReader(maxBytes: Int, tlparams: TLBundleParameters, tledge: TLEd
       tl.a.valid := true.B
       when(tl.a.fire) {
         tl_idx := 0.U
-        ch_idx := addr(log2Up(blockBytes)-1, logChannelSize)
+        if (logBlockBytes > logChannelSize) {
+          ch_idx := addr(logBlockBytes - 1, logChannelSize)
+        } else
+          ch_idx := 0.U
         addr := addr + blockBytes.U
         state := s_read_memory
         len := len - 1.U
       }
     }
+    // wait for responses from s_send_mem_request
     is (s_read_memory) {
-      // will stop firing on its own, no need for extra state
+      // when we get a message back store it into a buffer
       when(tl.d.fire) {
         (0 until channelsPerBeat) foreach { ch_buffer_idx =>
           val high = (ch_buffer_idx+1) * channelWidthBits - 1

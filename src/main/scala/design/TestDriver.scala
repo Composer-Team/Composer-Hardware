@@ -19,5 +19,5 @@ object Composer {
 }
 
 object GemmDriver extends App {
-  Composer.buildConfig(new GemmTestF1)
+  Composer.buildConfig(new GemmTestF1Big)
 }

@@ -438,5 +438,5 @@ class GemmTestF1 extends Config(
 )
 
 class GemmTestF1Big extends Config(
-  new WithGemm(8, GemmParam(4, 512, 16, 16, 2048)) ++ new WithComposer() ++ new WithAWSMem(1)
+  new WithGemm(4, GemmParam(4, 256, 16, 16, 2048)) ++ new WithComposer() ++ new WithAWSMem(1)
 )

@@ -33,10 +33,10 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
   val s_idle :: s_data :: s_allocate ::  s_mem :: Nil = Enum(4)
   val state = RegInit(s_idle)
 
-//  val txBusyBits = RegInit(VecInit(Seq(p(MaxMemTxsKey))(false.B)))
   val tx_inactive :: tx_inProgress :: Nil = Enum(2)
   val txStates = RegInit(VecInit(Seq.fill(p(MaxMemTxsKey))(tx_inactive)))
   val txPriority = PriorityEncoderOH(txStates map (_ === tx_inactive))
+
   val haveTransactionToDo = txStates.map(_ === tx_inProgress).fold(false.B)(_ || _)
   val haveAvailableTxSlot = txStates.map(_ === tx_inactive).fold(true.B)(_ || _)
 
@@ -48,7 +48,7 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
   tl.a.valid := false.B
 
   val isReallyIdle = state === s_idle && !haveTransactionToDo
-  io.channel.stop := isReallyIdle
+  io.channel.stop := !haveTransactionToDo
 
   require(nBytes >= 1)
   require(nBytes <= beatBytes)
@@ -73,7 +73,7 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
 
   val finishedBuf = RegInit(false.B)
   val wasFinished = RegInit(false.B)
-  val allocatedTx = Reg(UInt(log2Up(p(MaxMemTxsKey)).W))
+  val allocatedTransaction = Reg(UInt(log2Up(p(MaxMemTxsKey)).W))
 
   when(io.channel.finished) {
     finishedBuf := true.B
@@ -128,6 +128,7 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
             st := tx_inProgress
           }
         }
+        allocatedTransaction := OHToUInt(txPriority)
         state := s_mem
       }
     }
@@ -148,7 +149,7 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
   }
 
   tl.a.bits := edge.Put(
-    fromSource = allocatedTx,
+    fromSource = allocatedTransaction,
     toAddress = Cat(addr, 0.U(log2Up(beatBytes).W)),
     lgSize = log2Ceil(beatBytes).U,
     data = wdata,
