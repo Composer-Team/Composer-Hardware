@@ -6,10 +6,15 @@ import composer._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.tilelink._
 
+class WriterDataChannelIO(val dWidth: Int)(implicit p: Parameters) extends Bundle {
+  val data = Flipped(Decoupled(UInt(dWidth.W)))
+  val channelIdle = Output(Bool())
+  val finishEarly = Input(Bool())
+}
 
 class SequentialWriteChannelIO(addressBits: Int, maxBytes: Int)(implicit p: Parameters) extends Bundle {
   val req = Flipped(Decoupled(new ChannelTransactionBundle(addressBits)))
-  val channel = Flipped(new DataChannelIO(maxBytes))
+  val channel = new WriterDataChannelIO(maxBytes*8)
   val busy = Output(Bool())
 }
 
@@ -48,7 +53,7 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
   tl.a.valid := false.B
 
   val isReallyIdle = state === s_idle && !haveTransactionToDo
-  io.channel.stop := !haveTransactionToDo
+  io.channel.channelIdle := !haveTransactionToDo
 
   require(nBytes >= 1)
   require(nBytes <= beatBytes)
@@ -75,7 +80,7 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
   val wasFinished = RegInit(false.B)
   val allocatedTransaction = Reg(UInt(log2Up(p(MaxMemTxsKey)).W))
 
-  when(io.channel.finished) {
+  when(io.channel.finishEarly) {
     finishedBuf := true.B
   }
 
@@ -106,7 +111,7 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
       }
     }
     is(s_data) {
-      when(io.channel.finished || finishedBuf) {
+      when(io.channel.finishEarly || finishedBuf) {
         state := s_mem
       }
       // when the core data channel fires, put the data in the write

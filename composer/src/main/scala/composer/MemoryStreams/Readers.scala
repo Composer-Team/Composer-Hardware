@@ -4,49 +4,30 @@ import chisel3._
 import chisel3.util._
 import composer._
 import freechips.rocketchip.config.Parameters
-import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.tilelink._
 
-/**
- * A request to the ColumnReadChannel
- *
- * @param maxBytes the largest number of bytes that can be in a single element
- */
-
-class ReadChannelIO(addressBits: Int, maxBytes: Int)(implicit p: Parameters) extends Bundle {
+class ReadChannelIO(addressBits: Int, dataBytes: Int, vlen: Int)(implicit p: Parameters) extends Bundle {
   val req = Flipped(Decoupled(new ChannelTransactionBundle(addressBits)))
-  val channel = new DataChannelIO(maxBytes)
+  val channel = new DataChannelIO(dataBytes, vlen)
   val busy = Output(Bool())
 }
 
-
-/*
- TODO UG OR CHRIS: This is currently in a good-enough state that I'm not going to touch it for a while.
-                   The problem is that it assumes that all of the reads are going to be a multiple of
-                   128 bytes, which isn't necessarily a _good_ assumption. Fix this. It should be
-                   pretty simple...
- */
-/**
- * Reads data sequentially from memory and sends it out piece by piece
- *
- * @param maxBytes the largest number of bytes per element the reader will produce
- */
-class SequentialReader(maxBytes: Int, tlparams: TLBundleParameters, tledge: TLEdgeOut)(implicit p: Parameters) extends Module {
+class SequentialReader(dataBytes: Int, tlparams: TLBundleParameters, tledge: TLEdgeOut, vlen: Int = 1)(implicit p: Parameters) extends Module {
   val blockBytes = p(CacheBlockBytes)
   val addressBits = log2Up(tledge.manager.maxAddress)
+  val maxBytes = dataBytes * vlen
   require(isPow2(maxBytes))
 
   // io goes to user, TL connects with AXI4
-  val io = IO(new ReadChannelIO(addressBits, maxBytes))
+  val io = IO(new ReadChannelIO(addressBits, dataBytes, vlen))
   val tl = IO(new TLBundle(tlparams))
 
   val beatBytes = tledge.manager.beatBytes
 
   io.channel.finished := true.B
-
   val channelWidthBits = maxBytes * 8
-  val logBeatBytes = log2Up(beatBytes)
+//  val logBeatBytes = log2Up(beatBytes)
   val logChannelSize = log2Up(io.channel.data.bits.getWidth) - 3
   val logBlockBytes = log2Up(blockBytes)
   val beatsPerBlock = blockBytes / beatBytes
@@ -68,7 +49,7 @@ class SequentialReader(maxBytes: Int, tlparams: TLBundleParameters, tledge: TLEd
   val s_idle :: s_send_mem_request :: s_read_memory :: Nil = Enum(3)
   val state = RegInit(s_idle)
 
-  val channel_buffer = Reg(UInt(channelWidthBits.W))
+  val channel_buffer = Reg(Vec(vlen, UInt((dataBytes * 8).W)))
   val channel_buffer_valid = RegInit(false.B)
 
   io.channel.data.valid := channel_buffer_valid
@@ -134,7 +115,11 @@ class SequentialReader(maxBytes: Int, tlparams: TLBundleParameters, tledge: TLEd
   when((ch_idx >> logChannelsPerBeat).asUInt < tl_idx && state === s_read_memory && !channel_buffer_valid) {
     (0 until channelsPerBeat) foreach { ch =>
       when (ch.U === ch_idx(logChannelsPerBeat-1, 0)) {
-        channel_buffer := buffer(ch)((ch_idx >> logChannelsPerBeat).asUInt)
+        (0 until vlen) foreach {vidx =>
+          val start = vidx * dataBytes * 8
+          val end = (vidx + 1) * dataBytes * 8 - 1
+          channel_buffer(vidx) := buffer(ch)((ch_idx >> logChannelsPerBeat).asUInt)(end, start)
+        }
         channel_buffer_valid := true.B
       }
     }

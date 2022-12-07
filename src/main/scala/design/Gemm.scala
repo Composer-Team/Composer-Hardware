@@ -61,7 +61,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
 
   val state = RegInit(s_idle)
 
-  val (dataChannelB, reqChannelB) = declareSparseReader(0, dataWidthBytes * arithUnits)
+  val (dataChannelB, reqChannelB) = declareSparseReader(0, dataWidthBytes, arithUnits)
   val (dataChannelOut, reqChannelOut) = {
     val q = List.tabulate(coreP.rowParallelism)(declareSparseWriter(_, dataWidthBytes * arithUnits))
     (q.map(_._1), q.map(_._2))
@@ -87,7 +87,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
     datchan.data.ready := false.B
     datchan.stop := false.B
   }
-  dataChannelOut foreach (_.finished := false.B)
+  dataChannelOut foreach (_.finishEarly := false.B)
 
   reqChannelOut zip OutputAddr foreach { case (chan, addr) =>
     chan.bits.addr := addr
@@ -281,7 +281,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
         dataChannelRow map (_.data.bits) zip OCache foreach { case (dat, cache) =>
           cache.zipWithIndex foreach { case (arithcache, idx) =>
             when(idx.U === arithCounter) {
-              arithcache.write(bread, dat.asSInt)
+              arithcache.write(bread, dat(0).asSInt)
             }
           }
         }
@@ -310,7 +310,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       dataChannelRow.lazyZip(row_loaded).lazyZip(current_a) foreach { case (in_a, aload, areg) =>
         in_a.data.ready := !aload
         when(in_a.data.fire) {
-          areg := in_a.data.bits.asSInt
+          areg := in_a.data.bits(0).asSInt
           aload := true.B
         }
       }
@@ -319,7 +319,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       dataChannelB.data.ready := !b_loaded
       when(dataChannelB.data.fire) {
         b_loadidx := b_loadidx + 1.U
-        BCache zip splitPayload(dataChannelB.data.bits, dataWidthBits) foreach { case (cache, dat) =>
+        BCache zip dataChannelB.data.bits foreach { case (cache, dat) =>
           cache.write(b_loadidx, dat.asSInt)
         }
         when(b_loadidx === maxBCounter.U) {
@@ -385,8 +385,8 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       }
     }
     is(s_finish) {
-      dataChannelOut.foreach(_.finished := true.B)
-      when(dataChannelOut.map(_.stop) reduce (_ && _)) {
+      dataChannelOut.foreach(_.finishEarly := true.B)
+      when(dataChannelOut.map(_.channelIdle) reduce (_ && _)) {
         when(ACounter === lastA.U) {
           io.resp.valid := true.B
           io.resp.bits.data := 1.U

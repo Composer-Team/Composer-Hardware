@@ -127,11 +127,12 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
   val s_idle :: s_load :: s_add :: s_store :: s_finish :: Nil = Enum(5)
   val vConfig = p(VectorAdderKey)
   require(isPow2(vConfig.dWidth), "The vector data width must be a power of two!")
-  val myReader = declareSequentialReader(usingReadChannelID = 0, maxBytes = 8)
-  val myWriter = declareSequentialWriter(usingWriteChannelID = 0, maxBytes = 8)
+  require(vConfig.dWidth % 8 == 0)
+  val vDivs = 8
+  val myReader = declareSequentialReader(usingReadChannelID = 0, vConfig.dWidth / 8, vDivs)
+  val myWriter = declareSequentialWriter(usingWriteChannelID = 0, vConfig.dWidth / 8 * vDivs)
   val state = RegInit(s_idle)
   val toAdd = Reg(UInt(vConfig.dWidth.W))
-  val vDivs = myReader.data.bits.getWidth / vConfig.dWidth
   val vLen = Reg(UInt(io.req.bits.rs1.getWidth.W))
   val rfinish = RegInit(false.B)
 
@@ -142,11 +143,12 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
   val rdreg = Reg(UInt(io.resp.bits.rd.getWidth.W))
   io.resp.bits.rd := rdreg
 
+
   val dArray = Seq.fill(vDivs)(Reg(UInt(vConfig.dWidth.W)))
 
   // user reverse to maintain order
   myWriter.data.bits := Cat(dArray.reverse)
-  myWriter.finished := state === s_idle
+  myWriter.finishEarly := state === s_idle
   myWriter.data.valid := false.B
   myReader.stop := false.B
   myReader.data.ready := false.B
@@ -165,8 +167,8 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
     myReader.data.ready := true.B
     when(myReader.data.fire) {
       // break the input into data-sized segments defined by vConfig.dwidth
-      dArray.zipWithIndex.foreach { case (reg: UInt, idx: Int) =>
-        reg := myReader.data.bits((idx + 1) * vConfig.dWidth - 1, vConfig.dWidth * idx)
+      dArray zip myReader.data.bits foreach { case (reg: UInt, dat: UInt) =>
+        reg := dat
       }
       state := s_add
       vLen := vLen - vDivs.U
