@@ -27,14 +27,15 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
   val blockBytes = p(CacheBlockBytes)
 
   val CacheNodes = coreParams.readChannelParams.filter(_.isInstanceOf[ComposerCachedReadChannelParams]).
-    map(a => a match {
+    map {
       case b: ComposerCachedReadChannelParams => b
-    }).map {
+    }.map {
     param =>
+      println("Making cache")
       val cache = TLCache(param.sizeBytes, param.idxMask).suggestName("TLCache_" + param.id)
       val rnodes = Seq.tabulate(param.nChannels)(i => TLClientNode(Seq(TLMasterPortParameters.v1(
         clients = Seq(TLMasterParameters.v1(
-          name = s"CachedReadChannel_sys${system_id}_core${core_id}_cache${param.id}_channel${i}",
+          name = s"CachedReadChannel_sys${system_id}_core${core_id}_cache${param.id}_channel$i",
           supportsGet = TransferSizes(1, blockBytes),
           supportsProbe = TransferSizes(1, blockBytes)
         ))))))
@@ -48,8 +49,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
       clients = Seq(TLMasterParameters.v1(
         name = s"ReadChannel_sys${system_id}_core${core_id}_$rch",
         supportsGet = TransferSizes(1, blockBytes),
-        supportsProbe = TransferSizes(1, blockBytes),
-        sourceId = IdRange(0, 1 << p(ExtMem).get.master.idBits)
+        supportsProbe = TransferSizes(1, blockBytes)
       )))))
   }
 
@@ -57,7 +57,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
     TLClientNode(Seq(TLMasterPortParameters.v1(
       Seq(TLMasterParameters.v1(
         name = s"WriteChannel_sys${system_id}_core${core_id}_$wch",
-        sourceId = IdRange(0, p(ExtMem).get.master.idBits),
+        sourceId = IdRange(0, 1),
         supportsPutFull = TransferSizes(1, blockBytes),
         supportsProbe = TransferSizes(1, blockBytes)))))))
 

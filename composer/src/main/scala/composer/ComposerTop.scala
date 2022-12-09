@@ -109,7 +109,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
         name = "dma",
         maxFlight = Some(2),
         aligned = true,
-        id = IdRange(0, 1),
+        id = IdRange(0, 1 << p(HasDMA).get),
       ))
     )))
     Some(dma_node)
@@ -126,8 +126,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   acc.mem zip composer_mems foreach { case (m, x) =>
     (  x
       := AXI4Buffer()
-      := AXI4UserYanker()
-      := AXI4Buffer()
       //:= AXI4IdIndexer(idBits = 9)
       := AXI4Deinterleaver(64)
       := AXI4Buffer()
@@ -137,8 +135,11 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       := TLWidthWidget(64)
       := m)
   }
-
-  if (p(HasDMA).isDefined) {
+  val extMemIDBits = p(ExtMem) match {
+    case None => 0
+    case Some(a) => a.master.idBits
+  }
+  val mem_tops = if (p(HasDMA).isDefined) {
     val dma_mem_xbar = Seq.fill(nMemChannels)(AXI4Xbar())
     val dma = AXI4Xbar()
     dma := AXI4Buffer() := dma_port.get
@@ -146,15 +147,21 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       xb := cm
       xb := dma
     }
-    dma_mem_xbar foreach (dram_ports := _)
+    dma_mem_xbar
+//    dma_mem_xbar foreach (dram_ports := AXI4Buffer() := AXI4IdIndexer(extMemIDBits) := AXI4Buffer() := _)
   } else {
-    composer_mems foreach (dram_ports := _)
+//    composer_mems foreach (dram_ports := AXI4Buffer() := AXI4IdIndexer(extMemIDBits) := AXI4Buffer() := _)
+    composer_mems
+  }
+
+  mem_tops foreach { mt =>
+    dram_ports := AXI4Buffer() := AXI4UserYanker() := AXI4Buffer() := AXI4IdIndexer(extMemIDBits) := AXI4Buffer() := mt
   }
 
   val cmd_resp_axilhub = LazyModule(new AXILHub()(dummyTL))
 
   // connect axil hub to external axil port
-  cmd_resp_axilhub.node := ocl_port
+  cmd_resp_axilhub.node := AXI4Buffer() := AXI4IdIndexer(2) := ocl_port
   // connect axil hub to accelerator
 
   (acc.hostmem

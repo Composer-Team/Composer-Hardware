@@ -26,7 +26,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
 
 //  val all_mems = readLoc ++ writeLoc
   val reader_nodes = cores.flatMap(_.unCachedReaders) ++ cores.flatMap(_.CacheNodes.map(_._1.mem_out))
-  val writer_nodes = cores.map(_.writers).flatten
+  val writer_nodes = cores.flatMap(_.writers)
 
 //  val hasMem = (all_mems foldLeft[Boolean] false) ({ case (b: Boolean, s: String) => b || (s == "Mem") })
   val hasMem = reader_nodes.nonEmpty || writer_nodes.nonEmpty
@@ -40,9 +40,12 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
 
 
   if (reader_nodes.nonEmpty || writer_nodes.nonEmpty) {
-    val mem_xbar = TLXbar()
-    (reader_nodes ++ writer_nodes).foreach(mem_xbar := _)
-    mem foreach (_ := mem_xbar)
+    mem zip cores foreach {
+      case (m_out, core) =>
+        val mem_xbar = TLXbar()
+        core.unCachedReaders ++ core.writers ++ core.CacheNodes.map (_._1.mem_out) foreach (mem_xbar := _)
+        m_out := mem_xbar
+    }
   }
 
 

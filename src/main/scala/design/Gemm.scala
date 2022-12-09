@@ -262,11 +262,11 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       val output_channels_ready = reqChannelRow map (_.ready) reduce (_ && _)
       when(output_channels_ready) {
         state := s_load_buffer1
+        rowReqValid := true.B
       }
     }
     is(s_load_buffer1) {
       reqChannelRow.map(_.bits.addr) zip OutputAddr foreach { case (ioaddr, oaddr) => ioaddr := oaddr}
-      rowReqValid := true.B
       bread := 0.U
       state := s_load_buffer2
     }
@@ -438,11 +438,9 @@ class GemmConfig extends Config(
 )
 
 class GemmTestF1 extends Config(
-  new WithGemm(2, GemmParam(4, 16, 4, 16, 2048)) ++
-    new WithVectorAdder(1, 16) ++
-    new WithALUs(2) ++ new WithComposer() ++ new WithAWSMem(1)
+  new WithGemm(1, GemmParam(4, 16, 4, 16, 2048)) ++ new WithComposer() ++ new WithAWSMem(1)
 )
 
 class GemmTestF1Big extends Config(
-  new WithGemm(2, GemmParam(4, 128, 16, 8, 2048)) ++ new WithComposer() ++ new WithAWSMem(1)
+  new WithGemm(2, GemmParam(4, 256, 16, 8, 2048)) ++ new WithComposer() ++ new WithAWSMem(1)
 )

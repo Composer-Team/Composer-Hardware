@@ -1,7 +1,7 @@
 package composer.MemoryStreams
 
 import chipsalliance.rocketchip.config.Parameters
-import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType, TransferSizes}
+import freechips.rocketchip.diplomacy.{AddressSet, IdRange, LazyModule, LazyModuleImp, RegionType, TransferSizes}
 import freechips.rocketchip.tilelink.{TLBundle, TLBundleA, TLChannelBeatBytes, TLClientNode, TLIdentityNode, TLManagerNode, TLMasterParameters, TLMasterPortParameters, TLMasterToSlaveTransferSizes, TLSlaveParameters, TLSlavePortParameters, TLXbar}
 import chisel3._
 import chisel3.util._
@@ -33,6 +33,7 @@ class TLCache(cacheSize: Int,
       supportsPutFull = TransferSizes(1, blockBytes))),
     channelBytes = TLChannelBeatBytes(blockBytes))))
 
+  println("Cache 2")
   val mem_reqs = TLManagerNode(Seq(TLSlavePortParameters.v1(Seq(TLSlaveParameters.v2(
     Seq(AddressSet(mbase, mmask)),
     regionType = RegionType.UNCACHED,
@@ -55,7 +56,7 @@ object TLCacheImpl {
 
   @tailrec
   def getBitSubsetAsUInt(q: UInt, mask: Long, acc: List[Bool] = List.empty): UInt = {
-    val nextMask = (mask >> 1) & 0x7FFFFFFFFFFFFFFFL;
+    val nextMask = (mask >> 1) & 0x7FFFFFFFFFFFFFFFL
     if (mask == 0) VecInit(acc.reverse).asUInt
     else if ((mask & 1) == 1) q.getWidth match {
       case 1 => VecInit((q(0) :: acc).reverse).asUInt
