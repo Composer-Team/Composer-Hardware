@@ -70,6 +70,7 @@ class ALUInput extends Bundle {
   val inputB = Wire(UInt(3.W))
   val op = Wire(Bool())
 }
+
 class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
   val s_idle :: s_working :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
@@ -136,6 +137,9 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
   val vLen = Reg(UInt(io.req.bits.rs1.getWidth.W))
   val rfinish = RegInit(false.B)
 
+
+  cache_invalidate_ios foreach (_ := reset.asBool)
+
   io.req.ready := state === s_idle
   io.busy := state =/= s_idle
   io.resp.valid := false.B // set again later under s_finish
@@ -143,7 +147,7 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
   val rdreg = Reg(UInt(io.resp.bits.rd.getWidth.W))
   io.resp.bits.rd := rdreg
 
-  cache_invalidate_ios foreach { _ := false.B }
+  //  cache_invalidate_ios foreach { _ := false.B }
 
 
   val dArray = Seq.fill(vDivs)(Reg(UInt(vConfig.dWidth.W)))

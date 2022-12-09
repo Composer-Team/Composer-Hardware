@@ -33,6 +33,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
     param =>
       println("Making cache")
       val cache = TLCache(param.sizeBytes, param.idxMask).suggestName("TLCache_" + param.id)
+      val req_xbar = TLXbar()
       val rnodes = Seq.tabulate(param.nChannels)(i => TLClientNode(Seq(TLMasterPortParameters.v1(
         clients = Seq(TLMasterParameters.v1(
           name = s"CachedReadChannel_sys${system_id}_core${core_id}_cache${param.id}_channel$i",
@@ -40,7 +41,8 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
           supportsProbe = TransferSizes(1, blockBytes)
         ))))))
 
-      rnodes foreach (cache.mem_reqXBar := _)
+      rnodes foreach (req_xbar := _)
+      cache.mem_reqs := req_xbar
       (cache, rnodes, param)
   }
 
@@ -74,7 +76,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   var write_ios: Seq[(Int, DecoupledIO[ChannelTransactionBundle])] = Seq()
 
   // (id, is_reader)
-  private var activeChannelIds: Seq[(Int, Bool)] = Seq()
+  private val activeChannelIds: Seq[(Int, Bool)] = Seq()
 
   io.resp.bits.system_id := composerCoreParams.system_id.U
   io.resp.bits.core_id := composerCoreParams.core_id.U
@@ -115,6 +117,8 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
           outer.CacheNodes(cacheID)._2(channelID).out(0)
       }
     }
+
+    println(edge)
     val addressBits = log2Up(edge.manager.maxAddress)
 
     val m = Module(new SequentialReader(dataBytes, tl.params, edge, vlen))
