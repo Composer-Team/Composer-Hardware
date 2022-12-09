@@ -91,10 +91,6 @@ object CppGenerationUtils {
     val addrSet = ComposerTop.getAddressSet(0)
     f.write(s"static const uint64_t addrMask = ${addrSet.mask};\n")
     // this next stuff is just for simulation
-    if (p(HasDMA)) {
-      f.write("#define COMPOSER_HAS_DMA\n")
-    }
-
     def getVerilatorDtype(width: Int): String = {
       width match {
         case x if x <= 8 => "CData"
@@ -104,6 +100,11 @@ object CppGenerationUtils {
         case _ => "ERROR"
       }
     }
+
+    if (p(HasDMA).isDefined) {
+      f.write("#define COMPOSER_HAS_DMA\n")
+    }
+
     p(ExtMem) match {
       case Some(a) =>
         val strobeDtype = getVerilatorDtype(p(ExtMem).get.master.beatBytes)
@@ -115,6 +116,10 @@ object CppGenerationUtils {
           s"using ComposerMemAddressSimDtype=$addrDtype;\n" +
           s"using ComposerStrobeSimDtype=$strobeDtype;\n" +
           s"using ComposerMemIDDtype=$idDtype;\n" +
+          (p(HasDMA) match {
+            case None => ""
+            case Some(a) => s"using ComposerDMAIDtype=${getVerilatorDtype(a)};\n"
+          }) +
           s"#define DATA_BUS_WIDTH ${p(ExtMem).get.master.beatBytes * 8}\n" +
           s"#endif\n")
       case None =>
