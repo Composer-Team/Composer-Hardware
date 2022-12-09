@@ -17,18 +17,19 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
   val queueDepth = systemParams.channelQueueDepth
   val coreParams = systemParams.coreParams
 
-  val readLoc = coreParams.readChannelParams.map(_.location)
-  val writeLoc = coreParams.writeChannelParams.map(_.location)
+  val readLoc = coreParams.readChannelParams.map(_.loc)
+  val writeLoc = coreParams.writeChannelParams.map(_.loc)
 
   val cores = Seq.tabulate(systemParams.nCores) { idx: Int =>
     LazyModule(new ComposerCoreWrapper(systemParams, idx, system_id))
   }
 
-  val readers = cores.map(_.readers)
-  val writers = cores.map(_.writers)
+//  val all_mems = readLoc ++ writeLoc
+  val reader_nodes = cores.flatMap(_.unCachedReaders) ++ cores.flatMap(_.CacheNodes.map(_._1.mem_out))
+  val writer_nodes = cores.map(_.writers).flatten
 
-  val all_mems = readLoc ++ writeLoc
-  val hasMem = (all_mems foldLeft[Boolean] false) ({ case (b: Boolean, s: String) => b || (s == "Mem") })
+//  val hasMem = (all_mems foldLeft[Boolean] false) ({ case (b: Boolean, s: String) => b || (s == "Mem") })
+  val hasMem = reader_nodes.nonEmpty || writer_nodes.nonEmpty
   val mem = if (hasMem) {
     Seq.fill(nCores) {
       TLIdentityNode()
@@ -36,6 +37,14 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
   } else {
     Seq()
   }
+
+
+  if (reader_nodes.nonEmpty || writer_nodes.nonEmpty) {
+    val mem_xbar = TLXbar()
+    (reader_nodes ++ writer_nodes).foreach(mem_xbar := _)
+    mem foreach (_ := mem_xbar)
+  }
+
 
   val blockBytes = p(CacheBlockBytes)
 
@@ -106,64 +115,64 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
 
   // potentially split writer node
   // (mem, localBuf, remoteBuf)
-  val writeSplit = writeLoc.zipWithIndex.map { case (wloc, i) =>
-    writers.map { wlist =>
-      // wlist(i) is one writer
-      if ((wloc contains "Local") && (wloc contains "Mem")) {
-        val split = LazyModule(new TLXbar)
-        split.node := wlist(i)
-        (Some(split.node), Some(split.node), None)
-      } else if ((wloc contains "Remote") && (wloc contains "Mem")) {
-        val split = LazyModule(new TLXbar)
-        split.node := wlist(i)
-        (Some(split.node), None, Some(split.node))
-      } else if (wloc contains "Mem") {
-        (Some(wlist(i)), None, None)
-      } else if (wloc contains "Local") {
-        (None, Some(wlist(i)), None)
-      } else if (wloc contains "Remote") {
-        (None, None, Some(wlist(i)))
-      } else {
-        (None, None, None)
-      }
-    }
-  }
+//  val writeSplit = writeLoc.zipWithIndex.map { case (wloc, i) =>
+//    writers.map { wlist =>
+//      // wlist(i) is one writer
+//      if ((wloc contains "Local") && (wloc contains "Mem")) {
+//        val split = LazyModule(new TLXbar)
+//        split.node := wlist(i)
+//        (Some(split.node), Some(split.node), None)
+//      } else if ((wloc contains "Remote") && (wloc contains "Mem")) {
+//        val split = LazyModule(new TLXbar)
+//        split.node := wlist(i)
+//        (Some(split.node), None, Some(split.node))
+//      } else if (wloc contains "Mem") {
+//        (Some(wlist(i)), None, None)
+//      } else if (wloc contains "Local") {
+//        (None, Some(wlist(i)), None)
+//      } else if (wloc contains "Remote") {
+//        (None, None, Some(wlist(i)))
+//      } else {
+//        (None, None, None)
+//      }
+//    }
+//  }
 
   // potentially split reader node
   // (mem, localBuf, remoteBuf)
-  val readSplit = readLoc.zipWithIndex.map { case (rloc, i) =>
-    readers.map { rlist =>
-      // rlist(i) is one reader
-      if ((rloc contains "Remote") && (rloc contains "Mem")) {
-        val split = LazyModule(new TLXbar)
-        split.node := rlist(i)
-        (Some(split.node), None, Some(split.node))
-      } else if ((rloc contains "Local") && (rloc contains "Mem")) {
-        val split = LazyModule(new TLXbar)
-        split.node := rlist(i)
-        (Some(split.node), Some(split.node), None)
-      } else if (rloc contains "Mem") {
-        (Some(rlist(i)), None, None)
-      } else if (rloc contains "Remote") {
-        (None, None, Some(rlist(i)))
-      } else if (rloc contains "Local") {
-        (None, Some(rlist(i)), None)
-      } else {
-        (None, None, None)
-      }
-    }
-  }
+//  val readSplit = readLoc.zipWithIndex.map { case (rloc, i) =>
+//    readers.map { rlist =>
+//      // rlist(i) is one reader
+//      if ((rloc contains "Remote") && (rloc contains "Mem")) {
+//        val split = LazyModule(new TLXbar)
+//        split.node := rlist(i)
+//        (Some(split.node), None, Some(split.node))
+//      } else if ((rloc contains "Local") && (rloc contains "Mem")) {
+//        val split = LazyModule(new TLXbar)
+//        split.node := rlist(i)
+//        (Some(split.node), Some(split.node), None)
+//      } else if (rloc contains "Mem") {
+//        (Some(rlist(i)), None, None)
+//      } else if (rloc contains "Remote") {
+//        (None, None, Some(rlist(i)))
+//      } else if (rloc contains "Local") {
+//        (None, Some(rlist(i)), None)
+//      } else {
+//        (None, None, None)
+//      }
+//    }
+//  }
 
   // connect Mem channels up to mem
-  mem.zipWithIndex.foreach { case (m, coreid) =>
-    val arb = LazyModule(new TLXbar)
-    Seq((readLoc, readSplit), (writeLoc, writeSplit)) foreach { case (locs, splits) =>
-      locs zip splits foreach { case (loc, split) =>
-        if (loc contains "Mem") arb.node := split(coreid)._1.get
-      }
-    }
-    m := TLBuffer() := arb.node
-  }
+//  mem.zipWithIndex.foreach { case (m, coreid) =>
+//    val arb = LazyModule(new TLXbar)
+//    Seq((readLoc, readSplit), (writeLoc, writeSplit)) foreach { case (locs, splits) =>
+//      locs zip splits foreach { case (loc, split) =>
+//        if (loc contains "Mem") { arb.node := split(coreid)._1.get }
+//      }
+//    }
+//    m := TLBuffer() := arb.node
+//  }
 
   // connect producers+consumers to local buffer
   // localMem is a Seq of identity nodes correspnoding to a single write channel

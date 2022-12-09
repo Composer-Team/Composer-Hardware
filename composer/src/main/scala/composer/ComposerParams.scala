@@ -11,34 +11,40 @@ import freechips.rocketchip.tile._
 case object MMIOBaseAddress extends Field[Option[Long]]
 
 case object ProducerBuffers extends Field[Map[Seq[(Int, Int)], Seq[(Int, Int)]]]
+
 case object ConsumerBuffers extends Field[Map[Seq[(Int, Int)], Seq[(Int, Int)]]]
+
 case object ComposerSystemsKey extends Field[Seq[ComposerSystemParams]]
+
 /* TODO UG: How many bits we are using to identify a system. Ensure that no system has the same ID and the largest ID
  *           can be represented with this many bits
  */
 case object SystemIDLengthKey extends Field[Int]
+
 /* TODO UG: How many bits are we using to identify a core. Ensure that no system has more cores than can be uniquely
  *           identified by this many bits.
  */
 case object CoreIDLengthKey extends Field[Int]
+
 case object ChannelSelectionBitsKey extends Field[Int]
+
 case object MaxChannelTransactionLenKey extends Field[Int]
+
 case object MaxMemTxsKey extends Field[Int]
+
 case object TLInterconnectWidthBytes extends Field[Int]
-case object HasDMA extends Field[Boolean]
+
+// if we support a dedicated DMA port, provide the number of ID bits
+case object HasDMA extends Field[Option[Int]]
+
 case object HasAXILExternalMMIO extends Field[Boolean]
-// can configure this to add whatever features of a channel we want. Location should probably be an enum...
-// TODO UG: Channels should be named. The user shouldn't have to know the order of the channels and remember in both
-//          the software and the hardware! There should be a similar "Key" system that gets put into the composer header export
-//          and manifests in software that way or per haps we just generate the C++ enum and code stubs here...
-//          This is a more design-focused task and I may end up doing it myself but you are more than welcome to propose
-//          a solution - but it has to be good because this is an interface that is end-user-facing.
 
-// TODO UG & Chris: Is the current address scheme for read/write channels good? May consider re-doing the whole thing
-//                  to a more intuitive interface.
-case class ComposerChannelParams(location: String = "Mem")
+abstract class ComposerChannelParams(val loc: String)
 
-case class ComposerConstructor(composerCoreParams: ComposerCoreParams, composerCoreWrapper: ComposerCoreWrapper)
+case class ComposerCachedReadChannelParams(nChannels: Int, sizeBytes: Int, id: Int,
+                                           idxMask: Option[Long] = None,
+                                           location: String = "Mem") extends ComposerChannelParams(location)
+case class ComposerUncachedChannelParams(location: String = "Mem") extends ComposerChannelParams(location)
 
 case class ComposerCoreParams(readChannelParams: Seq[ComposerChannelParams],
                               writeChannelParams: Seq[ComposerChannelParams],
@@ -47,6 +53,8 @@ case class ComposerCoreParams(readChannelParams: Seq[ComposerChannelParams],
                               system_id: Int = 0, // for internal use
                               nMemXacts: Int = 1 // not for production release
                              )
+
+case class ComposerConstructor(composerCoreParams: ComposerCoreParams, composerCoreWrapper: ComposerCoreWrapper)
 
 case class ComposerSystemParams(coreParams: ComposerCoreParams,
                                 nCores: Int,
@@ -62,19 +70,20 @@ case class ComposerSystemParams(coreParams: ComposerCoreParams,
                                 channelQueueDepth: Int = 32,
                                )
 
-class WithAWSMem(nMemoryChannels: Int) extends Config((site, here, up) => {
-// why did this ever become 128? It's 2X the bus width... That doesn't seem to make much sense...
-//  case CacheBlockBytes => 128
+
+class WithAWSMem(nMemoryChannels: Int) extends Config((_, _, _) => {
+  // why did this ever become 128? It's 2X the bus width... That doesn't seem to make much sense...
+  //  case CacheBlockBytes => 128
   case ExtMem =>
     val q = Some(MemoryPortParams(MasterPortParams(
       base = 0,
       size = 0x400000000L,
       beatBytes = 64,
-      idBits = 12
+      idBits = 6
     ), nMemoryChannels))
     require(1 <= nMemoryChannels && nMemoryChannels <= 4)
     q
-  case HasDMA => true
+  case HasDMA => Some(6)
   case HasAXILExternalMMIO => true
   case MMIOBaseAddress => None // MMIO is not real, it's just a PCIE bus transaction that pretends to be MMIO
 })
@@ -88,7 +97,7 @@ class WithKriaMem extends Config((_, _, _) => {
   ), 1))
   // MMIO is real - part of the address space is reserved for MMIO communications
   case MMIOBaseAddress => Some(0xB0000000L)
-  case HasDMA => false
+  case HasDMA => None
   case HasAXILExternalMMIO => false // use full AXI4
 })
 
@@ -107,7 +116,7 @@ class WithKriaMem extends Config((_, _, _) => {
  */
 
 
-class WithComposer extends Config((site, here, up) => {
+class WithComposer extends Config((site, _, _) => {
   case ProducerBuffers => Map()
   case ConsumerBuffers => Map()
   case ComposerSystemsKey => Seq()

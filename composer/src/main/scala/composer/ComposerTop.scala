@@ -103,7 +103,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     case TileVisibilityNodeKey => acc.mem.head
   })
 
-  val dma_port =  if (p(HasDMA)) {
+  val dma_port =  if (p(HasDMA).isDefined) {
     val dma_node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
       masters = Seq(AXI4MasterParameters(
         name = "dma",
@@ -138,7 +138,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       := m)
   }
 
-  if (p(HasDMA)) {
+  if (p(HasDMA).isDefined) {
     val dma_mem_xbar = Seq.fill(nMemChannels)(AXI4Xbar())
     val dma = AXI4Xbar()
     dma := AXI4Buffer() := dma_port.get
@@ -187,13 +187,12 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   (ocl zip ocl_port.out) foreach { case (o, (i, _)) => i <> o }
 
   val mem: Seq[AXI4Bundle] = dram_ports.in.map(a => {
-    val q: AXI4BundleParameters = a._1.params
     IO(new AXI4Bundle(a._1.params))
   })
 
   // make incoming dma port and connect it
 
-  if (p(HasDMA)) {
+  if (p(HasDMA).isDefined) {
     val dma = IO(Flipped(new AXI4Bundle(outer.dram_ports.in(0)._1.params)))
     outer.dma_port.get.out(0)._1 <> dma
   }

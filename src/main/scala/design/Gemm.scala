@@ -5,7 +5,7 @@ import chipsalliance.rocketchip.config.Config
 import chisel3.{UInt, _}
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
-import composer.{ComposerChannelParams, ComposerConstructor, ComposerCore, ComposerCoreParams, ComposerSystemParams, ComposerSystemsKey, WithAWSMem, WithComposer, WithKriaMem}
+import composer.{ComposerChannelParams, ComposerConstructor, ComposerCore, ComposerCoreParams, ComposerSystemParams, ComposerSystemsKey, ComposerUncachedChannelParams, WithAWSMem, WithComposer, WithKriaMem}
 import design.GemmCore.splitPayload
 import freechips.rocketchip.subsystem.ExtMem
 
@@ -61,14 +61,15 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
 
   val state = RegInit(s_idle)
 
-  val (dataChannelB, reqChannelB) = declareSparseReader(0, dataWidthBytes, arithUnits)
+//  val (dataChannelB, reqChannelB) = declareSparseReader(0, dataWidthBytes, arithUnits)
+  val (dataChannelB, reqChannelB) = declareSparseReader(dataWidthBytes, arithUnits)
   val (dataChannelOut, reqChannelOut) = {
-    val q = List.tabulate(coreP.rowParallelism)(declareSparseWriter(_, dataWidthBytes * arithUnits))
+    val q = List.fill(coreP.rowParallelism)(declareSparseWriter(dataWidthBytes * arithUnits))
     (q.map(_._1), q.map(_._2))
   }
   // these channels will read both the buffers and the A Matrix
   val (dataChannelRow, reqChannelRow) = {
-    val q = List.tabulate(coreP.rowParallelism) { a: Int => declareSparseReader(1 + a, dataWidthBytes) }
+    val q = List.tabulate(coreP.rowParallelism) { a: Int => declareSparseReader(dataWidthBytes) }
     (q.map(_._1), q.map(_._2))
   }
 
@@ -78,9 +79,16 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   val AAddrs = List.fill(coreP.rowParallelism)(Reg(UInt(addrWidth.W)))
 
   // initialize some of the channels
-  reqChannelB :: reqChannelRow foreach { ioa =>
+  reqChannelB.bits.len := rowSizeBytes.U
+  reqChannelB.valid := false.B
+  reqChannelB.bits.addr := DontCare
+  val rowReqValid = RegInit(false.B)
+  when (rowReqValid) {
+    rowReqValid := false.B
+  }
+  reqChannelRow foreach { ioa =>
     ioa.bits.len := rowSizeBytes.U
-    ioa.valid := false.B
+    ioa.valid := rowReqValid
     ioa.bits.addr := DontCare
   }
   (dataChannelB :: dataChannelRow) foreach { datchan =>
@@ -257,10 +265,8 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       }
     }
     is(s_load_buffer1) {
-      reqChannelRow zip OutputAddr foreach { case (io, oaddr) =>
-        io.bits.addr := oaddr
-        io.valid := true.B
-      }
+      reqChannelRow.map(_.bits.addr) zip OutputAddr foreach { case (ioaddr, oaddr) => ioaddr := oaddr}
+      rowReqValid := true.B
       bread := 0.U
       state := s_load_buffer2
     }
@@ -298,10 +304,10 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
     is(s_addr_commit) {
       reqChannelB.valid := true.B
       reqChannelB.bits.addr := BAddr
-      reqChannelRow zip AAddrs foreach { case (reqChan, aaddr) =>
-        reqChan.bits.addr := aaddr
-        reqChan.valid := true.B
+      reqChannelRow.map(_.bits.addr) zip AAddrs foreach { case (ioaddr, aaddr) =>
+        ioaddr := aaddr
       }
+      rowReqValid := true.B
       BAddr := BAddr + realRowBytes
       state := s_load
     }
@@ -414,9 +420,9 @@ class WithGemm(withNCores: Int,
   case ComposerSystemsKey => up(ComposerSystemsKey, site) ++ Seq(ComposerSystemParams(
     coreParams = ComposerCoreParams(
       // one for B, one for each row of A
-      readChannelParams = Seq.fill(1 + gp.rowParallelism)(ComposerChannelParams()),
+      readChannelParams = Seq.fill(1 + gp.rowParallelism)(ComposerUncachedChannelParams()),
       // one for each row of output
-      writeChannelParams = Seq.fill(gp.rowParallelism)(ComposerChannelParams())
+      writeChannelParams = Seq.fill(gp.rowParallelism)(ComposerUncachedChannelParams())
     ),
     nCores = withNCores,
     name = "GemmCore",
@@ -438,5 +444,5 @@ class GemmTestF1 extends Config(
 )
 
 class GemmTestF1Big extends Config(
-  new WithGemm(2, GemmParam(4, 256, 16, 8, 2048)) ++ new WithComposer() ++ new WithAWSMem(1)
+  new WithGemm(2, GemmParam(4, 128, 16, 8, 2048)) ++ new WithComposer() ++ new WithAWSMem(1)
 )

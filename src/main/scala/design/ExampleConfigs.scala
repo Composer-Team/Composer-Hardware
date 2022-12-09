@@ -2,7 +2,7 @@ package design
 
 import chipsalliance.rocketchip.config.{Config, Field, Parameters}
 import chisel3.{Data, Module}
-import composer.{ComposerChannelParams, ComposerConstructor, ComposerCoreParams, ComposerSystemParams, ComposerSystemsKey, WithAWSMem, WithComposer}
+import composer.{ComposerCachedReadChannelParams, ComposerChannelParams, ComposerConstructor, ComposerCoreParams, ComposerSystemParams, ComposerSystemsKey, ComposerUncachedChannelParams, WithAWSMem, WithComposer}
 
 case object LFSRConfigKey extends Field[LFSRConfig]
 case object VectorAdderKey extends Field[VectorConfig]
@@ -40,8 +40,8 @@ class WithALUs(withNCores: Int) extends Config((site, here, up) => {
 class WithVectorAdder(withNCores: Int, dataWidth: Int) extends Config((site, here, up) => {
   case ComposerSystemsKey => up(ComposerSystemsKey, site) ++ Seq(ComposerSystemParams(
     coreParams = ComposerCoreParams(
-      readChannelParams = Seq(ComposerChannelParams()),
-      writeChannelParams = Seq(ComposerChannelParams())
+      readChannelParams = Seq(ComposerCachedReadChannelParams(1, 1024*4, 0)),
+      writeChannelParams = Seq(ComposerUncachedChannelParams())
     ),
     nCores = withNCores,
     name = "VectorSystem",
@@ -59,6 +59,5 @@ class exampleConfig extends Config (
   //  - 1 SimpleALU that supports add, sub, multiply
   //  - 1 VectorAdder that uses Readers/Writers to read/write to large chunks of memory
   //  - 1 GaloisLFSR that returns random numbers over the command/response interface
-  new WithALUs(1) ++ new WithVectorAdder(1, 16) ++ new WithLFSR(1) ++
-    new WithComposer() ++ new WithAWSMem(1)
+  new WithVectorAdder(1, 16) ++ new WithComposer() ++ new WithAWSMem(1)
 )
