@@ -43,8 +43,8 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
   val txStates = RegInit(VecInit(Seq.fill(1 << txIDBits)(tx_inactive)))
   val txPriority = PriorityEncoderOH(txStates map (_ === tx_inactive))
 
-  val haveTransactionToDo = txStates.map(_ === tx_inProgress).fold(false.B)(_ || _)
-  val haveAvailableTxSlot = txStates.map(_ === tx_inactive).fold(true.B)(_ || _)
+  val haveTransactionToDo = txStates.map(_ === tx_inProgress).reduce(_ || _)
+  val haveAvailableTxSlot = txStates.map(_ === tx_inactive).reduce(_ || _)
 
   // handle TileLink 'd' interface (response from slave)
   tl.d.ready := haveTransactionToDo
@@ -77,21 +77,11 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
   val wdata = dataBuf.asUInt
   val wmask = FillInterleaved(nBytes, dataValid)
 
-  val finishedBuf = RegInit(false.B)
-  val wasFinished = RegInit(false.B)
-  val allocatedTransaction = Reg(UInt(txIDBits.W))
-
-  when(io.channel.finishEarly) {
-    finishedBuf := true.B
-  }
-
-  when (finishedBuf && !RegNext(finishedBuf)) {
-    wasFinished := true.B
-  }
+  val allocatedTransaction = RegInit(0.U(txIDBits.W))
+  val earlyFinish = RegInit(false.B)
 
   switch(state) {
     is(s_idle) {
-      wasFinished := false.B
       when(io.req.fire) {
         if (nBytes == beatBytes) {
           idx := 0.U
@@ -101,7 +91,6 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
         req_len := io.req.bits.len >> log2Up(nBytes)
         addr := io.req.bits.addr >> log2Up(beatBytes)
         dataValid := 0.U
-        finishedBuf := false.B
 
         if (nBytes > 1) {
           assert(io.req.bits.addr(log2Ceil(nBytes) - 1, 0) === 0.U,
@@ -112,8 +101,9 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
       }
     }
     is(s_data) {
-      when(io.channel.finishEarly || finishedBuf) {
-        state := s_mem
+      when(io.channel.finishEarly) {
+        earlyFinish := true.B
+        state := s_allocate
       }
       // when the core data channel fires, put the data in the write
       // buffer and update buffer maintance state
@@ -145,8 +135,9 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
         addr := nextAddr
         idx := 0.U
         dataValid := 0.U
-        when(req_len === 0.U || wasFinished) {
+        when(req_len === 0.U || earlyFinish) {
           state := s_idle
+          earlyFinish := false.B
         }.otherwise {
           state := s_data
         }
