@@ -59,8 +59,9 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
     TLClientNode(Seq(TLMasterPortParameters.v1(
       Seq(TLMasterParameters.v1(
         name = s"WriteChannel_sys${system_id}_core${core_id}_$wch",
-        sourceId = IdRange(0, 1),
+        sourceId = IdRange(0, 2),
         supportsPutFull = TransferSizes(1, blockBytes),
+        supportsPutPartial = TransferSizes(1, blockBytes),
         supportsProbe = TransferSizes(1, blockBytes)))))))
 
   lazy val module = composerSystemParams.buildCore(ComposerConstructor(composerSystemParams.coreParams, this), p)

@@ -46,13 +46,6 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
   val haveTransactionToDo = txStates.map(_ === tx_inProgress).reduce(_ || _)
   val haveAvailableTxSlot = txStates.map(_ === tx_inactive).reduce(_ || _)
 
-  // handle TileLink 'd' interface (response from slave)
-  tl.d.ready := haveTransactionToDo
-  when(tl.d.fire) {
-    txStates(tl.d.bits.source) := tx_inactive
-  }
-  tl.a.valid := false.B
-
   val isReallyIdle = state === s_idle && !haveTransactionToDo
   io.channel.channelIdle := !haveTransactionToDo
 
@@ -81,6 +74,12 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
   val earlyFinish = RegInit(false.B)
 
   tl.a.bits := DontCare
+  tl.a.valid := false.B
+  // handle TileLink 'd' interface (response from slave)
+  tl.d.ready := haveTransactionToDo
+  when(tl.d.fire) {
+    txStates(tl.d.bits.source) := tx_inactive
+  }
 
   switch(state) {
     is(s_idle) {
