@@ -30,8 +30,6 @@ case object ChannelSelectionBitsKey extends Field[Int]
 
 case object MaxChannelTransactionLenKey extends Field[Int]
 
-case object MaxMemTxsKey extends Field[Int]
-
 case object TLInterconnectWidthBytes extends Field[Int]
 
 // if we support a dedicated DMA port, provide the number of ID bits
@@ -122,7 +120,6 @@ class WithComposer extends Config((site, _, _) => {
   case ComposerSystemsKey => Seq()
   case SystemIDLengthKey => 4
   case CoreIDLengthKey => 8
-  case MaxMemTxsKey => 11
   case TLInterconnectWidthBytes => 16
   case ChannelSelectionBitsKey => 3
   case MaxChannelTransactionLenKey => 1 << 30

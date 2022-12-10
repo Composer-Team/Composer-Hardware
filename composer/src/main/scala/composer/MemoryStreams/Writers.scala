@@ -39,7 +39,8 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
   val state = RegInit(s_idle)
 
   val tx_inactive :: tx_inProgress :: Nil = Enum(2)
-  val txStates = RegInit(VecInit(Seq.fill(p(MaxMemTxsKey))(tx_inactive)))
+  val txIDBits = tlparams.sourceBits
+  val txStates = RegInit(VecInit(Seq.fill(1 << txIDBits)(tx_inactive)))
   val txPriority = PriorityEncoderOH(txStates map (_ === tx_inactive))
 
   val haveTransactionToDo = txStates.map(_ === tx_inProgress).fold(false.B)(_ || _)
@@ -78,7 +79,7 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
 
   val finishedBuf = RegInit(false.B)
   val wasFinished = RegInit(false.B)
-  val allocatedTransaction = Reg(UInt(log2Up(p(MaxMemTxsKey)).W))
+  val allocatedTransaction = Reg(UInt(txIDBits.W))
 
   when(io.channel.finishEarly) {
     finishedBuf := true.B
