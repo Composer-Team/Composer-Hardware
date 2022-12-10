@@ -14,7 +14,7 @@ class WriterDataChannelIO(val dWidth: Int)(implicit p: Parameters) extends Bundl
 
 class SequentialWriteChannelIO(addressBits: Int, maxBytes: Int)(implicit p: Parameters) extends Bundle {
   val req = Flipped(Decoupled(new ChannelTransactionBundle(addressBits)))
-  val channel = new WriterDataChannelIO(maxBytes*8)
+  val channel = new WriterDataChannelIO(maxBytes * 8)
   val busy = Output(Bool())
 }
 
@@ -35,7 +35,7 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
 
   val tl = IO(new TLBundle(tlparams))
 
-  val s_idle :: s_data :: s_allocate ::  s_mem :: Nil = Enum(4)
+  val s_idle :: s_data :: s_allocate :: s_mem :: Nil = Enum(4)
   val state = RegInit(s_idle)
 
   val tx_inactive :: tx_inProgress :: Nil = Enum(2)
@@ -63,7 +63,7 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
   val wordsPerBeat = beatBytes / nBytes
 
   val addr = Reg(UInt(addressBitsChop.W))
-  val req_tx_max_length_beats = p(MaxChannelTransactionLenKey)/nBytes
+  val req_tx_max_length_beats = p(MaxChannelTransactionLenKey) / nBytes
   val req_tx_mlb_bits = log2Up(req_tx_max_length_beats)
   val req_len = Reg(UInt(req_tx_mlb_bits.W))
 
@@ -79,6 +79,8 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
 
   val allocatedTransaction = RegInit(0.U(txIDBits.W))
   val earlyFinish = RegInit(false.B)
+
+  tl.a.bits := DontCare
 
   switch(state) {
     is(s_idle) {
@@ -117,21 +119,24 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
         }
       }
     }
-    is (s_allocate) {
-      when (haveAvailableTxSlot) {
-        txStates zip txPriority foreach { case (st, use) =>
-          when (use) {
-            st := tx_inProgress
-          }
-        }
+    is(s_allocate) {
+      when(haveAvailableTxSlot) {
         allocatedTransaction := OHToUInt(txPriority)
         state := s_mem
       }
     }
     is(s_mem) {
       tl.a.valid := true.B
+      tl.a.bits := edge.Put(
+        fromSource = allocatedTransaction,
+        toAddress = Cat(addr, 0.U(log2Up(beatBytes).W)),
+        lgSize = log2Ceil(beatBytes).U,
+        data = wdata,
+        mask = wmask)._2
+
       // handle TileLink 'a' interface (request to slave)
       when(tl.a.fire) {
+        txStates(allocatedTransaction) := tx_inProgress
         addr := nextAddr
         idx := 0.U
         dataValid := 0.U
@@ -144,13 +149,6 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
       }
     }
   }
-
-  tl.a.bits := edge.Put(
-    fromSource = allocatedTransaction,
-    toAddress = Cat(addr, 0.U(log2Up(beatBytes).W)),
-    lgSize = log2Ceil(beatBytes).U,
-    data = wdata,
-    mask = wmask)._2
 
   io.req.ready := isReallyIdle
   io.channel.data.ready := state === s_data
