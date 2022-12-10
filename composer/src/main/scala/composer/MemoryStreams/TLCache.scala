@@ -127,9 +127,9 @@ class TLCacheImpl(cacheSize: Int, outer: TLCache, idxMaskP: Option[Long] = None)
     io_req_in.d.bits := io_req_out.d.bits
     io_req_in.d.valid := true.B
     when (io_req_in.d.ready) {
-      val tx_idx = ongoing_txs(io_req_in.d.bits.source)
-      valids(tx_idx) := true.B
-      cache.write(tx_idx, io_req_out.d.bits.data)
+      valids(idx) := true.B
+      tags(idx) := tag
+      cache.write(idx, io_req_out.d.bits.data)
     }
   }
 
@@ -139,7 +139,7 @@ class TLCacheImpl(cacheSize: Int, outer: TLCache, idxMaskP: Option[Long] = None)
 
   when(cache_read_valid && !io_req_out.d.valid) {
     io_req_in.d.valid := true.B
-    io_req_in.d.bits := req_in_cache
+    io_req_in.d.bits <> req_in_cache
     io_req_in.d.bits.data := cache_read_dat
     when(io_req_in.d.fire) {
       cache_read_valid := false.B

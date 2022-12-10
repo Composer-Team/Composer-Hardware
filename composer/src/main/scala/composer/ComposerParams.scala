@@ -83,7 +83,7 @@ class WithAWSMem(nMemoryChannels: Int) extends Config((_, _, _) => {
     ), nMemoryChannels))
     require(1 <= nMemoryChannels && nMemoryChannels <= 4)
     q
-  case HasDMA => Some(6)
+  case HasDMA => None // Some(6)
   case HasAXILExternalMMIO => true
   case MMIOBaseAddress => None // MMIO is not real, it's just a PCIE bus transaction that pretends to be MMIO
 })
