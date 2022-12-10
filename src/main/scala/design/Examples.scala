@@ -130,7 +130,8 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
   require(isPow2(vConfig.dWidth), "The vector data width must be a power of two!")
   require(vConfig.dWidth % 8 == 0)
   val vDivs = 8
-  val myReader = declareSequentialReader(usingReadChannelID = 0, vConfig.dWidth / 8, vDivs)
+//  val myReader = declareSequentialReader(usingReadChannelID = 0, vConfig.dWidth / 8, vDivs)
+  val myReader = declareSequentialReader(usingReadChannelID = 0, vConfig.dWidth / 8, vDivs, Some(0))
   val myWriter = declareSequentialWriter(usingWriteChannelID = 0, vConfig.dWidth / 8 * vDivs)
   val state = RegInit(s_idle)
   val toAdd = Reg(UInt(vConfig.dWidth.W))
@@ -147,7 +148,7 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
   val rdreg = Reg(UInt(io.resp.bits.rd.getWidth.W))
   io.resp.bits.rd := rdreg
 
-  //  cache_invalidate_ios foreach { _ := false.B }
+    cache_invalidate_ios foreach { _ := false.B }
 
 
   val dArray = Seq.fill(vDivs)(Reg(UInt(vConfig.dWidth.W)))
