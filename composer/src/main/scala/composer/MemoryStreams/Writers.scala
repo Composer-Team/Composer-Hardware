@@ -39,8 +39,9 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
   val state = RegInit(s_idle)
 
   val tx_inactive :: tx_inProgress :: Nil = Enum(2)
-  val txIDBits = tlparams.sourceBits
-  val txStates = RegInit(VecInit(Seq.fill(1 << txIDBits)(tx_inactive)))
+  val nSources = edge.master.endSourceId
+  val txIDBits = log2Up(nSources)
+  val txStates = RegInit(VecInit(Seq.fill(nSources)(tx_inactive)))
   val txPriority = PriorityEncoderOH(txStates map (_ === tx_inactive))
 
   val haveTransactionToDo = txStates.map(_ === tx_inProgress).reduce(_ || _)
