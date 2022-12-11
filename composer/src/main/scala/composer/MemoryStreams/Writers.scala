@@ -40,6 +40,7 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
 
   val tx_inactive :: tx_inProgress :: Nil = Enum(2)
   val nSources = edge.master.endSourceId
+//  println(nSources)
   val txIDBits = log2Up(nSources)
   val txStates = RegInit(VecInit(Seq.fill(nSources)(tx_inactive)))
   val txPriority = PriorityEncoderOH(txStates map (_ === tx_inactive))
@@ -150,7 +151,7 @@ class SequentialWriter(nBytes: Int, tlparams: TLBundleParameters, edge: TLEdgeOu
     }
   }
 
-  io.req.ready := isReallyIdle
+  io.req.ready := state === s_idle
   io.channel.data.ready := state === s_data
   io.busy := state =/= s_idle
 }

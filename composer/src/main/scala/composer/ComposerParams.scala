@@ -41,6 +41,7 @@ abstract class ComposerChannelParams(val loc: String)
 
 case class ComposerCachedReadChannelParams(nChannels: Int, sizeBytes: Int, id: Int,
                                            idxMask: Option[Long] = None,
+                                           associativity: Int = 1,
                                            location: String = "Mem") extends ComposerChannelParams(location)
 case class ComposerUncachedChannelParams(location: String = "Mem") extends ComposerChannelParams(location)
 

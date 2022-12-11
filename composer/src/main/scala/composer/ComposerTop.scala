@@ -82,7 +82,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
         q.subtract(mmio)
       } else Seq(q)
     }
-    println(as)
+//    println(as)
 
     AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(

@@ -125,7 +125,7 @@ case class VectorConfig(dWidth: Int, // what is the datatype width?
                        )
 
 class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
-  val s_idle :: s_load :: s_add :: s_store :: s_finish :: Nil = Enum(5)
+  val s_idle :: s_load :: s_add :: s_store :: s_commit :: s_finish :: Nil = Enum(6)
   val vConfig = p(VectorAdderKey)
   require(isPow2(vConfig.dWidth), "The vector data width must be a power of two!")
   require(vConfig.dWidth % 8 == 0)
@@ -190,10 +190,14 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
     myWriter.data.valid := true.B
     when(myWriter.data.fire) {
       when(rfinish) {
-        state := s_finish
+        state := s_commit
       }.otherwise {
         state := s_load
       }
+    }
+  }.elsewhen(state === s_commit){
+    when (myWriter.channelIdle) {
+      state := s_finish
     }
   }.elsewhen(state === s_finish) {
     io.resp.valid := true.B

@@ -31,8 +31,11 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
       case b: ComposerCachedReadChannelParams => b
     }.map {
     param =>
-      println("Making cache")
-      val cache = TLCache(param.sizeBytes, param.idxMask).suggestName("TLCache_" + param.id)
+//      println("Making cache")
+      val cache = TLCache(param.sizeBytes,
+        nClients = param.nChannels,
+        associativity = param.associativity).suggestName("TLCache_" + param.id)
+      println(param.associativity)
       val req_xbar = TLXbar()
       val rnodes = Seq.tabulate(param.nChannels)(i => TLClientNode(Seq(TLMasterPortParameters.v1(
         clients = Seq(TLMasterParameters.v1(
@@ -42,7 +45,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
         ))))))
 
       rnodes foreach (req_xbar := _)
-      cache.mem_reqs := req_xbar
+      cache.mem_reqs := TLBuffer() := TLWidthWidget(blockBytes) := TLBuffer() := req_xbar
       (cache, rnodes, param)
   }
 
@@ -119,7 +122,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       }
     }
 
-    println(edge)
+//    println(edge)
     val addressBits = log2Up(edge.manager.maxAddress)
 
     val m = Module(new SequentialReader(dataBytes, tl.params, edge, vlen))
