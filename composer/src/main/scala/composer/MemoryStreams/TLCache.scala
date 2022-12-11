@@ -134,7 +134,7 @@ class TLCacheImpl(cacheSize: Int, associativity: Int, outer: TLCache, idxMaskP: 
   val cache_read_en = WireInit(VecInit(Seq.fill(associativity)(false.B)))
   val cache_read_dat = Reg(UInt(io_req_in.d.bits.data.getWidth.W))
   val cache_read_valid = RegInit(false.B)
-  val cache_read = VecInit(cache zip cache_read_en map { case (ch, en) => ch.read(idx, en) })
+  val cache_read = VecInit(cache zip cache_read_en map { case (ch, en) => RegNext(ch.read(idx, en)) })
 
   // we're ready for another D when master is ready for another Dtx
   io_req_out.d.ready := io_req_in.d.ready
@@ -146,7 +146,7 @@ class TLCacheImpl(cacheSize: Int, associativity: Int, outer: TLCache, idxMaskP: 
   io_req_out.a.valid := false.B
   io_req_in.d.valid := false.B
 
-  when(RegNext(cache_read_en.reduce(_ || _))) {
+  when(RegNext(RegNext(cache_read_en.reduce(_ || _)))) {
     cache_read_valid := true.B
     cache_read_dat := Mux1H(cache_hits, cache_read)
   }
