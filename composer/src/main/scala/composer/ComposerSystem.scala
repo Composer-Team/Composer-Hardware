@@ -1,266 +1,40 @@
 package composer
 
-import chipsalliance.rocketchip.config.{Field, Parameters}
+import chipsalliance.rocketchip.config._
 import chisel3.util._
 import chisel3._
-import composer.MemoryStreams.{ChannelTransactionBundle, SequentialWriter}
+import composer.MemoryStreams._
 import composer.RoccConstants.{FUNC_ADDR, FUNC_START}
 import composer.common.Util.BoolSeqHelper
 import composer.common._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
-case object ComposerSystemWrapperKey extends Field[ComposerCoreWrapper]
+
+import scala.annotation.tailrec
 
 class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)(implicit p: Parameters) extends LazyModule {
   val nCores = systemParams.nCores
-  val queueDepth = systemParams.channelQueueDepth
   val coreParams = systemParams.coreParams
 
-  val readLoc = coreParams.readChannelParams.map(_.loc)
-  val writeLoc = coreParams.writeChannelParams.map(_.loc)
-
-  val cores = Seq.tabulate(systemParams.nCores) { idx: Int =>
+  lazy val cores = List.tabulate(systemParams.nCores) { idx: Int =>
     LazyModule(new ComposerCoreWrapper(systemParams, idx, system_id))
   }
 
-//  val all_mems = readLoc ++ writeLoc
-  val reader_nodes = cores.flatMap(_.unCachedReaders) ++ cores.flatMap(_.CacheNodes.map(_._1.mem_out))
-  val writer_nodes = cores.flatMap(_.writers)
-
-//  val hasMem = (all_mems foldLeft[Boolean] false) ({ case (b: Boolean, s: String) => b || (s == "Mem") })
-  val hasMem = reader_nodes.nonEmpty || writer_nodes.nonEmpty
-  val mem = if (hasMem) {
-    Seq.fill(nCores) {
-      TLIdentityNode()
-    }
-  } else {
-    Seq()
-  }
-
-
-  if (reader_nodes.nonEmpty || writer_nodes.nonEmpty) {
-    mem zip cores foreach {
-      case (m_out, core) =>
-        val mem_xbar = TLXbar()
-        core.unCachedReaders ++ core.writers ++ core.CacheNodes.map (_._1.mem_out) foreach (mem_xbar := _)
-        m_out := mem_xbar
-    }
+  val memory_nodes = {
+    val core_mems = cores.flatMap(_.mem_nodes)
+    if (core_mems.length > p(CChannelXBarWidth)) {
+      core_mems.grouped(p(CChannelXBarWidth)) map { node_set =>
+        val memory_subset_xbar = new TLXbar()
+        val xbar_node = memory_subset_xbar.node
+        node_set foreach (xbar_node := _)
+        xbar_node
+      }
+    } else core_mems
   }
 
 
   val blockBytes = p(CacheBlockBytes)
-
-  val maxBufSize = 1024 * 4 * 4
-  // TODO UG: use parameters for this
-  val maxCores = 32
-  val maxWriteCount = 4
-  val maxReadCount = 5
-  val maxMemAddr = p(ExtMem).get.master.size
-  val bufStride = 1 // used for sharing a buffer amongst several cores
-  val bufSize = /*systemParams.bufSize  * nBytes*/ maxBufSize * bufStride
-//  val producerBuffers = coreParams.writeChannelParams.indices.map { i =>
-//    val wloc = writeLoc(i)
-//    if (wloc contains "Local") {
-//      None
-//      val bufSize = /*systemParams.bufSize  * nBytes*/ maxBufSize * bufStride
-//      Some((0 until nCores by bufStride).map { x =>
-//        //noinspection DuplicatedCode
-//        val bufAddr = (system_id * maxWriteCount * maxCores * maxBufSize) + (i * maxCores * maxBufSize)+ (x * maxBufSize) + maxMemAddr
-//        implicit val prop = new RAMProperties(AddressSet(bufAddr, bufSize - 1))
-//        if (systemParams.bufMasked) {
-//          LazyModule(new MaskTLRAM()).node
-//        } else {
-//          LazyModule(new SimpleTLRAM()).node
-//        }
-//      })
-//    } else {
-//      None
-//    }
-//  }
-
-//  val consumerBuffersModules = coreParams.readChannelParams.indices.map { i =>
-//    val rloc = readLoc(i)
-//    if (rloc contains "Local") {
-//      // This address thing sucks, can collide addresses between the two
-//      Some((0 until nCores by bufStride).map { x =>
-//        //noinspection DuplicatedCode
-//        val bufAddr = (system_id * maxReadCount * maxCores * maxBufSize) + (i * maxCores * maxBufSize) + (x * maxBufSize) + maxMemAddr
-//        implicit val prop = new RAMProperties(AddressSet(bufAddr, bufSize - 1))
-//        if (systemParams.bufMasked) {
-//          LazyModule(new MaskTLRAM())
-//          //LazyModule(new TLRAM(AddressSet(bufAddr, bufSize - 1), beatBytes = 32)).node
-//        } else if (systemParams.doubleBuf) {
-//          LazyModule(new DoubleTLRAM())
-//        } else {
-//          LazyModule(new SimpleTLRAM())
-//        }
-//      })
-//      None
-//    } else {
-//      None
-//    }
-//  }
-//  val consumerBuffers = consumerBuffersModules.map { bufs =>
-//    if (bufs.isDefined) {
-//      if (systemParams.bufMasked) {
-//        Some(bufs.get.map(_.asInstanceOf[MaskTLRAM].node))
-//      } else if (systemParams.doubleBuf) {
-//        Some(bufs.get.map(_.asInstanceOf[DoubleTLRAM].node))
-//      } else {
-//        Some(bufs.get.map(_.asInstanceOf[SimpleTLRAM].node))
-//      }
-//      None
-//    } else {
-//      None
-//    }
-//  }
-
-  // potentially split writer node
-  // (mem, localBuf, remoteBuf)
-//  val writeSplit = writeLoc.zipWithIndex.map { case (wloc, i) =>
-//    writers.map { wlist =>
-//      // wlist(i) is one writer
-//      if ((wloc contains "Local") && (wloc contains "Mem")) {
-//        val split = LazyModule(new TLXbar)
-//        split.node := wlist(i)
-//        (Some(split.node), Some(split.node), None)
-//      } else if ((wloc contains "Remote") && (wloc contains "Mem")) {
-//        val split = LazyModule(new TLXbar)
-//        split.node := wlist(i)
-//        (Some(split.node), None, Some(split.node))
-//      } else if (wloc contains "Mem") {
-//        (Some(wlist(i)), None, None)
-//      } else if (wloc contains "Local") {
-//        (None, Some(wlist(i)), None)
-//      } else if (wloc contains "Remote") {
-//        (None, None, Some(wlist(i)))
-//      } else {
-//        (None, None, None)
-//      }
-//    }
-//  }
-
-  // potentially split reader node
-  // (mem, localBuf, remoteBuf)
-//  val readSplit = readLoc.zipWithIndex.map { case (rloc, i) =>
-//    readers.map { rlist =>
-//      // rlist(i) is one reader
-//      if ((rloc contains "Remote") && (rloc contains "Mem")) {
-//        val split = LazyModule(new TLXbar)
-//        split.node := rlist(i)
-//        (Some(split.node), None, Some(split.node))
-//      } else if ((rloc contains "Local") && (rloc contains "Mem")) {
-//        val split = LazyModule(new TLXbar)
-//        split.node := rlist(i)
-//        (Some(split.node), Some(split.node), None)
-//      } else if (rloc contains "Mem") {
-//        (Some(rlist(i)), None, None)
-//      } else if (rloc contains "Remote") {
-//        (None, None, Some(rlist(i)))
-//      } else if (rloc contains "Local") {
-//        (None, Some(rlist(i)), None)
-//      } else {
-//        (None, None, None)
-//      }
-//    }
-//  }
-
-  // connect Mem channels up to mem
-//  mem.zipWithIndex.foreach { case (m, coreid) =>
-//    val arb = LazyModule(new TLXbar)
-//    Seq((readLoc, readSplit), (writeLoc, writeSplit)) foreach { case (locs, splits) =>
-//      locs zip splits foreach { case (loc, split) =>
-//        if (loc contains "Mem") { arb.node := split(coreid)._1.get }
-//      }
-//    }
-//    m := TLBuffer() := arb.node
-//  }
-
-  // connect producers+consumers to local buffer
-  // localMem is a Seq of identity nodes correspnoding to a single write channel
-  // this attaches to an xbar which splits into 8 per-core buf per channel
-  // then a second xbar connects a single producer and single consumer
-
-  // first when the buffer is at the producer
-
-//  val localWrite = writeLoc.zipWithIndex.map { case (wloc, i) =>
-//    if (wloc contains "Local") {
-//      val corenode = TLIdentityNode()
-//      val corearb = LazyModule(new TLXbar)
-//      (0 until nCores by bufStride).map { coreid =>
-//        val loc = TLIdentityNode()
-//        val arb = LazyModule(new TLXbar)
-//        (0 until bufStride).foreach { offset =>
-//          arb.node := TLBuffer() := writeSplit(i)(coreid + offset)._2.get
-//        }
-//        arb.node := TLBuffer() := loc
-//        producerBuffers(i).get(coreid / bufStride) := TLFragmenter(32, 128) := TLBuffer() := arb.node
-//        loc
-//      }.foreach { loc_node =>
-//        loc_node := corearb.node
-//      }
-//      corearb.node := corenode
-//      Some(corenode)
-//    } else {
-//      None
-//    }
-//  }
-
-  // then when the buffer is at the consumer
-//  val localRead = readLoc.zipWithIndex.map { case (rloc, i) =>
-//    if (rloc contains "Local") {
-//      val corenode = TLIdentityNode()
-//      val corearb = LazyModule(new TLXbar)
-//      (0 until nCores by bufStride).map { coreid =>
-//        val loc = TLIdentityNode()
-//        val arb = LazyModule(new TLXbar)
-//        (0 until bufStride).foreach { offset =>
-//          arb.node := TLBuffer() := readSplit(i)(coreid + offset)._2.get
-//        }
-//        arb.node := TLBuffer() := loc
-//        consumerBuffers(i).get(coreid / bufStride) := TLFragmenter(32, 128) := TLBuffer() := arb.node
-//        loc
-//      }.foreach { loc_node =>
-//        loc_node := corearb.node
-//      }
-//      corearb.node := corenode
-//      Some(corenode)
-//    } else {
-//      None
-//    }
-//  }
-
-  // create external ports for reading from remote types
-  // will be connected to the localWrite of another syste
-  // in Accelerator.scala
-//  val remoteRead = readLoc.zipWithIndex.map { case (rloc, i) =>
-//    if (rloc contains "Remote") {
-//      val corenode = TLIdentityNode()
-//      val corearb = LazyModule(new TLXbar)
-//      readSplit(i).foreach { rnode =>
-//        corearb.node := rnode._3.get
-//      }
-//      corenode := corearb.node
-//      Some(corenode)
-//    } else {
-//      None
-//    }
-//  }
-
-//  val remoteWrite = writeLoc.zipWithIndex.map { case (wloc, i) =>
-//    if (wloc contains "Remote") {
-//      val corenode = TLIdentityNode()
-//      val corearb = LazyModule(new TLXbar)
-//      writers.indices.foreach { coreid =>
-//        corearb.node := writeSplit(i)(coreid)._3.get
-//      }
-//      corenode := corearb.node
-//      Some(corenode)
-//    } else {
-//      None
-//    }
-//  }
 
   lazy val module = new ComposerSystemImp(this)
 }
@@ -284,21 +58,13 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
 
   lazy val coreSelect = cmd.bits.core_id
 
-  val addressBits = outer.mem map { m =>
-    val edge = m.edges.in(0)
-    log2Up(edge.manager.maxAddress)
+  val addressBits = outer.memory_nodes map { m =>
+    m.out(0)._1.params.addressBits
   } match {
     case Seq() => 0
     case l: Seq[Int] => l.max
     case _ => 0
   }
-  //    ++ outer.localWrite.filter(_.isDefined).map(_.get)
-  //    ++ outer.remoteWrite.filter(_.isDefined).map(_.get)
-  //    ++ outer.localRead.filter(_.isDefined).map(_.get)
-  //    ++ outer.remoteRead.filter(_.isDefined).map(_.get)
-
-  lazy val numReadChannels = outer.readLoc.length
-  lazy val numWriteChannels = outer.writeLoc.length
 
   lazy val resp = Wire(Decoupled(new ComposerRoccResponse())) //Queue(io.resp)
 
@@ -307,21 +73,8 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     core.io.req.ready || coreSelect =/= i.U
   }.reduce(_ && _)
 
-  // connect cores to mem
+  // connect cores to resp channel
   io.resp <> Queue(resp)
-
-//  if (outer.systemParams.doubleBuf) {
-//    outer.consumerBuffersModules.foreach { bufs =>
-//      if (bufs.isDefined) {
-//        bufs.get.zipWithIndex.foreach { case (buf, i) =>
-//          buf.asInstanceOf[DoubleTLRAM].module.io.swap.valid := false.B
-//          when(cores(i).io.req.fire) {
-//            buf.asInstanceOf[DoubleTLRAM].module.io.swap.valid := true.B
-//          }
-//        }
-//      }
-//    }
-//  }
 
   cmd.ready := funct =/= FUNC_START.U || coreReady
 
@@ -330,15 +83,13 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   val nChannelBits = p(ChannelSelectionBitsKey)
   val lenBits = log2Up(p(MaxChannelTransactionLenKey))
 
-  val channelSelect = cmd.bits.rs1(nChannelBits-1, 1)
+  val channelSelect = cmd.bits.rs1(nChannelBits - 1, 1)
   val channelRead = cmd.bits.rs1(0)
 
   cores.zipWithIndex.foreach { case (core, i) =>
-    // TO-DO: delay until all readers/writers are ready? use DecoupledHelper
-    val coreStart = cmd.fire && funct === FUNC_START.U && coreSelect === i.U //&& coreRWReady(i)
+    val coreStart = cmd.fire && funct === FUNC_START.U && coreSelect === i.U
     core.io.req.valid := coreStart
     core.io.req.bits := cmd.bits
-    //rest are up to individual system
   }
 
   // scope to separate out read channel stuff
@@ -356,20 +107,32 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     cores(0).write_ios(0)._2.valid := true.B
   }
   val txLenFromCmd = cmd.bits.rs1(nChannelBits + lenBits - 1, nChannelBits)
-  cores.zipWithIndex.foreach { case (core: ComposerCore, i) =>
-    def pairWithAddrStore(id: Int, interface: DecoupledIO[ChannelTransactionBundle], condition: Bool): Unit = {
-      val tx_len = Reg(UInt(log2Up(p(MaxChannelTransactionLenKey)).W))
-      val tx_addr_start = Reg(UInt(addressBits.W))
-      when(addr_func_live && coreSelect === i.U && channelSelect === id.U && condition) {
-        tx_len := txLenFromCmd
-        tx_addr_start := cmd.bits.rs2(addressBits - 1, 0)
-      }
-      interface.valid := cmdFireLatch && functLatch === FUNC_START.U && coreSelectLatch === i.U
-      interface.bits.addr := tx_addr_start
-      interface.bits.len := tx_len
+
+  val read_ios = cores.zipWithIndex.flatMap(q => q._1.read_ios.map((q._2, _)))
+  val write_ios = cores.zipWithIndex.flatMap(q => q._1.write_ios.map((q._2, _)))
+
+  @tailrec
+  private def assign_channel_addresses(coreId: Int, channelList: List[(String, DecoupledIO[ChannelTransactionBundle])], condition: Bool, assignment: Int = 0): Unit = {
+    channelList match {
+      case (_, txio) :: rst =>
+        val tx_len = Reg(UInt(log2Up(p(MaxChannelTransactionLenKey)).W))
+        val tx_addr_start = Reg(UInt(addressBits.W))
+        when(addr_func_live && coreSelect === coreId.U && channelSelect === assignment.U && condition) {
+          tx_len := txLenFromCmd
+          tx_addr_start := cmd.bits.rs2(addressBits - 1, 0)
+        }
+        txio.valid := cmdFireLatch && functLatch === FUNC_START.U && coreSelectLatch === coreId.U
+        txio.bits.addr := tx_addr_start
+        txio.bits.len := tx_len
+        assign_channel_addresses(coreId, rst, condition, assignment + 1)
+      case _ => ;
     }
-    core.read_ios.foreach(a => pairWithAddrStore(a._1, a._2, channelRead))
-    core.write_ios.foreach(a => pairWithAddrStore(a._1, a._2, !channelRead))
   }
+
+  cores.zipWithIndex.foreach { case (co, id) =>
+    assign_channel_addresses(id, co.read_ios, channelRead)
+    assign_channel_addresses(id, co.write_ios, !channelRead)
+  }
+
 }
 

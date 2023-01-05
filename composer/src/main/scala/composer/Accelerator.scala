@@ -29,56 +29,7 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
   }
 
   val systems = system_tups.map(_._1)
-
-  val memGroups = systems.map(_.mem).filter(_ nonEmpty)
-  val mem = Seq.fill(memGroups.size) {
-    TLIdentityNode()
-  }
-
-  mem zip memGroups foreach { case (acc_channel, unit_channels) =>
-    val usize = unit_channels.size
-    if (unit_channels nonEmpty) {
-      val arb = LazyModule(new TLXbar)
-      unit_channels.foreach { c => arb.node := c }
-      acc_channel := TLBuffer() := arb.node
-    }
-  }
-
-  // type2type wiring
-  val producerList = p(ProducerBuffers)
-//  for ((writelist, readlist) <- producerList) {
-//
-//    // nWriteChannels x nReadChannels crossbar
-//    val arb = LazyModule(new TLXbar)
-//    writelist.foreach { case (write, chIdx) =>
-//      val lmem = sysLookup(write).localWrite(chIdx)
-//      if (lmem isEmpty) println("WRITE not defined " + write + " , " + chIdx)
-//      lmem.get := TLBuffer() := arb.node
-//    }
-//    readlist.foreach { case (read, chIdx) =>
-//      val rmem = sysLookup(read).remoteRead(chIdx)
-//      if (rmem isEmpty) println("READ not defined " + read + " , " + chIdx)
-//      arb.node := TLBuffer() := rmem.get
-//    }
-//
-//  }
-//  val consumerList = p(ConsumerBuffers)
-//  for ((writelist, readlist) <- consumerList) {
-//
-//    // nWriteChannels x nReadChannels crossbar
-//    val arb = LazyModule(new TLXbar)
-//    writelist.foreach { case (write, chIdx) =>
-//      val rmem = sysLookup(write).remoteWrite(chIdx)
-//      if (rmem isEmpty) println("WRITE not defined " + write + " , " + chIdx)
-//      arb.node := TLBuffer() := rmem.get
-//    }
-//    readlist.foreach { case (read, chIdx) =>
-//      val lmem = sysLookup(read).localRead(chIdx)
-//      if (lmem isEmpty) println("READ not defined " + read + " , " + chIdx)
-//      lmem.get := TLBuffer() := arb.node
-//    }
-//
-//  }
+  val mems = systems.flatMap(_.memory_nodes)
 
   lazy val module = new ComposerAccModule(this)
 }
@@ -88,14 +39,9 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
     val cmd = Flipped(Decoupled(new RoCCCommand))
     val resp = Decoupled(new RoCCResponse)
     val busy = Output(Bool())
-    val partCounter = Output(UInt(32.W))
   })
 
   val cmd = Queue(io.cmd)
-  //cmd.ready := false.B
-
-  val maxCores = 256
-  val maxTypes = 16
 
   val cmdArb = Module(new RRArbiter(new RoCCCommand, 1))
   cmdArb.io.in <> Seq(cmd)
@@ -128,8 +74,8 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   val system_id = accCmd.bits.inst.system_id
   accCmd.ready := false.B //base case
 
-  // MONITOR CODE
-  val hostRespFile = RegInit(VecInit(Seq.fill(maxTypes)(VecInit(Seq.fill(maxCores)(false.B)))))
+  val maxCore = outer.systems.map(_.nCores).max
+  val hostRespFile = RegInit(VecInit(Seq.fill(outer.systems.length)(VecInit(Seq.fill(maxCore)(false.B)))))
   val monitorWaiting = RegInit(false.B)
 
   val systemQueues = outer.systems.map(_ => Module(new Queue(new ComposerRoccCommand, 2)))
@@ -184,6 +130,7 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
 }
 
 class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
+  val dummyTL = p.alterPartial({ case TileVisibilityNodeKey => mem.head})
 
   val nMemChannels = p(ExtMem).get.nMemoryChannels
 
@@ -191,13 +138,10 @@ class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
   val mem = Seq.fill(nMemChannels) {
     TLIdentityNode()
   }
-  val dummyTL = p.alterPartial({
-    case TileVisibilityNodeKey => mem.head
-  })
   lazy val acc = LazyModule(new ComposerAcc()(dummyTL))
 
   lazy val crossbar = LazyModule(new TLXbar)
-  acc.mem.foreach (crossbar.node := _)
+  acc.mems.foreach (crossbar.node := _)
   // what happens if we get rid of this?
   crossbar.node := hostmem
 

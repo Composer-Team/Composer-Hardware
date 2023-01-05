@@ -1,10 +1,10 @@
 package design
 
-import chipsalliance.rocketchip.config.{Field, Parameters}
+import chipsalliance.rocketchip.config.{Config, Field, Parameters}
 import chisel3._
 import chisel3.util._
-import composer.MemoryStreams.SequentialReader
-import composer.{ComposerConstructor, ComposerCore, ComposerCoreParams}
+import composer.MemoryStreams.{CChannelParams, CChannelType, SequentialReader}
+import composer.{ComposerConstructor, ComposerCore, ComposerCoreParams, ComposerSystemParams, ComposerSystemsKey, WithAWSMem, WithComposer}
 
 import scala.util.Random
 
@@ -131,8 +131,8 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
   require(vConfig.dWidth % 8 == 0)
   val vDivs = 8
 //  val myReader = declareSequentialReader(usingReadChannelID = 0, vConfig.dWidth / 8, vDivs)
-  val myReader = declareSequentialReader(usingReadChannelID = 0, vConfig.dWidth / 8, vDivs, Some(0))
-  val myWriter = declareSequentialWriter(usingWriteChannelID = 0, vConfig.dWidth / 8 * vDivs)
+  val myReader = getSequentialReaderModules("ReadChannel", vConfig.dWidth/8 , vDivs)(0) //= 0, vConfig.dWidth / 8, vDivs, Some(0))
+  val myWriter = getSequentialWriterModules("WriteChannel", vConfig.dWidth/8 * vDivs)(0)
   val state = RegInit(s_idle)
   val toAdd = Reg(UInt(vConfig.dWidth.W))
   val vLen = Reg(UInt(io.req.bits.rs1.getWidth.W))
@@ -206,3 +206,59 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
     }
   }
 }
+
+
+case object LFSRConfigKey extends Field[LFSRConfig]
+
+case object VectorAdderKey extends Field[VectorConfig]
+
+class WithLFSR(withNCores: Int) extends Config((site, here, up) => {
+  case ComposerSystemsKey => up(ComposerSystemsKey, site) ++ Seq(ComposerSystemParams(
+    coreParams = ComposerCoreParams(),
+    nCores = withNCores,
+    name = "LFSRSystem",
+    buildCore = {
+      case (coreParams: ComposerConstructor, parameters: Parameters) =>
+        new LFSRCore(coreParams)(parameters)
+    }))
+
+  case LFSRConfigKey => LFSRConfig(7, Seq(7, 6, 5, 4))
+})
+
+class WithALUs(withNCores: Int) extends Config((site, here, up) => {
+  case ComposerSystemsKey => up(ComposerSystemsKey, site) ++ Seq(ComposerSystemParams(
+    coreParams = ComposerCoreParams(),
+    nCores = withNCores,
+    name = "ALUSystem",
+    buildCore = {
+      case (coreParams: ComposerConstructor, parameters: Parameters) =>
+        new SimpleALU(coreParams)(parameters)
+    }))
+})
+
+class WithVectorAdder(withNCores: Int, dataWidth: Int) extends Config((site, here, up) => {
+  case ComposerSystemsKey => up(ComposerSystemsKey, site) ++ Seq(ComposerSystemParams(
+    coreParams = ComposerCoreParams(
+      memoryChannelParams = List(
+        CChannelParams("ReadChannel", 1, CChannelType.ReadChannel),
+        CChannelParams("WriteChannel", 1, CChannelType.WriteChannel))
+    ),
+    nCores = withNCores,
+    name = "VectorSystem",
+    buildCore = {
+      case (composerCoreParams: ComposerConstructor, parameters: Parameters) =>
+        new VectorAdder(composerCoreParams)(parameters)
+    }
+  ))
+
+  // use 8-bit data divisions
+  case VectorAdderKey => VectorConfig(dWidth = dataWidth)
+})
+
+class exampleConfig extends Config(
+  // example configuration that has
+  //  - 1 SimpleALU that supports add, sub, multiply
+  //  - 1 VectorAdder that uses Readers/Writers to read/write to large chunks of memory
+  //  - 1 GaloisLFSR that returns random numbers over the command/response interface
+  new WithVectorAdder(1, 16) ++ new WithComposer() ++ new WithAWSMem(1)
+)

@@ -26,7 +26,6 @@ class TLCache(cacheSize: Int, associativity: Int, nClients: Int,
   val mbase = p(ExtMem).get.master.base
   val mmask = p(ExtMem).get.master.size * p(ExtMem).get.nMemoryChannels - 1
   val blockBytes = p(CacheBlockBytes)
-  println(associativity)
 
   val mem_reqs = TLManagerNode(Seq(TLSlavePortParameters.v1(Seq(TLSlaveParameters.v2(
     Seq(AddressSet(mbase, mmask)),

@@ -2,12 +2,12 @@ package composer
 
 import chisel3._
 import chisel3.util._
-import composer.MemoryStreams.{ChannelTransactionBundle, SequentialReader, SequentialWriter, TLCache, WriterDataChannelIO}
+import composer.MemoryStreams._
 import freechips.rocketchip.util._
 import freechips.rocketchip.config._
 import composer.common._
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.subsystem.{CacheBlockBytes, ExtMem}
+import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 
 class ComposerCoreIO(implicit p: Parameters) extends ParameterizedBundle()(p) {
@@ -26,47 +26,61 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
   val coreParams = composerSystemParams.coreParams.copy(core_id = core_id, system_id = system_id)
   val blockBytes = p(CacheBlockBytes)
 
-  val CacheNodes = coreParams.readChannelParams.filter(_.isInstanceOf[ComposerCachedReadChannelParams]).
-    map {
-      case b: ComposerCachedReadChannelParams => b
-    }.map {
-    param =>
-//      println("Making cache")
+  val CacheNodes = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.CacheChannel) map (_.asInstanceOf[CCachedReadChannelParams]) map {
+    par =>
+      val param = par.cacheParams
       val cache = TLCache(param.sizeBytes,
-        nClients = param.nChannels,
+        nClients = par.nChannels,
         associativity = param.associativity).suggestName("TLCache_" + param.id)
-      println(param.associativity)
       val req_xbar = TLXbar()
-      val rnodes = Seq.tabulate(param.nChannels)(i => TLClientNode(Seq(TLMasterPortParameters.v1(
-        clients = Seq(TLMasterParameters.v1(
-          name = s"CachedReadChannel_sys${system_id}_core${core_id}_cache${param.id}_channel$i",
+      val rnodes = List.tabulate(par.nChannels)(i => TLClientNode(List(TLMasterPortParameters.v1(
+        clients = List(TLMasterParameters.v1(
+          name = s"CachedReadChannel_sys${system_id}_core${core_id}_${par.name}$i",
           supportsGet = TransferSizes(1, blockBytes),
           supportsProbe = TransferSizes(1, blockBytes)
         ))))))
 
       rnodes foreach (req_xbar := _)
       cache.mem_reqs := TLBuffer() := TLWidthWidget(blockBytes) := TLBuffer() := req_xbar
-      (cache, rnodes, param)
+      (par.name, (cache, rnodes))
   }
 
-  val unCachedReaders = coreParams.readChannelParams.filter(_.isInstanceOf[ComposerUncachedChannelParams]).indices.map { rch =>
-    TLClientNode(Seq(TLMasterPortParameters.v1(
-      clients = Seq(TLMasterParameters.v1(
-        name = s"ReadChannel_sys${system_id}_core${core_id}_$rch",
-        supportsGet = TransferSizes(1, blockBytes),
-        supportsProbe = TransferSizes(1, blockBytes)
-      )))))
+  val unCachedReaders = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.ReadChannel).map { para =>
+    (para.name, List.tabulate(para.nChannels) { i =>
+      TLClientNode(List(TLMasterPortParameters.v1(
+        clients = List(TLMasterParameters.v1(
+          name = s"ReadChannel_sys${system_id}_core${core_id}_${para.name}$i",
+          supportsGet = TransferSizes(1, blockBytes),
+          supportsProbe = TransferSizes(1, blockBytes)
+        )))))
+    })
   }
 
-  val writers = coreParams.writeChannelParams.indices.map(wch =>
-    TLClientNode(Seq(TLMasterPortParameters.v1(
-      Seq(TLMasterParameters.v1(
-        name = s"WriteChannel_sys${system_id}_core${core_id}_$wch",
-        sourceId = IdRange(0, 4),
-        supportsPutFull = TransferSizes(1, blockBytes),
-        supportsPutPartial = TransferSizes(1, blockBytes),
-        supportsProbe = TransferSizes(1, blockBytes)))))))
+  val writers = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.WriteChannel).map(para =>
+    (para.name, List.tabulate(para.nChannels) { i =>
+      TLClientNode(List(TLMasterPortParameters.v1(
+        List(TLMasterParameters.v1(
+          name = s"WriteChannel_sys${system_id}_core${core_id}_${para.name}$i",
+          sourceId = IdRange(0, 4),
+          supportsPutFull = TransferSizes(1, blockBytes),
+          supportsPutPartial = TransferSizes(1, blockBytes),
+          supportsProbe = TransferSizes(1, blockBytes))))))
+    }))
 
+  val scratch_mod = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.Scratchpad).map(_.asInstanceOf[CScratchpadChannelParams]).map {
+    param =>
+      lazy val mod = LazyModule(param.make)
+      (param.name, mod)
+  }
+
+  val readerNodes = unCachedReaders ++ CacheNodes.map(i => (i._1, i._2._2))
+
+  val mem_nodes = (
+    CacheNodes.map(i => (i._1, i._2._2)) ++
+      unCachedReaders ++
+      writers ++
+      scratch_mod.map(i => (i._1, List(i._2.mem)))
+    ).flatMap(_._2)
   lazy val module = composerSystemParams.buildCore(ComposerConstructor(composerSystemParams.coreParams, this), p)
 }
 
@@ -74,146 +88,121 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   LazyModuleImp(composerConstructor.composerCoreWrapper) {
 
   private val composerCoreParams = composerConstructor.composerCoreParams
+  private val outer = composerConstructor.composerCoreWrapper
   val io = IO(new ComposerCoreIO())
 
-  var read_ios: Seq[(Int, DecoupledIO[ChannelTransactionBundle])] = Seq()
-  var write_ios: Seq[(Int, DecoupledIO[ChannelTransactionBundle])] = Seq()
-
-  // (id, is_reader)
-  private val activeChannelIds: Seq[(Int, Bool)] = Seq()
+  var read_ios: List[(String, DecoupledIO[ChannelTransactionBundle])] = List()
+  var write_ios: List[(String, DecoupledIO[ChannelTransactionBundle])] = List()
 
   io.resp.bits.system_id := composerCoreParams.system_id.U
   io.resp.bits.core_id := composerCoreParams.core_id.U
 
-  private var unnamedId = 0
-  private var readChannelCheckIn = 0
-  private var writeChannelCheckIn = 0
-  private val cacheCheck = scala.collection.mutable.Map[Int, Int]()
+  val cache_invalidate_ios = composerConstructor.composerCoreWrapper.CacheNodes.map(_._2._1.module.io_invalidate)
 
-  val cache_invalidate_ios = composerConstructor.composerCoreWrapper.CacheNodes.map(_._1.module.io_invalidate)
+  private def getTLClients(name: String, listList: List[(String, List[TLClientNode])]): List[TLClientNode] = {
+    listList.filter(_._1 == name) match {
+      case first :: rst =>
+        require(rst.isEmpty)
+        first._2
+      case _ =>
+        throw new Exception(s"getReaderModules failed. Tried to fetch a channel set with a name($name) that doesn't exist. Declared names: " +
+          (outer.unCachedReaders.map(_._1) ++ outer.CacheNodes.map(_._1)))
+    }
+  }
 
-  private def exposeReaderModule(dataBytes: Int, vlen: Int,
-                                 seqId: Option[Int],
-                                 useCacheWithID: Option[Int],
-                                 name: Option[String]):
-  (DataChannelIO, DecoupledIO[ChannelTransactionBundle]) = {
-    val (tl, edge) = {
-      useCacheWithID match {
-        case None =>
-          val list = composerConstructor.composerCoreWrapper.unCachedReaders
-          require(readChannelCheckIn < list.length, "This channel has been declared with an ID that is greater than the number of channels" +
-            "declared in the config file. Please update your config file to reflect the number of channels you need.")
-          val q = list(readChannelCheckIn).out(0)
-          readChannelCheckIn = readChannelCheckIn + 1
-          q
-        case Some(cacheID) =>
-          val outer = composerConstructor.composerCoreWrapper
-          val channelID = cacheCheck.get(cacheID) match {
-            case None =>
-              cacheCheck.update(cacheID, 1)
-              0
-            case Some(cid) =>
-              cacheCheck.update(cacheID, cid + 1)
-              cid
-          }
-          require(channelID < outer.CacheNodes(cacheID)._3.nChannels, "This channel is oversubscribed. Increase the number of channels for this" +
-            " cache in the config if you wish to assign more channels.")
-          outer.CacheNodes(cacheID)._2(channelID).out(0)
-      }
+  /**
+    * Declare reader module implementations associated with a certain channel name.
+    * Data channel will read out a vector of UInts of dimension (vlen, dataBytes*8 bits)
+    *
+    * @param name      name of channel to instantiate readers for
+    * @param dataBytes width of the data channel to the user module
+    * @param vlen      dimension of the data channel
+    * @param idx       optionally instantiate an implementation for only a single channel in the name group. This may be useful
+    *                  when different channels need to be parameterized differently
+    * @return List of transaction information bundles (address and length in bytes) and then a data channel. For
+    *         sparse readers, we give back both interfaces and for non-sparse, addresses are provided through separate address
+    *         commands in software.
+    */
+  def getSparseReaderModules(name: String,
+                             dataBytes: Int,
+                             vlen: Int,
+                             prefetchRows: Int = 0,
+                             idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
+    (List(), List())
+    val mod = idx match {
+      case Some(id_unpack) =>
+        val clients = getTLClients(name, outer.readerNodes)
+        List(Module(new SequentialReader(dataBytes, vlen, prefetchRows, clients(id_unpack))))
+      case None => getTLClients(name, outer.readerNodes).map(tab_id => Module(new SequentialReader(dataBytes, vlen,
+        prefetchRows, tab_id)))
+    }
+    mod foreach {m =>
+      m.tl_out <> m.tl_outer
+      m.suggestName(name)
+    }
+    (mod.map(_.io.req), mod.map(_.io.channel))
+  }
+
+
+  /**
+    * See @getSparseReaderModules for description
+    */
+  def getSequentialReaderModules(name: String,
+                                 dataBytes: Int,
+                                 vlen: Int,
+                                 prefetchRows: Int = 0,
+                                 idx: Option[Int] = None): List[DataChannelIO] = {
+    val mods = getSparseReaderModules(name, dataBytes, vlen, prefetchRows, idx)
+    mods._1.zipWithIndex foreach { case (reqio, m_id) =>
+      val chosen_name = s"Reader_$name" + (idx match {
+        case Some(real_id) => real_id
+        case None => m_id
+      })
+      val newio = IO(Flipped(Decoupled(new ChannelTransactionBundle))).suggestName(chosen_name)
+      newio <> reqio
+      read_ios = (List((name, newio)) ++ read_ios).sortBy(_._1)
+    }
+    mods._2
+  }
+
+  def getSparseWriterModules(name: String,
+                             dataBytes: Int,
+                             idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[WriterDataChannelIO]) = {
+    val mod = idx match {
+      case Some(id) => List(Module(new SequentialWriter(dataBytes, getTLClients(name, outer.writers)(id))))
+      case None => getTLClients(name, outer.writers).map(tab_id => Module(new SequentialWriter(dataBytes, tab_id)))
+    }
+    mod foreach { m =>
+      m.tl_out <> m.tl_outer
+      m.suggestName(name)
     }
 
-//    println(edge)
-    val addressBits = log2Up(edge.manager.maxAddress)
+    (mod.map(_.io.req), mod.map(_.io.channel))
+  }
 
-    val m = Module(new SequentialReader(dataBytes, tl.params, edge, vlen))
-    m.suggestName(name match {
-      case Some(n) => n
-      case None =>
-        unnamedId = unnamedId + 1
-        "Reader_unnamed_" + unnamedId
-    })
-    //noinspection DuplicatedCode
-    seqId match {
-      case Some(id) =>
-        require(!activeChannelIds.contains((id, true)),
-          "Error: It appears that you're re-declaring a sequential reader/writer under the same channel ID. " +
-            "Use another channel ID.")
-        val newio = IO(Flipped(Decoupled(new ChannelTransactionBundle(addressBits)))).suggestName(
-          "Reader_seq_txbundle" + id
-        )
-        m.io.req <> newio
-        read_ios = (Seq((id, newio)) ++ read_ios).sortBy(_._1)
-      case None =>
-
+  def getSequentialWriterModules(name: String,
+                                 dataBytes: Int,
+                                 idx: Option[Int] = None): List[WriterDataChannelIO] = {
+    val mods = getSparseWriterModules(name, dataBytes, idx)
+    mods._1.zipWithIndex.foreach { case (reqio, m_id) =>
+      val chosen_name = s"Writer_$name" + (idx match {
+        case Some(real_id) => real_id
+        case None => m_id
+      })
+      val newio = IO(Flipped(Decoupled(new ChannelTransactionBundle))).suggestName(chosen_name)
+      newio <> reqio
+      write_ios = (List((name, newio)) ++ write_ios).sortBy(_._1)
     }
-
-    tl <> m.tl
-    (m.io.channel, m.io.req)
+    mods._2
   }
 
-  private def exposeWriterModule(dataBytes: Int,
-                                 seqId: Option[Int],
-                                 name: Option[String]): (WriterDataChannelIO, DecoupledIO[ChannelTransactionBundle]) = {
-    val (tl, edge) = {
-      val list = composerConstructor.composerCoreWrapper.writers
-      require(writeChannelCheckIn < list.length, "This channel has been declared with an ID that is greater than the number of channels" +
-        "declared in the config file. Please update your config file to reflect the number of channels you need.")
-      val q = list(writeChannelCheckIn).out(0)
-      writeChannelCheckIn = writeChannelCheckIn + 1
-      q
-    }
-    val addressBits = log2Up(edge.manager.maxAddress)
+  def getScratchpad(name: String): (DecoupledIO[CScratchpadInitReq], CScratchpadAccessBundle, Bool) = {
+    val outer = composerConstructor.composerCoreWrapper
+    val lm = outer.scratch_mod.filter(_._1 == name)(0)._2
+    lm.suggestName(name)
+    val mod = lm.module
 
-    val m = Module(new SequentialWriter(dataBytes, tl.params, edge))
-    m.suggestName(name match {
-      case Some(n) => n
-      case None =>
-        unnamedId = unnamedId + 1
-        "Writer_unnamed_" + unnamedId
-    })
-    //noinspection DuplicatedCode
-    seqId match {
-      case Some(id) =>
-        require(!activeChannelIds.contains((id, false)),
-          "Error: It appears that you're re-declaring a sequential reader/writer under the same channel ID. " +
-            "Use another channel ID.")
-        val newio = IO(Flipped(Decoupled(new ChannelTransactionBundle(addressBits)))).suggestName(
-          "Writer_seq_txbundle" + id
-        )
-        m.io.req <> newio
-        write_ios = (Seq((id, newio)) ++ write_ios).sortBy(_._1)
-      case None =>
-    }
-
-    tl <> m.tl
-    (m.io.channel, m.io.req)
-  }
-
-  def declareSequentialReader(usingReadChannelID: Int,
-                              dataBytes: Int,
-                              vLen: Int = 1,
-                              useCacheWithID: Option[Int] = None,
-                              name: Option[String] = None)(implicit p: Parameters): DataChannelIO = {
-    exposeReaderModule(dataBytes, vLen, Some(usingReadChannelID), useCacheWithID, name)._1
-  }
-
-  def declareSequentialWriter(usingWriteChannelID: Int,
-                              dataBytes: Int,
-                              name: Option[String] = None)(implicit p: Parameters): WriterDataChannelIO = {
-    exposeWriterModule(dataBytes, Some(usingWriteChannelID), name)._1
-  }
-
-  def declareSparseReader(dataBytes: Int, vLen: Int = 1,
-                          useCacheWithID: Option[Int] = None,
-                          name: Option[String] = None)(implicit p: Parameters):
-  (DataChannelIO, DecoupledIO[ChannelTransactionBundle]) = {
-    exposeReaderModule(dataBytes, vLen, None, useCacheWithID, name)
-  }
-
-  def declareSparseWriter(dataBytes: Int,
-                          name: Option[String] = None)(implicit p: Parameters):
-  (WriterDataChannelIO, DecoupledIO[ChannelTransactionBundle]) = {
-    exposeWriterModule(dataBytes, None, name)
+    (mod.scratchpad_req_io, mod.scratchpad_access_io, mod.scratchpad_req_idle_io)
   }
 
 }

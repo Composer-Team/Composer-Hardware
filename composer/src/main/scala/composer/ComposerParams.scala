@@ -1,5 +1,6 @@
 package composer
 
+import composer.MemoryStreams._
 import freechips.rocketchip.config._
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.devices.tilelink._
@@ -10,11 +11,7 @@ import freechips.rocketchip.tile._
 
 case object MMIOBaseAddress extends Field[Option[Long]]
 
-case object ProducerBuffers extends Field[Map[Seq[(Int, Int)], Seq[(Int, Int)]]]
-
-case object ConsumerBuffers extends Field[Map[Seq[(Int, Int)], Seq[(Int, Int)]]]
-
-case object ComposerSystemsKey extends Field[Seq[ComposerSystemParams]]
+case object ComposerSystemsKey extends Field[List[ComposerSystemParams]]
 
 /* TODO UG: How many bits we are using to identify a system. Ensure that no system has the same ID and the largest ID
  *           can be represented with this many bits
@@ -37,16 +34,9 @@ case object HasDMA extends Field[Option[Int]]
 
 case object HasAXILExternalMMIO extends Field[Boolean]
 
-abstract class ComposerChannelParams(val loc: String)
+case object CChannelXBarWidth extends Field[Int]
 
-case class ComposerCachedReadChannelParams(nChannels: Int, sizeBytes: Int, id: Int,
-                                           idxMask: Option[Long] = None,
-                                           associativity: Int = 1,
-                                           location: String = "Mem") extends ComposerChannelParams(location)
-case class ComposerUncachedChannelParams(location: String = "Mem") extends ComposerChannelParams(location)
-
-case class ComposerCoreParams(readChannelParams: Seq[ComposerChannelParams],
-                              writeChannelParams: Seq[ComposerChannelParams],
+case class ComposerCoreParams(memoryChannelParams: List[CChannelParams] = List(),
                               customRead: Boolean = false,
                               core_id: Int = 0, // for internal use
                               system_id: Int = 0, // for internal use
@@ -55,14 +45,14 @@ case class ComposerCoreParams(readChannelParams: Seq[ComposerChannelParams],
 
 case class ComposerConstructor(composerCoreParams: ComposerCoreParams, composerCoreWrapper: ComposerCoreWrapper)
 
-case class ComposerSystemParams(coreParams: ComposerCoreParams,
-                                nCores: Int,
+case class ComposerSystemParams(nCores: Int,
                                 name: String,
                                 buildCore: (ComposerConstructor, Parameters) => ComposerCore,
 
                                 /**
                                   * In elements, per write channel, scaled by the number of bytes
                                   */
+                                coreParams: ComposerCoreParams = ComposerCoreParams(),
                                 bufSize: Int = 1024,
                                 bufMasked: Boolean = false,
                                 doubleBuf: Boolean = false,
@@ -85,6 +75,8 @@ class WithAWSMem(nMemoryChannels: Int) extends Config((_, _, _) => {
   case HasDMA => Some(6)
   case HasAXILExternalMMIO => true
   case MMIOBaseAddress => None // MMIO is not real, it's just a PCIE bus transaction that pretends to be MMIO
+  // TODO this can be tuned
+  case CChannelXBarWidth => 16
 })
 
 class WithKriaMem extends Config((_, _, _) => {
@@ -97,6 +89,8 @@ class WithKriaMem extends Config((_, _, _) => {
   // MMIO is real - part of the address space is reserved for MMIO communications
   case MMIOBaseAddress => Some(0xB0000000L)
   case HasDMA => None
+  // TODO this can be tuned
+  case CChannelXBarWidth => 8
   case HasAXILExternalMMIO => false // use full AXI4
 })
 
@@ -116,8 +110,6 @@ class WithKriaMem extends Config((_, _, _) => {
 
 
 class WithComposer extends Config((site, _, _) => {
-  case ProducerBuffers => Map()
-  case ConsumerBuffers => Map()
   case ComposerSystemsKey => Seq()
   case SystemIDLengthKey => 4
   case CoreIDLengthKey => 8
