@@ -123,12 +123,12 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     *         sparse readers, we give back both interfaces and for non-sparse, addresses are provided through separate address
     *         commands in software.
     */
-  def getSparseReaderModules(name: String,
-                             dataBytes: Int,
-                             vlen: Int,
-                             prefetchRows: Int = 0,
-                             idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
-    (List(), List())
+  def getReaderModules(name: String,
+                       useSoftwareAddressing: Boolean,
+                       dataBytes: Int,
+                       vlen: Int,
+                       prefetchRows: Int = 0,
+                       idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
     val mod = idx match {
       case Some(id_unpack) =>
         val clients = getTLClients(name, outer.readerNodes)
@@ -136,36 +136,22 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       case None => getTLClients(name, outer.readerNodes).map(tab_id => Module(new SequentialReader(dataBytes, vlen,
         prefetchRows, tab_id)))
     }
-    mod foreach {m =>
+    mod foreach { m =>
       m.tl_out <> m.tl_outer
       m.suggestName(name)
+      if (useSoftwareAddressing) {
+        val newio = IO(Flipped(Decoupled(new ChannelTransactionBundle))).suggestName(name)
+        newio <> m.io.req
+        read_ios = (List((name, newio)) ++ read_ios).sortBy(_._1)
+      }
     }
-    (mod.map(_.io.req), mod.map(_.io.channel))
-  }
-
-
-  /**
-    * See @getSparseReaderModules for description
-    */
-  def getSequentialReaderModules(name: String,
-                                 dataBytes: Int,
-                                 vlen: Int,
-                                 prefetchRows: Int = 0,
-                                 idx: Option[Int] = None): List[DataChannelIO] = {
-    val mods = getSparseReaderModules(name, dataBytes, vlen, prefetchRows, idx)
-    mods._1.zipWithIndex foreach { case (reqio, m_id) =>
-      val chosen_name = s"Reader_$name" + (idx match {
-        case Some(real_id) => real_id
-        case None => m_id
-      })
-      val newio = IO(Flipped(Decoupled(new ChannelTransactionBundle))).suggestName(chosen_name)
-      newio <> reqio
-      read_ios = (List((name, newio)) ++ read_ios).sortBy(_._1)
-    }
-    mods._2
+    (if (useSoftwareAddressing) List()
+    else mod.map(_.io.req),
+      mod.map(_.io.channel))
   }
 
   def getSparseWriterModules(name: String,
+                             useSoftwareAddressing: Boolean,
                              dataBytes: Int,
                              idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[WriterDataChannelIO]) = {
     val mod = idx match {
@@ -175,25 +161,15 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     mod foreach { m =>
       m.tl_out <> m.tl_outer
       m.suggestName(name)
+      if (useSoftwareAddressing) {
+        val newio = IO(Flipped(Decoupled(new ChannelTransactionBundle))).suggestName(name)
+        newio <> m.io.req
+        write_ios = (List((name, newio)) ++ write_ios).sortBy(_._1)
+      }
     }
 
-    (mod.map(_.io.req), mod.map(_.io.channel))
-  }
-
-  def getSequentialWriterModules(name: String,
-                                 dataBytes: Int,
-                                 idx: Option[Int] = None): List[WriterDataChannelIO] = {
-    val mods = getSparseWriterModules(name, dataBytes, idx)
-    mods._1.zipWithIndex.foreach { case (reqio, m_id) =>
-      val chosen_name = s"Writer_$name" + (idx match {
-        case Some(real_id) => real_id
-        case None => m_id
-      })
-      val newio = IO(Flipped(Decoupled(new ChannelTransactionBundle))).suggestName(chosen_name)
-      newio <> reqio
-      write_ios = (List((name, newio)) ++ write_ios).sortBy(_._1)
-    }
-    mods._2
+    (if (useSoftwareAddressing) List()
+    else mod.map(_.io.req), mod.map(_.io.channel))
   }
 
   def getScratchpad(name: String): (DecoupledIO[CScratchpadInitReq], CScratchpadAccessBundle, Bool) = {

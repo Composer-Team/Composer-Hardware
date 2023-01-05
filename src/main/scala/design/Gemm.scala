@@ -54,7 +54,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   val (reqChannelB, accessChannelB, reqBIdle) = getScratchpad("ChannelB")
   val (reqChannelOut, dataChannelOut) = getSparseWriterModules("ChannelOut", dataWidthBytes * arithUnits)
   // these channels will read both the buffers and the A Matrix
-  val (reqChannelRow, dataChannelRow) = getSparseReaderModules("ChannelA", dataWidthBytes, vlen=1, prefetchRows = 2)
+  val (reqChannelRow, dataChannelRow) = getReaderModules("ChannelA", dataWidthBytes, vlen=1, prefetchRows = 2)
 
   val BAddr = Reg(UInt(addrWidth.W))
   val BSave = Reg(UInt(addrWidth.W))
@@ -189,22 +189,22 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
           is(0.U) {
             // BEGIN COMPUTATION
             currentBRow := 1.U
-            realRowLength := io.req.bits.rs2(realRowBits - 1, 0)
+            realRowLength := io.req.bits.payload2(realRowBits - 1, 0)
             ACounter := 0.U
             state := s_addr_comp
           }
           is(1.U) {
             // STORE A_BASE
-            AAddrs(0) := io.req.bits.rs2(addrWidth - 1, 0)
+            AAddrs(0) := io.req.bits.payload2(addrWidth - 1, 0)
           }
           is(2.U) {
             // STORE B_BASE
-            BAddr := io.req.bits.rs2(addrWidth - 1, 0)
-            BSave := io.req.bits.rs2(addrWidth - 1, 0)
+            BAddr := io.req.bits.payload2(addrWidth - 1, 0)
+            BSave := io.req.bits.payload2(addrWidth - 1, 0)
           }
           is(3.U) {
             // STORE OUTPUT_BASE
-            OutputAddr(0) := io.req.bits.rs2(addrWidth - 1, 0)
+            OutputAddr(0) := io.req.bits.payload2(addrWidth - 1, 0)
           }
         }
       }

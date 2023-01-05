@@ -76,8 +76,8 @@ class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters)
   val state = RegInit(s_idle)
 
   val op = RegInit(0.U(io.req.bits.inst.funct.getWidth.W))
-  val a = RegInit(0.U(io.req.bits.rs1.getWidth.W))
-  val b = RegInit(0.U(io.req.bits.rs2.getWidth.W))
+  val a = RegInit(0.U(io.req.bits.payload1.getWidth.W))
+  val b = RegInit(0.U(io.req.bits.payload2.getWidth.W))
   val result = RegInit(0.U(io.resp.bits.data.getWidth.W))
 
   io.req.ready := false.B
@@ -92,8 +92,8 @@ class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters)
     when(io.req.fire) {
       state := s_working
       op := io.req.bits.inst.rs1
-      a := io.req.bits.rs1
-      b := io.req.bits.rs2
+      a := io.req.bits.payload1
+      b := io.req.bits.payload2
     }
   }.elsewhen(state === s_working) {
     switch(op) {
@@ -135,7 +135,7 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
   val myWriter = getSequentialWriterModules("WriteChannel", vConfig.dWidth/8 * vDivs)(0)
   val state = RegInit(s_idle)
   val toAdd = Reg(UInt(vConfig.dWidth.W))
-  val vLen = Reg(UInt(io.req.bits.rs1.getWidth.W))
+  val vLen = Reg(UInt(io.req.bits.payload1.getWidth.W))
   val rfinish = RegInit(false.B)
 
 
@@ -162,11 +162,11 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
 
   when(state === s_idle) {
     // don't start if it's a 0-lengthed segment
-    when(io.req.fire && io.req.bits.rs1 =/= 0.U) {
+    when(io.req.fire && io.req.bits.payload1 =/= 0.U) {
       // start address has already been loaded into reader, just need to start reading
       state := s_load
-      toAdd := io.req.bits.rs2(vConfig.dWidth - 1, 0)
-      vLen := io.req.bits.rs1
+      toAdd := io.req.bits.payload2(vConfig.dWidth - 1, 0)
+      vLen := io.req.bits.payload1
       rfinish := false.B
       rdreg := io.req.bits.inst.rd
     }

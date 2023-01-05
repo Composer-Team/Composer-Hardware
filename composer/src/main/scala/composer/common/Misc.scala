@@ -3,6 +3,7 @@ package composer.common
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import composer.{CoreIDLengthKey, SystemIDLengthKey}
 import freechips.rocketchip.tile.{RoCCResponse, XLen}
 
 /**
@@ -60,8 +61,7 @@ class RequestRouter[T <: Data](typ: T, n: Int, getId: T => UInt) extends Module 
 }
 
 //noinspection ScalaUnusedSymbol
-class ComposerRoccCommand() extends Bundle {
-  // TODO UG: fix rs1(outer field), core_id, and system_id according to params (also add implicit parameters)
+class ComposerRoccCommand()(implicit p: Parameters) extends Bundle {
   val inst = new Bundle {
     val rd = UInt(5.W)
     val rs1 = UInt(5.W)
@@ -72,55 +72,23 @@ class ComposerRoccCommand() extends Bundle {
     val xs2 = Bool()
     val opcode = UInt(7.W)
 
-    val system_id = UInt(4.W)
+    val system_id = UInt(p(SystemIDLengthKey).W)
     val funct = UInt(3.W)
   }
-  val core_id = UInt(8.W)
-  // TODO UG: This should change dynamically according to width of sys/core id width
-  val rs1 = UInt(56.W)
-  val rs2 = UInt(64.W)
+  val core_id = UInt(p(CoreIDLengthKey).W)
+  val payload1 = UInt((64-p(CoreIDLengthKey)-p(SystemIDLengthKey)).W)
+  val payload2 = UInt(64.W)
 }
 
 class ComposerRoccResponse()(implicit p: Parameters) extends Bundle {
   val rd = UInt(5.W)
-  // TODO UG: these should reflect parameters SystemIDBitsKey, etc...
-  val system_id = UInt(4.W)
-  val core_id = UInt(8.W)
+  val system_id = UInt(p(CoreIDLengthKey).W)
+  val core_id = UInt(p(SystemIDLengthKey).W)
   val data = UInt((p(XLen)-system_id.getWidth-core_id.getWidth).W)
   def packData()(implicit p: Parameters): UInt = {
     val q = Wire(UInt(64.W))
     q := Cat(system_id, core_id, data)
     q
   }
+  def getDataWidth: Int = data.getWidth
 }
-
-
-object Util {
-  def scaledLength(length: UInt, align: Int): UInt = {
-    val l2 = log2Ceil(align)
-    val needtoaddone = length(l2 - 1, 0).orR
-    val lengthdiv = Mux(needtoaddone, 1.U + (length >> l2).asTypeOf(UInt()), length >> l2)
-    //val ret = Cat(lengthdiv, 0.U(l2.W))
-    Cat(lengthdiv)
-  }
-
-  /**
-   * Enum for the local things with the Modular System (doesn't start at zero)
-   */
-  def FunctEnum(n: Int): Seq[UInt] = {
-    (2 until ((n - 2) + 2)).map(_.U((1 max log2Ceil(n)).W)).toList
-  }
-
-  implicit class BoolSeqHelper(s: Seq[Bool]) {
-    def any: Bool = s.reduce(_ || _)
-
-    def none: Bool = !s.any
-
-
-    def all: Bool = s.reduce(_ && _)
-
-    def notAll: Bool = !s.all
-  }
-
-}
-

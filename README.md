@@ -3,7 +3,7 @@
 
 This is a sub-repo used by the top-level [Composer](https://github.com/ChrisKjellqvist/Composer) repo.
 Please clone that repo instead as it comes with necessary tool installs, and setup instructions.
-
+Extensive documentation is housed in the `doc` folder.
 # Developing a Core
 Developing a core for the composer is super easy.
 It is broken into two parts: the core itself(what does your functional unit do) and the system configuration
@@ -18,7 +18,7 @@ Your design should be a `ComposerCore`.
 The declaration of a top-level core module should look like the following code-block and will not change much at all from design to design. 
 ```scala
 class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters) 
-  extends ComposerCore(composerCoreParams) {
+  extends ComposerCore(composerCoreParams)
 ```
 
 The core design needs to drive the IO interface of the core, defined by `ComposerCoreIO` (see [source](composer/src/main/scala/composer/ComposerCore.scala)).
@@ -150,7 +150,7 @@ simpler than the previous Composer interface, so any contributions you have to i
 appreciated.
 ### Software Declarations
 
-See the [Composer software repository](github.com/ChrisKjellqvist/Composer-Software) for more information.
+See the [Composer software repository](https://github.com/ChrisKjellqvist/Composer-Software) for more information.
 
 # Building
 

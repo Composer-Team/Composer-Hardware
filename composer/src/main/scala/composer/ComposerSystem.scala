@@ -83,8 +83,8 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   val nChannelBits = p(ChannelSelectionBitsKey)
   val lenBits = log2Up(p(MaxChannelTransactionLenKey))
 
-  val channelSelect = cmd.bits.rs1(nChannelBits - 1, 1)
-  val channelRead = cmd.bits.rs1(0)
+  val channelSelect = cmd.bits.payload1(nChannelBits - 1, 1)
+  val channelRead = cmd.bits.payload1(0)
 
   cores.zipWithIndex.foreach { case (core, i) =>
     val coreStart = cmd.fire && funct === FUNC_START.U && coreSelect === i.U
@@ -106,7 +106,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     cores(0).read_ios(0)._2.valid := false.B
     cores(0).write_ios(0)._2.valid := true.B
   }
-  val txLenFromCmd = cmd.bits.rs1(nChannelBits + lenBits - 1, nChannelBits)
+  val txLenFromCmd = cmd.bits.payload1(nChannelBits + lenBits - 1, nChannelBits)
 
   val read_ios = cores.zipWithIndex.flatMap(q => q._1.read_ios.map((q._2, _)))
   val write_ios = cores.zipWithIndex.flatMap(q => q._1.write_ios.map((q._2, _)))
@@ -119,7 +119,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
         val tx_addr_start = Reg(UInt(addressBits.W))
         when(addr_func_live && coreSelect === coreId.U && channelSelect === assignment.U && condition) {
           tx_len := txLenFromCmd
-          tx_addr_start := cmd.bits.rs2(addressBits - 1, 0)
+          tx_addr_start := cmd.bits.payload2(addressBits - 1, 0)
         }
         txio.valid := cmdFireLatch && functLatch === FUNC_START.U && coreSelectLatch === coreId.U
         txio.bits.addr := tx_addr_start

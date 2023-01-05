@@ -2,19 +2,13 @@ package composer
 
 import chisel3._
 import chisel3.util._
-import composer.CppGenerationUtils.genCPPHeader
 import composer.RoccConstants.FUNC_START
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.config.Parameters
 import composer.common._
-import composer.common.Util._
-import freechips.rocketchip.amba.axi4.{AXI4Buffer, AXI4IdentityNode, AXI4ToTL}
 import freechips.rocketchip.subsystem.ExtMem
-
-import java.io.FileWriter
-import scala.annotation.tailrec
 import scala.language.postfixOps
 
 class ComposerAcc(implicit p: Parameters) extends LazyModule {
@@ -24,9 +18,9 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
     (LazyModule(new ComposerSystem(c, id)), id, c)
   }
 
-  def sysLookup(opcode: Int): ComposerSystem = {
-    system_tups(system_tups.indexWhere(_._2 == opcode))._1
-  }
+//  def sysLookup(opcode: Int): ComposerSystem = {
+//    system_tups(system_tups.indexWhere(_._2 == opcode))._1
+//  }
 
   val systems = system_tups.map(_._1)
   val mems = systems.flatMap(_.memory_nodes)
@@ -65,12 +59,15 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   accCmd.bits.inst.opcode := cmdRouter.io.out(1).bits.inst.opcode
   // TODO UG: The top bits in funct refer to the system_id. Ensure that we extract the bits according to our param
   val nSystemIDBits = p(SystemIDLengthKey)
-  accCmd.bits.inst.funct := cmdRouter.io.out(1).bits.inst.funct(2, 0)
-  accCmd.bits.inst.system_id := cmdRouter.io.out(1).bits.inst.funct(6, 3)
+  require(nSystemIDBits <= 7)
+  accCmd.bits.inst.funct := cmdRouter.io.out(1).bits.inst.funct(6-nSystemIDBits, 0)
+  accCmd.bits.inst.system_id := cmdRouter.io.out(1).bits.inst.funct(6, 6-nSystemIDBits+1)
   // TODO UG: same thing with Core ID. Get parameter and extract bits right for core_id and rs1
-  accCmd.bits.core_id := cmdRouter.io.out(1).bits.rs1(63, 56)
-  accCmd.bits.rs1 := cmdRouter.io.out(1).bits.rs1(55, 0)
-  accCmd.bits.rs2 := cmdRouter.io.out(1).bits.rs2
+  val nCoreIDBits = p(CoreIDLengthKey)
+  require(nCoreIDBits < 64)
+  accCmd.bits.core_id := cmdRouter.io.out(1).bits.rs1(63, 64-nCoreIDBits)
+  accCmd.bits.payload1 := cmdRouter.io.out(1).bits.rs1(63-nCoreIDBits, 0)
+  accCmd.bits.payload2 := cmdRouter.io.out(1).bits.rs2
   val system_id = accCmd.bits.inst.system_id
   accCmd.ready := false.B //base case
 
@@ -95,7 +92,7 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
     }
   }
 
-  val anyBusy = outer.system_tups.map(_._1.module.io.busy).any
+  val anyBusy = outer.system_tups.map(_._1.module.io.busy).reduce(_ || _)
   when(monitorWaiting === true.B && !anyBusy) {
     monitorWaiting := false.B
   }
@@ -125,7 +122,7 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   io.resp.valid := respArb.io.out.valid && hostRespFile(respArb.io.out.bits.system_id)(respArb.io.out.bits.core_id)
   // MONITOR CODE END
 
-  io.busy := cmdArb.io.out.valid || accCmd.valid || outer.systems.map(_.module.io.busy).any || systemQueues.map(_.io.count =/= 0.U).any
+  io.busy := cmdArb.io.out.valid || accCmd.valid || outer.systems.map(_.module.io.busy).reduce(_ || _) || systemQueues.map(_.io.count =/= 0.U).reduce(_ || _)
 
 }
 
