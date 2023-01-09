@@ -42,6 +42,7 @@ case class ComposerCoreParams(memoryChannelParams: List[CChannelParams] = List()
                               system_id: Int = 0, // for internal use
                               nMemXacts: Int = 1 // not for production release
                              )
+case object MaximumTransactionLength extends Field[Int]
 
 case class ComposerConstructor(composerCoreParams: ComposerCoreParams, composerCoreWrapper: ComposerCoreWrapper)
 
@@ -109,7 +110,7 @@ class WithKriaMem extends Config((_, _, _) => {
  */
 
 
-class WithComposer extends Config((site, _, _) => {
+class WithComposer(maximumTxLengthBytes: Int = 64) extends Config((site, _, _) => {
   case ComposerSystemsKey => Seq()
   case SystemIDLengthKey => 4
   case CoreIDLengthKey => 8
@@ -122,6 +123,7 @@ class WithComposer extends Config((site, _, _) => {
   // in elaboration
   case PgLevels => 5
   case XLen => 64 // Applies to all cores
+  case MaximumTransactionLength => maximumTxLengthBytes
   case MaxHartIdBits => 1 // log2Up(site(TilesLocated(InSubsystem)).map(_.tileParams.hartId).max+1)
   // Interconnect parameters
   case SystemBusKey => SystemBusParams(

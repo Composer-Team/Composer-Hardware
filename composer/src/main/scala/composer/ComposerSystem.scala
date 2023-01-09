@@ -5,7 +5,6 @@ import chisel3.util._
 import chisel3._
 import composer.MemoryStreams._
 import composer.RoccConstants.{FUNC_ADDR, FUNC_START}
-import composer.common.Util.BoolSeqHelper
 import composer.common._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
@@ -17,7 +16,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
   val nCores = systemParams.nCores
   val coreParams = systemParams.coreParams
 
-  lazy val cores = List.tabulate(systemParams.nCores) { idx: Int =>
+  val cores = List.tabulate(nCores) { idx: Int =>
     LazyModule(new ComposerCoreWrapper(systemParams, idx, system_id))
   }
 
@@ -25,14 +24,13 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
     val core_mems = cores.flatMap(_.mem_nodes)
     if (core_mems.length > p(CChannelXBarWidth)) {
       core_mems.grouped(p(CChannelXBarWidth)) map { node_set =>
-        val memory_subset_xbar = new TLXbar()
+        val memory_subset_xbar = LazyModule(new TLXbar())
         val xbar_node = memory_subset_xbar.node
         node_set foreach (xbar_node := _)
         xbar_node
       }
     } else core_mems
   }
-
 
   val blockBytes = p(CacheBlockBytes)
 
@@ -45,9 +43,10 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   val cores = outer.cores.map(_.module)
 
   arbiter.io.in <> cores.map(_.io.resp)
+
   resp.valid := arbiter.io.out.valid
   resp.bits.rd := arbiter.io.out.bits.rd
-  resp.bits.core_id := arbiter.io.out.bits.core_id
+  resp.bits.core_id := arbiter.io.chosen // .io.out.bits.core_id
   resp.bits.data := arbiter.io.out.bits.data
   resp.bits.system_id := outer.system_id.U
   arbiter.io.out.ready := resp.ready
@@ -78,7 +77,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
 
   cmd.ready := funct =/= FUNC_START.U || coreReady
 
-  io.busy := cores.map(_.io.busy).any
+  io.busy := cores.map(_.io.busy).reduce(_ || _)
 
   val nChannelBits = p(ChannelSelectionBitsKey)
   val lenBits = log2Up(p(MaxChannelTransactionLenKey))

@@ -18,10 +18,6 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
     (LazyModule(new ComposerSystem(c, id)), id, c)
   }
 
-//  def sysLookup(opcode: Int): ComposerSystem = {
-//    system_tups(system_tups.indexWhere(_._2 == opcode))._1
-//  }
-
   val systems = system_tups.map(_._1)
   val mems = systems.flatMap(_.memory_nodes)
 
@@ -127,22 +123,19 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
 }
 
 class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
-  val dummyTL = p.alterPartial({ case TileVisibilityNodeKey => mem.head})
-
   val nMemChannels = p(ExtMem).get.nMemoryChannels
 
   val hostmem = TLIdentityNode()
-  val mem = Seq.fill(nMemChannels) {
-    TLIdentityNode()
-  }
-  lazy val acc = LazyModule(new ComposerAcc()(dummyTL))
+  val mem = Seq.fill(nMemChannels) { TLIdentityNode() }
 
-  lazy val crossbar = LazyModule(new TLXbar)
-  acc.mems.foreach (crossbar.node := _)
-  // what happens if we get rid of this?
-  crossbar.node := hostmem
+  val dummyTL = p.alterPartial({ case TileVisibilityNodeKey => mem.head})
+  val acc = LazyModule(new ComposerAcc()(dummyTL))
 
-  mem.foreach ( _ := crossbar.node)
+  val crossbar = TLXbar()
+
+  acc.mems foreach (crossbar := _)
+  mem.foreach ( _ := crossbar)
+  crossbar := hostmem
 
   lazy val module = new ComposerAccSystemModule(this)
 }

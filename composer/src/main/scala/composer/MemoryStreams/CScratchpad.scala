@@ -3,84 +3,10 @@ package composer.MemoryStreams
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import composer.MaximumTransactionLength
+import composer.MemoryStreams.Loaders.CScratchpadPackedSubwordLoader
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.subsystem._
-
-abstract class CScratchpadLoader(datOutWidth: Int, idxWidth: Int)(implicit p: Parameters) extends Module {
-  val blockSize = p(CacheBlockBytes)
-  val io = IO(new Bundle() {
-    val cache_block_in = Flipped(Decoupled(new Bundle() {
-      val dat = UInt((blockSize * 8).W)
-      val len = UInt(idxWidth.W)
-      val idxBase = UInt(idxWidth.W)
-    }))
-    val sp_write_out = Decoupled(new Bundle() {
-      val dat = UInt(datOutWidth.W)
-      val idx = UInt(idxWidth.W)
-    })
-  })
-
-  val lengthIncPerCB: Int
-}
-
-class CScratchpadPackedSubwordLoader(datOutWidth: Int, idxWidth: Int, wordSizeBits: Int, datsPerSubword: Int)(implicit p: Parameters)
-  extends CScratchpadLoader(datOutWidth, idxWidth) {
-  require(blockSize * 8 % wordSizeBits == 0)
-  val subwordsPerBlock = blockSize * 8 / wordSizeBits
-
-  val subwordCounter = Counter(subwordsPerBlock)
-  val datCounter = Counter(datsPerSubword)
-
-  val cacheblock = Reg(UInt((blockSize * 8).W))
-  val idxBase = Reg(UInt(idxWidth.W))
-  val lenRemainingFromReq = Reg(UInt(idxWidth.W))
-
-  val s_idle :: s_loading :: Nil = Enum(2)
-  val state = RegInit(s_idle)
-  io.cache_block_in.ready := state === s_idle
-  io.sp_write_out.bits := DontCare
-  io.sp_write_out.valid := false.B
-
-  override val lengthIncPerCB: Int = datsPerSubword * subwordsPerBlock
-
-  val datSelection = VecInit((0 until datsPerSubword) map { sw_idx =>
-    val start = sw_idx * datOutWidth
-    val end = (sw_idx + 1) * datOutWidth - 1
-    cacheblock(end, start)
-  })
-
-  switch(state) {
-    is(s_idle) {
-      when(io.cache_block_in.fire) {
-        state := s_loading
-        cacheblock := io.cache_block_in.bits.dat
-        idxBase := io.cache_block_in.bits.idxBase
-        lenRemainingFromReq := io.cache_block_in.bits.len
-        datCounter.reset()
-        subwordCounter.reset()
-      }
-    }
-
-    is(s_loading) {
-      io.sp_write_out.valid := true.B
-      io.sp_write_out.bits.dat := datSelection(datCounter.value)
-      io.sp_write_out.bits.idx := idxBase
-      when(io.sp_write_out.fire) {
-        lenRemainingFromReq := lenRemainingFromReq - 1.U
-        datCounter.inc()
-        idxBase := idxBase + 1.U
-        when(lenRemainingFromReq === 0.U) {
-          state := s_idle
-        }
-        when(datCounter.value === (datsPerSubword - 1).U) {
-          subwordCounter.inc()
-          cacheblock := cacheblock >> wordSizeBits
-        }
-      }
-    }
-  }
-}
 
 class CScratchpadAccessBundle(supportMemRead: Boolean, supportWriteback: Boolean,
                               scReqBits: Int, dataWidthBits: Int) extends Bundle {
@@ -93,10 +19,10 @@ class CScratchpadAccessBundle(supportMemRead: Boolean, supportWriteback: Boolean
   }))) else None
 }
 
-class CScratchpadInitReq(mem_out: TLBundle, nDatas: Int) extends Bundle {
+class CScratchpadInitReq(mem_out: TLBundle, nDatas: Int, upperboundBytesPerData: Int) extends Bundle {
   val memAddr = UInt(mem_out.params.addressBits.W)
   val scAddr = UInt(log2Up(nDatas).W)
-  val len = UInt(log2Up(nDatas).W)
+  val len = UInt(log2Up(nDatas * upperboundBytesPerData).W)
 }
 
 
@@ -122,111 +48,104 @@ class CScratchpad(supportMemRead: Boolean,
   require(supportMemRead || supportWriteback)
   require(dataWidthBits > 0)
   require(nDatas > 0)
-  val blockBytes = p(CacheBlockBytes)
+  val maxTxSize = p(MaximumTransactionLength)
   val mem = TLClientNode(Seq(TLMasterPortParameters.v2(
     masters = Seq(TLMasterParameters.v1(
       name = "ScratchpadToMemory",
-      sourceId = IdRange(0, maxInFlightTxs),
-      supportsProbe = TransferSizes(1, blockBytes),
-      supportsGet = TransferSizes(1, blockBytes),
-      supportsPutFull = TransferSizes(1, blockBytes)
+      sourceId = IdRange(0, 1),
+      supportsProbe = TransferSizes(1, maxTxSize),
+      supportsGet = TransferSizes(1, maxTxSize),
+      supportsPutFull = TransferSizes(1, maxTxSize)
     )),
-    channelBytes = TLChannelBeatBytes(blockBytes))))
-  lazy val module = new CScratchpadImp(supportMemRead, supportWriteback, dataWidthBits, nDatas, maxInFlightTxs, latency, specialization, this)
+    channelBytes = TLChannelBeatBytes(maxTxSize))))
+  lazy val module = new CScratchpadImp(supportMemRead, supportWriteback, dataWidthBits, nDatas, latency, specialization, this)
 }
 
 class CScratchpadImp(supportMemRead: Boolean,
                      supportWrite: Boolean,
                      dataWidthBits: Int,
                      nDatas: Int,
-                     maxInFlightTxs: Int,
                      latency: Int,
                      specialization: CScratchpadSpecialization,
                      outer: CScratchpad) extends LazyModuleImp(outer) {
   val (mem_out, mem_edge) = outer.mem.out(0)
-
+  val beatSize = mem_edge.manager.beatBytes
   val scReqBits = log2Up(nDatas)
+
   val scratchpad_access_io = IO(new CScratchpadAccessBundle(supportMemRead, supportWrite, scReqBits, dataWidthBits))
+  val scratchpad_req_io = IO(Flipped(Decoupled(new CScratchpadInitReq(mem_out, nDatas,
+    specialization match {
+      case psw: PackedSubwordScratchpadParams =>
+        val c = Math.ceil(psw.wordSizeBits.toFloat / psw.datsPerSubword).toInt
+        (c + c % 8) / 8
+      case _: FlatPackScratchpadParams =>
+        (dataWidthBits + (dataWidthBits % 8)) / 8
+    }))))
 
-  val scratchpad_req_io = IO(Flipped(Decoupled(new CScratchpadInitReq(mem_out, nDatas))))
-
-  val scratchpad_req_idle_io = IO(Output(Bool()))
-  scratchpad_req_idle_io := true.B
 
   val mem = SyncReadMem(nDatas, UInt(dataWidthBits.W))
 
   if (supportMemRead) {
     val loader = Module(specialization match {
       case psw: PackedSubwordScratchpadParams =>
-        new CScratchpadPackedSubwordLoader(dataWidthBits, scReqBits, psw.wordSizeBits, psw.datsPerSubword)
+        new CScratchpadPackedSubwordLoader(dataWidthBits, scReqBits, psw.wordSizeBits, psw.datsPerSubword, beatSize)
       case _: FlatPackScratchpadParams =>
-        new CScratchpadPackedSubwordLoader(dataWidthBits, scReqBits, dataWidthBits, 1)
+        new CScratchpadPackedSubwordLoader(dataWidthBits, scReqBits, dataWidthBits, 1, beatSize)
     })
 
-    val read_idle :: read_allocate :: Nil = Enum(2)
+    val read_idle :: read_send :: read_process :: Nil = Enum(3)
     val read_state = RegInit(read_idle)
     scratchpad_access_io.readRes.get.valid := (if (latency == 1) RegNext(scratchpad_access_io.readReq.get.valid) else
       RegNext(RegNext(scratchpad_access_io.readReq.get.valid)))
     val rval = mem.read(scratchpad_access_io.readReq.get.bits, scratchpad_access_io.readReq.get.valid)
     scratchpad_access_io.readRes.get.bits := (if (latency == 1) rval else RegNext(rval))
     // in-flight read tx busy bits
-    val busyBits = Reg(Vec(maxInFlightTxs, Bool()))
 
-    scratchpad_req_idle_io := !busyBits.reduce(_ || _)
+    scratchpad_req_io.ready := read_state === read_idle
 
-    val srcToTxInfo = Reg(Vec(maxInFlightTxs, new Bundle() {
-      val baseIdx = UInt(scReqBits.W)
-      val len = UInt(scReqBits.W)
-    }))
-    when(reset.asBool) {
-      busyBits foreach (_ := false.B)
-    }
     // only consider non-busy transactions to be the
-    val next_tx = PriorityEncoderOH(busyBits map (!_))
-    val tx_id = OHToUInt(next_tx)
-    val have_available_tx_slot = busyBits.map(!_).reduce(_ || _)
-
     val req_cache = Reg(Output(scratchpad_req_io.cloneType))
 
-    scratchpad_req_io.ready := read_state === read_idle && mem_out.a.ready
-    mem_out.a.bits := mem_edge.Get(tx_id, req_cache.bits.memAddr, 6.U)._2
-    mem_out.a.valid := false.B
+    when ((scratchpad_req_io.bits.len & (scratchpad_req_io.bits.len - 1.U)) =/= 0.U) {
+      printf("Len is not pow2: %d\n", scratchpad_req_io.bits.len)
+      assert(false.B)
+    }
+    mem_out.a.bits := mem_edge.Get(0.U,
+      req_cache.bits.memAddr,
+      OHToUInt(req_cache.bits.len))._2
+    mem_out.a.valid := read_state === read_send
 
     switch(read_state) {
-      is(read_idle) {
+      is (read_idle) {
         when(scratchpad_req_io.fire) {
           req_cache := scratchpad_req_io
-          read_state := read_allocate
+          read_state := read_send
         }
       }
 
-      is(read_allocate) {
-        mem_out.a.valid := have_available_tx_slot
-        when(have_available_tx_slot && mem_out.a.ready) {
-          busyBits(tx_id) := true.B
-          val itemsPerTx = loader.lengthIncPerCB
-
-          srcToTxInfo(tx_id).baseIdx := req_cache.bits.scAddr
-          when(req_cache.bits.len < itemsPerTx.U) {
-            srcToTxInfo(tx_id).len := (itemsPerTx - 1).U
-            read_state := read_idle
-          }.otherwise {
-            srcToTxInfo(tx_id).len := req_cache.bits.len
-            // otherwise we need to allocate more txs because we have a very long read (>1 CB)
-            req_cache.bits.scAddr := req_cache.bits.scAddr + itemsPerTx.U
-            req_cache.bits.len := req_cache.bits.len - itemsPerTx.U
-          }
+      is(read_send) {
+        when (mem_out.a.fire) {
+          read_state := read_process
         }
+      }
+
+      is (read_process) {
+        // see mem_out.d.fire condition for transition out of read_process
       }
     }
     loader.io.cache_block_in.valid := mem_out.d.valid
     loader.io.cache_block_in.bits.dat := mem_out.d.bits.data
-    loader.io.cache_block_in.bits.idxBase := srcToTxInfo(mem_out.d.bits.source).baseIdx
-    loader.io.cache_block_in.bits.len := srcToTxInfo(mem_out.d.bits.source).len
+    loader.io.cache_block_in.bits.idxBase := req_cache.bits.scAddr
     mem_out.d.ready := loader.io.cache_block_in.ready
     loader.io.sp_write_out.ready := true.B
-    when (mem_out.d.fire) {
-      busyBits(mem_out.d.bits.source) := false.B
+    when (loader.io.cache_block_in.fire) {
+      req_cache.bits.scAddr := req_cache.bits.scAddr + loader.spEntriesPerBeat.U
+    }
+    when(mem_out.d.fire) {
+      req_cache.bits.len := req_cache.bits.len - beatSize.U
+      when (req_cache.bits.len <= beatSize.U) {
+        read_state := read_idle
+      }
     }
     when(loader.io.sp_write_out.valid) {
       mem.write(loader.io.sp_write_out.bits.idx, loader.io.sp_write_out.bits.dat)
@@ -237,5 +156,4 @@ class CScratchpadImp(supportMemRead: Boolean,
       mem.write(scratchpad_access_io.writeReq.get.bits.addr, scratchpad_access_io.writeReq.get.bits.data)
     }
   }
-
 }

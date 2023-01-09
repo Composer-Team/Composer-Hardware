@@ -3,8 +3,8 @@ package design
 import chipsalliance.rocketchip.config.{Config, Field, Parameters}
 import chisel3._
 import chisel3.util._
-import composer.MemoryStreams.{CChannelParams, CChannelType, SequentialReader}
-import composer.{ComposerConstructor, ComposerCore, ComposerCoreParams, ComposerSystemParams, ComposerSystemsKey, WithAWSMem, WithComposer}
+import composer.MemoryStreams._
+import composer._
 
 import scala.util.Random
 
@@ -131,8 +131,8 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
   require(vConfig.dWidth % 8 == 0)
   val vDivs = 8
 //  val myReader = declareSequentialReader(usingReadChannelID = 0, vConfig.dWidth / 8, vDivs)
-  val myReader = getSequentialReaderModules("ReadChannel", vConfig.dWidth/8 , vDivs)(0) //= 0, vConfig.dWidth / 8, vDivs, Some(0))
-  val myWriter = getSequentialWriterModules("WriteChannel", vConfig.dWidth/8 * vDivs)(0)
+  val myReader = getReaderModules("ReadChannel", useSoftwareAddressing = true, vConfig.dWidth/8 , vDivs)._2(0) //= 0, vConfig.dWidth / 8, vDivs, Some(0))
+  val myWriter = getWriterModules("WriteChannel", useSoftwareAddressing = true, vConfig.dWidth/8 * vDivs)._2(0)
   val state = RegInit(s_idle)
   val toAdd = Reg(UInt(vConfig.dWidth.W))
   val vLen = Reg(UInt(io.req.bits.payload1.getWidth.W))
@@ -212,7 +212,7 @@ case object LFSRConfigKey extends Field[LFSRConfig]
 
 case object VectorAdderKey extends Field[VectorConfig]
 
-class WithLFSR(withNCores: Int) extends Config((site, here, up) => {
+class WithLFSR(withNCores: Int) extends Config((site, _, up) => {
   case ComposerSystemsKey => up(ComposerSystemsKey, site) ++ Seq(ComposerSystemParams(
     coreParams = ComposerCoreParams(),
     nCores = withNCores,
@@ -225,7 +225,7 @@ class WithLFSR(withNCores: Int) extends Config((site, here, up) => {
   case LFSRConfigKey => LFSRConfig(7, Seq(7, 6, 5, 4))
 })
 
-class WithALUs(withNCores: Int) extends Config((site, here, up) => {
+class WithALUs(withNCores: Int) extends Config((site, _, up) => {
   case ComposerSystemsKey => up(ComposerSystemsKey, site) ++ Seq(ComposerSystemParams(
     coreParams = ComposerCoreParams(),
     nCores = withNCores,
@@ -236,7 +236,7 @@ class WithALUs(withNCores: Int) extends Config((site, here, up) => {
     }))
 })
 
-class WithVectorAdder(withNCores: Int, dataWidth: Int) extends Config((site, here, up) => {
+class WithVectorAdder(withNCores: Int, dataWidth: Int) extends Config((site, _, up) => {
   case ComposerSystemsKey => up(ComposerSystemsKey, site) ++ Seq(ComposerSystemParams(
     coreParams = ComposerCoreParams(
       memoryChannelParams = List(
@@ -260,5 +260,5 @@ class exampleConfig extends Config(
   //  - 1 SimpleALU that supports add, sub, multiply
   //  - 1 VectorAdder that uses Readers/Writers to read/write to large chunks of memory
   //  - 1 GaloisLFSR that returns random numbers over the command/response interface
-  new WithVectorAdder(1, 16) ++ new WithComposer() ++ new WithAWSMem(1)
+  new WithVectorAdder(1, 16) ++ new WithLFSR(1) ++ new WithComposer() ++ new WithAWSMem(1)
 )

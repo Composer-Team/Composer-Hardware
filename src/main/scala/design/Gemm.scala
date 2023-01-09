@@ -24,7 +24,7 @@ case class GemmParam(dataWidthBytes: Int,
 class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implicit p: Parameters)
   extends ComposerCore(composerCoreParams)(p) {
   val dataWidthBytes = coreP.dataWidthBytes
-  val rowSizeBytes = coreP.rowColDim * dataWidthBytes
+  val submatrixRowSizeBytes = coreP.rowColDim * dataWidthBytes
   val dataWidthBits = dataWidthBytes * 8
   val arithUnits = coreP.columnParallelism
   // split rows between each arith unit via striping
@@ -51,10 +51,12 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
 
   val state = RegInit(s_idle)
 
-  val (reqChannelB, accessChannelB, reqBIdle) = getScratchpad("ChannelB")
-  val (reqChannelOut, dataChannelOut) = getSparseWriterModules("ChannelOut", dataWidthBytes * arithUnits)
+  val (reqChannelB, accessChannelB) = getScratchpad("ChannelB")
+  val (reqChannelOut, dataChannelOut) = getWriterModules(name = "ChannelOut", useSoftwareAddressing =  false,
+    dataBytes = dataWidthBytes * arithUnits)
   // these channels will read both the buffers and the A Matrix
-  val (reqChannelRow, dataChannelRow) = getReaderModules("ChannelA", dataWidthBytes, vlen=1, prefetchRows = 2)
+  val (reqChannelRow, dataChannelRow) = getReaderModules(name = "ChannelA", useSoftwareAddressing = false,
+    dataBytes = dataWidthBytes, vlen=1, prefetchRows = 2)
 
   val BAddr = Reg(UInt(addrWidth.W))
   val BSave = Reg(UInt(addrWidth.W))
@@ -63,11 +65,10 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   val AAddrs = List.fill(coreP.rowParallelism)(Reg(UInt(addrWidth.W)))
 
   // initialize some of the channels
-  reqChannelB.bits.len := rowSizeBytes.U
   reqChannelB.valid := false.B
   reqChannelB.bits := DontCare
   reqChannelRow foreach { ioa =>
-    ioa.bits.len := rowSizeBytes.U
+    ioa.bits.len := submatrixRowSizeBytes.U
     ioa.valid := false.B
     ioa.bits.addr := DontCare
   }
@@ -80,7 +81,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   reqChannelOut zip OutputAddr foreach { case (chan, addr) =>
     chan.bits.addr := addr
     chan.valid := false.B
-    chan.bits.len := rowSizeBytes.U
+    chan.bits.len := submatrixRowSizeBytes.U
   }
 
   // counter to gate whether or not we're loading in the right output buffer
@@ -215,8 +216,8 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       AAddrs.indices.foreach { idx: Int =>
         if (idx > 0) {
           when(currentBRow === idx.U) {
-            AAddrs(idx) := AAddrs(idx - 1) + Cat(realRowLength, 0.U(log2Up(dataWidthBytes).W))
-            OutputAddr(idx) := OutputAddr(idx - 1) + Cat(realRowLength, 0.U(log2Up(dataWidthBytes).W))
+            AAddrs(idx) := AAddrs(idx - 1) + realRowBytes
+            OutputAddr(idx) := OutputAddr(idx - 1) + realRowBytes
           }
         }
       }
@@ -240,9 +241,11 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
         prefetch_B_valid_sig := false.B
       }
       reqChannelB.valid := prefetch_B_valid_sig
-      reqChannelB.bits.len := (coreP.rowColDim / coreP.columnParallelism - 1).U
+      // since column parallelism increases # items read / cycle, they need to all live in the same SRAM/URAM cell,
+      //    reducing the number of separable items in a row to rowColDim/columnParallelism
       reqChannelB.bits.scAddr := Cat(currentBRow, 0.U(log2Up(coreP.rowColDim / coreP.columnParallelism).W))
       reqChannelB.bits.memAddr := BAddr
+      reqChannelB.bits.len := submatrixRowSizeBytes.U
       when(reqChannelB.ready && !prefetch_B_valid_sig) {
         when(currentBRow === maxRowColDim.U) {
           currentBRow := 0.U
@@ -292,7 +295,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
     is(s_addr_wait_AB) {
       val inputs_ready = reqChannelB.ready && reqChannelRow.map(_.ready).reduce(_ && _)
       // reqBIdle ensures that B has been entirely fetched
-      when(inputs_ready && reqBIdle) {
+      when(inputs_ready) {
         state := s_addr_commit
       }
     }
@@ -381,8 +384,8 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
           currentBRow := 1.U
           state := s_addr_comp
           ACounter := ACounter + 1.U
-          AAddrs(0) := AAddrs.last + rowSizeBytes.U
-          OutputAddr(0) := OutputAddr.last + rowSizeBytes.U
+          AAddrs(0) := AAddrs.last + realRowBytes
+          OutputAddr(0) := OutputAddr.last + realRowBytes
           BAddr := BSave
         }
       }
@@ -419,17 +422,11 @@ class WithGemm(withNCores: Int,
 })
 
 //noinspection ScalaUnusedSymbol
-class GemmConfig extends Config(
-  new WithGemm(1, GemmParam(4, 16, 2, 2, 1024)) ++
-    new WithVectorAdder(1, 16) ++ new WithALUs(1) ++ new WithComposer() ++ new WithKriaMem()
-)
-
-//noinspection ScalaUnusedSymbol
 class GemmTestF1 extends Config(
-  new WithGemm(1, GemmParam(4, 16, 4, 4, 2048)) ++ new WithComposer() ++ new WithAWSMem(1)
+  new WithGemm(2, GemmParam(4, 16, 4, 4, 2048)) ++ new WithComposer() ++ new WithAWSMem(1)
 )
 
 //noinspection ScalaUnusedSymbol
 class GemmTestF1Big extends Config(
-  new WithGemm(2, GemmParam(4, 256, 16, 8, 2048)) ++ new WithComposer() ++ new WithAWSMem(1)
+  new WithGemm(2, GemmParam(4, 256, 16, 8, 2048)) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
 )

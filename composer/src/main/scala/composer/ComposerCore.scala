@@ -25,6 +25,7 @@ class DataChannelIO(dataBytes: Int, vlen: Int = 1) extends Bundle {
 class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_id: Int, system_id: Int)(implicit p: Parameters) extends LazyModule {
   val coreParams = composerSystemParams.coreParams.copy(core_id = core_id, system_id = system_id)
   val blockBytes = p(CacheBlockBytes)
+  val maxTxLength = p(MaximumTransactionLength)
 
   val CacheNodes = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.CacheChannel) map (_.asInstanceOf[CCachedReadChannelParams]) map {
     par =>
@@ -36,43 +37,41 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
       val rnodes = List.tabulate(par.nChannels)(i => TLClientNode(List(TLMasterPortParameters.v1(
         clients = List(TLMasterParameters.v1(
           name = s"CachedReadChannel_sys${system_id}_core${core_id}_${par.name}$i",
-          supportsGet = TransferSizes(1, blockBytes),
-          supportsProbe = TransferSizes(1, blockBytes)
+          supportsGet = TransferSizes(1, maxTxLength),
+          supportsProbe = TransferSizes(1, maxTxLength)
         ))))))
 
       rnodes foreach (req_xbar := _)
-      cache.mem_reqs := TLBuffer() := TLWidthWidget(blockBytes) := TLBuffer() := req_xbar
+      cache.mem_reqs :=
+        //        TLBuffer() := TLWidthWidget(blockBytes) :=
+        TLBuffer() := req_xbar
       (par.name, (cache, rnodes))
   }
-
   val unCachedReaders = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.ReadChannel).map { para =>
     (para.name, List.tabulate(para.nChannels) { i =>
       TLClientNode(List(TLMasterPortParameters.v1(
         clients = List(TLMasterParameters.v1(
           name = s"ReadChannel_sys${system_id}_core${core_id}_${para.name}$i",
-          supportsGet = TransferSizes(1, blockBytes),
-          supportsProbe = TransferSizes(1, blockBytes)
+          supportsGet = TransferSizes(1, maxTxLength),
+          supportsProbe = TransferSizes(1, maxTxLength)
         )))))
     })
   }
-
   val writers = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.WriteChannel).map(para =>
     (para.name, List.tabulate(para.nChannels) { i =>
       TLClientNode(List(TLMasterPortParameters.v1(
         List(TLMasterParameters.v1(
           name = s"WriteChannel_sys${system_id}_core${core_id}_${para.name}$i",
           sourceId = IdRange(0, 4),
-          supportsPutFull = TransferSizes(1, blockBytes),
-          supportsPutPartial = TransferSizes(1, blockBytes),
-          supportsProbe = TransferSizes(1, blockBytes))))))
+          supportsPutFull = TransferSizes(1, maxTxLength),
+          supportsPutPartial = TransferSizes(1, maxTxLength),
+          supportsProbe = TransferSizes(1, maxTxLength))))))
     }))
-
   val scratch_mod = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.Scratchpad).map(_.asInstanceOf[CScratchpadChannelParams]).map {
     param =>
       lazy val mod = LazyModule(param.make)
       (param.name, mod)
   }
-
   val readerNodes = unCachedReaders ++ CacheNodes.map(i => (i._1, i._2._2))
 
   val mem_nodes = (
@@ -81,6 +80,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
       writers ++
       scratch_mod.map(i => (i._1, List(i._2.mem)))
     ).flatMap(_._2)
+
   lazy val module = composerSystemParams.buildCore(ComposerConstructor(composerSystemParams.coreParams, this), p)
 }
 
@@ -128,13 +128,14 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
                        dataBytes: Int,
                        vlen: Int,
                        prefetchRows: Int = 0,
-                       idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
+                       idx: Option[Int] = None,
+                       transactionEmitBehavior: ReaderFetchBehavior = ReaderFetchCacheBlock()): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
     val mod = idx match {
       case Some(id_unpack) =>
         val clients = getTLClients(name, outer.readerNodes)
-        List(Module(new SequentialReader(dataBytes, vlen, prefetchRows, clients(id_unpack))))
-      case None => getTLClients(name, outer.readerNodes).map(tab_id => Module(new SequentialReader(dataBytes, vlen,
-        prefetchRows, tab_id)))
+        List(Module(new CReader(dataBytes, vlen, prefetchRows, transactionEmitBehavior, clients(id_unpack))))
+      case None => getTLClients(name, outer.readerNodes).map(tab_id => Module(new CReader(dataBytes, vlen,
+        prefetchRows, transactionEmitBehavior, tab_id)))
     }
     mod foreach { m =>
       m.tl_out <> m.tl_outer
@@ -150,10 +151,10 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       mod.map(_.io.channel))
   }
 
-  def getSparseWriterModules(name: String,
-                             useSoftwareAddressing: Boolean,
-                             dataBytes: Int,
-                             idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[WriterDataChannelIO]) = {
+  def getWriterModules(name: String,
+                       useSoftwareAddressing: Boolean,
+                       dataBytes: Int,
+                       idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[WriterDataChannelIO]) = {
     val mod = idx match {
       case Some(id) => List(Module(new SequentialWriter(dataBytes, getTLClients(name, outer.writers)(id))))
       case None => getTLClients(name, outer.writers).map(tab_id => Module(new SequentialWriter(dataBytes, tab_id)))
@@ -172,13 +173,13 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     else mod.map(_.io.req), mod.map(_.io.channel))
   }
 
-  def getScratchpad(name: String): (DecoupledIO[CScratchpadInitReq], CScratchpadAccessBundle, Bool) = {
+  def getScratchpad(name: String): (DecoupledIO[CScratchpadInitReq], CScratchpadAccessBundle) = {
     val outer = composerConstructor.composerCoreWrapper
     val lm = outer.scratch_mod.filter(_._1 == name)(0)._2
     lm.suggestName(name)
     val mod = lm.module
 
-    (mod.scratchpad_req_io, mod.scratchpad_access_io, mod.scratchpad_req_idle_io)
+    (mod.scratchpad_req_io, mod.scratchpad_access_io)
   }
 
 }

@@ -13,10 +13,16 @@ class ReadChannelIO(dataBytes: Int, vlen: Int)(implicit p: Parameters) extends B
   val busy = Output(Bool())
 }
 
-class SequentialReader(dataBytes: Int,
-                       vlen: Int = 1,
-                       prefetchRows: Int = 0,
-                       tlclient: TLClientNode)(implicit p: Parameters) extends Module {
+abstract class ReaderFetchBehavior
+
+case class ReaderFetchAsOneTx() extends ReaderFetchBehavior
+case class ReaderFetchCacheBlock() extends ReaderFetchBehavior
+
+class CReader(dataBytes: Int,
+              vlen: Int = 1,
+              prefetchRows: Int = 0,
+              fetchBehavior: ReaderFetchBehavior,
+              tlclient: TLClientNode)(implicit p: Parameters) extends Module {
   val usesPrefetch = prefetchRows > 0
   val blockBytes = p(CacheBlockBytes)
   val (tl_outer, tledge) = tlclient.out(0)
@@ -24,13 +30,14 @@ class SequentialReader(dataBytes: Int,
   val maxBytes = dataBytes * vlen
   require(isPow2(maxBytes))
 
+
   // io goes to user, TL connects with AXI4
   val io = IO(new ReadChannelIO(dataBytes, vlen))
   val tl_out = IO(new TLBundle(tl_outer.params))
   val beatBytes = tledge.manager.beatBytes
 
   io.channel.finished := true.B
-  val channelWidthBits = maxBytes * 8 * vlen
+  val channelWidthBits = maxBytes * 8
 
   val beatsPerBlock = blockBytes / beatBytes
   val channelsPerBlock = blockBytes / maxBytes
@@ -78,7 +85,13 @@ class SequentialReader(dataBytes: Int,
   tl_out.a.bits := tledge.Get(
     fromSource = 0.U,
     toAddress = blockAddr,
-    lgSize = OHToUInt(len))._2
+    lgSize = fetchBehavior match {
+      case ReaderFetchAsOneTx() =>
+        OHToUInt(len) // log
+      case ReaderFetchCacheBlock() =>
+        log2Up(blockBytes).U
+    }
+  )._2
   //////////////////////////////////////////////////////
   // handle data input
 
@@ -135,6 +148,7 @@ class SequentialReader(dataBytes: Int,
     is(s_send_mem_request) {
       tl_out.a.valid := true.B
       when(tl_out.a.fire) {
+//        printf("tl_out a fire len(%d)", tl_out.a.bits.size)
         buffer_fill_level := 0.U
         if (logBlockBytes > logChannelSize) {
           data_channel_read_idx := addr(logBlockBytes - 1, logChannelSize)
@@ -147,23 +161,27 @@ class SequentialReader(dataBytes: Int,
     // wait for responses from s_send_mem_request
     is(s_read_memory) {
       // when we get a message back store it into a buffer
-      when(len === 0.U && data_channel_read_idx === 0.U) {
-        state := s_idle
+      when(data_channel_read_idx === channelsPerBlock.U) {
+        data_channel_read_idx := 0.U
+        if (usesPrefetch) {
+          // if prefetching then wait for the fetch buffer to be valid so that we can fill it in here
+          // then it'll be loaded to the top at once
+          buffer_valid(0) := false.B
+        } else {
+          // if no prefetching then this is also the loading buffer and we need to start filling it from the bottom
+          buffer_fill_level := 0.U
+        }
+        when (len === 0.U) {
+          state := s_idle
+        }.otherwise {
+          if (fetchBehavior.isInstanceOf[ReaderFetchCacheBlock]) {
+            state := s_send_mem_request
+          } // if one transaction mode then the beats just keep coming
+        }
       }
     }
   }
 
-  when(data_channel_read_idx === channelsPerBlock.U) {
-    data_channel_read_idx := 0.U
-    if (usesPrefetch) {
-      // if prefetching then wait for the fetch buffer to be valid so that we can fill it in here
-      // then it'll be loaded to the top at once
-      buffer_valid(0) := false.B
-    } else {
-      // if no prefetching then this is also the loading buffer and we need to start filling it from the bottom
-      buffer_fill_level := 0.U
-    }
-  }
 
   val buffer_ch_idx = data_channel_read_idx(logChannelsPerBeat - 1, 0)
   val buffer_beat_idx = data_channel_read_idx(data_channel_read_idx.getWidth - 1, logChannelsPerBeat)
