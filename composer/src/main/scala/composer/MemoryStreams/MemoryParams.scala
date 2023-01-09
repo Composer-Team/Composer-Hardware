@@ -21,12 +21,11 @@ class ChannelTransactionBundle(implicit p: Parameters) extends Bundle {
   * WARNING: large caches may fail to pass timing
   *
   * @param sizeBytes     total cache size in bytes
-  * @param id            cache identifier to be used inside core definitions
   * @param idxMask       optionally can provide a custom layout for choosing index bits. This may be useful for
   *                      preventing conflict misses in channels that are expected to be strided access
   * @param associativity cache associativity
   */
-case class CCacheParams(sizeBytes: Int, id: Int,
+case class CCacheParams(sizeBytes: Int,
                         idxMask: Option[Long] = None,
                         associativity: Int = 1)
 

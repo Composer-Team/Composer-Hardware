@@ -32,7 +32,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
       val param = par.cacheParams
       val cache = TLCache(param.sizeBytes,
         nClients = par.nChannels,
-        associativity = param.associativity).suggestName("TLCache_" + param.id)
+        associativity = param.associativity).suggestName("TLCache")
       val req_xbar = TLXbar()
       val rnodes = List.tabulate(par.nChannels)(i => TLClientNode(List(TLMasterPortParameters.v1(
         clients = List(TLMasterParameters.v1(
@@ -179,7 +179,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     lm.suggestName(name)
     val mod = lm.module
 
-    (mod.scratchpad_req_io, mod.scratchpad_access_io)
+    (mod.scratchpad_req_io, mod.access)
   }
 
 }

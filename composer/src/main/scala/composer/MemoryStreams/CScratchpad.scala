@@ -8,11 +8,11 @@ import composer.MemoryStreams.Loaders.CScratchpadPackedSubwordLoader
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 
-class CScratchpadAccessBundle(supportMemRead: Boolean, supportWriteback: Boolean,
+class CScratchpadAccessBundle(supportWriteback: Boolean,
                               scReqBits: Int, dataWidthBits: Int) extends Bundle {
   // note the flipped
-  val readReq = if (supportMemRead) Some(Flipped(ValidIO(UInt(scReqBits.W)))) else None
-  val readRes = if (supportMemRead) Some(ValidIO(UInt(dataWidthBits.W))) else None
+  val readReq = Flipped(ValidIO(UInt(scReqBits.W)))
+  val readRes = ValidIO(UInt(dataWidthBits.W))
   val writeReq = if (supportWriteback) Some(Flipped(ValidIO(new Bundle() {
     val addr = UInt(scReqBits.W)
     val data = UInt(dataWidthBits.W)
@@ -30,22 +30,20 @@ class CScratchpadInitReq(mem_out: TLBundle, nDatas: Int, upperboundBytesPerData:
   * Parameters that all scratchpad subtypes should support
   *
   * @param supportMemRead   support initialization from memory. If false, an implementation must tie off the TL interface
-  * @param supportWriteback support memory writeback. If false, an implementation must tie off the TL interface
+  * @param supportWrite support memory writeback. If false, an implementation must tie off the TL interface
   * @param dataWidthBits    the granularity of a single scratchpad read/write in bits
   * @param nDatas           number of data items in the scratchpad. Non-zero
   * @param latency          latency of a scratchpad access from the user interface. Current implementation only supports 1 or 2.
-  * @param maxInFlightTxs   Initialization for different sublocks of the scratchpad may come from far away segments in memory. Multiple in-flight txs may be issued to utilize DDR concurrency.
   * @param specialization   How data is loaded from memory. Choose a specialization from CScratchpadSpecialization
   */
 class CScratchpad(supportMemRead: Boolean,
-                  supportWriteback: Boolean,
+                  supportWrite: Boolean,
                   dataWidthBits: Int,
                   nDatas: Int,
-                  maxInFlightTxs: Int,
                   latency: Int,
                   specialization: CScratchpadSpecialization)(implicit p: Parameters) extends LazyModule {
   require(latency == 1 || latency == 2)
-  require(supportMemRead || supportWriteback)
+  require(supportMemRead || supportWrite)
   require(dataWidthBits > 0)
   require(nDatas > 0)
   val maxTxSize = p(MaximumTransactionLength)
@@ -58,7 +56,7 @@ class CScratchpad(supportMemRead: Boolean,
       supportsPutFull = TransferSizes(1, maxTxSize)
     )),
     channelBytes = TLChannelBeatBytes(maxTxSize))))
-  lazy val module = new CScratchpadImp(supportMemRead, supportWriteback, dataWidthBits, nDatas, latency, specialization, this)
+  lazy val module = new CScratchpadImp(supportMemRead, supportWrite, dataWidthBits, nDatas, latency, specialization, this)
 }
 
 class CScratchpadImp(supportMemRead: Boolean,
@@ -72,20 +70,23 @@ class CScratchpadImp(supportMemRead: Boolean,
   val beatSize = mem_edge.manager.beatBytes
   val scReqBits = log2Up(nDatas)
 
-  val scratchpad_access_io = IO(new CScratchpadAccessBundle(supportMemRead, supportWrite, scReqBits, dataWidthBits))
-  val scratchpad_req_io = IO(Flipped(Decoupled(new CScratchpadInitReq(mem_out, nDatas,
-    specialization match {
-      case psw: PackedSubwordScratchpadParams =>
-        val c = Math.ceil(psw.wordSizeBits.toFloat / psw.datsPerSubword).toInt
-        (c + c % 8) / 8
-      case _: FlatPackScratchpadParams =>
-        (dataWidthBits + (dataWidthBits % 8)) / 8
-    }))))
+  val access = IO(new CScratchpadAccessBundle(supportWrite, scReqBits, dataWidthBits))
+  val req = if (supportMemRead) {
+    Some(IO(Flipped(Decoupled(new CScratchpadInitReq(mem_out, nDatas,
+      specialization match {
+        case psw: PackedSubwordScratchpadParams =>
+          val c = Math.ceil(psw.wordSizeBits.toFloat / psw.datsPerSubword).toInt
+          (c + c % 8) / 8
+        case _: FlatPackScratchpadParams =>
+          (dataWidthBits + (dataWidthBits % 8)) / 8
+      })))))
+  } else None
 
 
   val mem = SyncReadMem(nDatas, UInt(dataWidthBits.W))
 
   if (supportMemRead) {
+    val scratchpad_req_io = req.get
     val loader = Module(specialization match {
       case psw: PackedSubwordScratchpadParams =>
         new CScratchpadPackedSubwordLoader(dataWidthBits, scReqBits, psw.wordSizeBits, psw.datsPerSubword, beatSize)
@@ -95,10 +96,10 @@ class CScratchpadImp(supportMemRead: Boolean,
 
     val read_idle :: read_send :: read_process :: Nil = Enum(3)
     val read_state = RegInit(read_idle)
-    scratchpad_access_io.readRes.get.valid := (if (latency == 1) RegNext(scratchpad_access_io.readReq.get.valid) else
-      RegNext(RegNext(scratchpad_access_io.readReq.get.valid)))
-    val rval = mem.read(scratchpad_access_io.readReq.get.bits, scratchpad_access_io.readReq.get.valid)
-    scratchpad_access_io.readRes.get.bits := (if (latency == 1) rval else RegNext(rval))
+    access.readRes.valid := (if (latency == 1) RegNext(access.readReq.valid) else
+      RegNext(RegNext(access.readReq.valid)))
+    val rval = mem.read(access.readReq.bits, access.readReq.valid)
+    access.readRes.bits := (if (latency == 1) rval else RegNext(rval))
     // in-flight read tx busy bits
 
     scratchpad_req_io.ready := read_state === read_idle
@@ -152,8 +153,8 @@ class CScratchpadImp(supportMemRead: Boolean,
     }
   }
   if (supportWrite) {
-    when(scratchpad_access_io.writeReq.get.valid) {
-      mem.write(scratchpad_access_io.writeReq.get.bits.addr, scratchpad_access_io.writeReq.get.bits.data)
+    when(access.writeReq.get.valid) {
+      mem.write(access.writeReq.get.bits.addr, access.writeReq.get.bits.data)
     }
   }
 }

@@ -123,14 +123,14 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
 
   val all_rows_loaded = row_loaded.reduce(_ && _)
   // set defaults
-  accessChannelB.readReq.get.valid := state === s_acc
-  accessChannelB.readReq.get.bits := Cat(currentBRow, bread)
+  accessChannelB.readReq.valid := state === s_acc
+  accessChannelB.readReq.bits := Cat(currentBRow, bread)
 
   // after 2 cy
   val bread_val = (0 until arithUnits) map { idx =>
     val start = idx * dataWidthBits
     val end = (idx + 1) * dataWidthBits - 1
-    accessChannelB.readRes.get.bits(end, start).asSInt
+    accessChannelB.readRes.bits(end, start).asSInt
   }
   val o_mul = current_a flatMap { row_a: SInt =>
     val a_pipe = RegNext(RegNext(row_a))
