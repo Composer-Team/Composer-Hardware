@@ -20,21 +20,31 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
     LazyModule(new ComposerCoreWrapper(systemParams, idx, system_id))
   }
 
+  // we want to avoid high-degree xbars. Recursively make multi-stage xbar network
   val memory_nodes = {
-    val core_mems = cores.flatMap(_.mem_nodes)
-    if (core_mems.length > p(CChannelXBarWidth)) {
-      core_mems.grouped(p(CChannelXBarWidth)) map { node_set =>
-        val memory_subset_xbar = LazyModule(new TLXbar())
-        val xbar_node = memory_subset_xbar.node
-        node_set foreach (xbar_node := _)
-        xbar_node
-      }
-    } else core_mems
+    val core_mems = cores.flatMap(_.mem_nodes).map { mn =>
+      val tli = TLIdentityNode()
+      tli := mn
+      tli
+    }
+
+    def recursivelyReduceXBar(grp: Seq[TLIdentityNode]): Seq[TLIdentityNode] = {
+      if (grp.length <= p(CChannelXBarWidth)) grp
+      else (grp.grouped(p(CChannelXBarWidth)) map { subgroup =>
+        val sub_xbar = TLXbar()
+        subgroup foreach (sub_xbar := _)
+        val out_node = TLIdentityNode()
+        out_node := TLBuffer() := sub_xbar
+        out_node
+      }).toSeq
+    }
+
+    recursivelyReduceXBar(core_mems)
   }
 
-  val blockBytes = p(CacheBlockBytes)
+val blockBytes = p(CacheBlockBytes)
 
-  lazy val module = new ComposerSystemImp(this)
+lazy val module = new ComposerSystemImp(this)
 }
 
 class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) {

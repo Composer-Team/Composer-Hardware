@@ -373,7 +373,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
     }
     is(s_finish) {
       dataChannelOut.foreach(_.finishEarly := true.B)
-      when(dataChannelOut.map(_.channelIdle) reduce (_ && _)) {
+      when((reqChannelOut.map(_.ready) ++ dataChannelOut.map(_.channelIdle)).reduce(_ && _)) {
         when(ACounter === lastA.U) {
           io.resp.valid := true.B
           io.resp.bits.data := 1.U
