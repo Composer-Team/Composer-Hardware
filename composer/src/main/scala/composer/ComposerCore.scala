@@ -173,13 +173,13 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     else mod.map(_.io.req), mod.map(_.io.channel))
   }
 
-  def getScratchpad(name: String): (DecoupledIO[CScratchpadInitReq], CScratchpadAccessBundle) = {
+  def getScratchpad(name: String): (Option[DecoupledIO[CScratchpadInitReq]], CScratchpadAccessBundle) = {
     val outer = composerConstructor.composerCoreWrapper
     val lm = outer.scratch_mod.filter(_._1 == name)(0)._2
     lm.suggestName(name)
     val mod = lm.module
 
-    (mod.scratchpad_req_io, mod.access)
+    (mod.req, mod.access)
   }
 
 }

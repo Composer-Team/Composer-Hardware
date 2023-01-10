@@ -105,12 +105,11 @@ class CScratchpadChannelParams(name: String,
                                val supportWriteback: Boolean,
                                val dataWidthBits: Int,
                                val nDatas: Int,
-                               val maxInFlightTxs: Int = 1,
                                val latency: Int = 2,
                                val specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked)
   extends CChannelParams(name, nChannels = 1, channelType = CChannelType.Scratchpad) {
   private[composer] def make(implicit p: Parameters): CScratchpad = {
-    new CScratchpad(supportMemRead, supportWriteback, dataWidthBits, nDatas, maxInFlightTxs, latency, specialization)
+    new CScratchpad(supportMemRead, supportWriteback, dataWidthBits, nDatas, latency, specialization)
   }
 }
 
@@ -120,8 +119,7 @@ object CScratchpadChannelParams {
             supportWriteback: Boolean,
             dataWidthBits: Int,
             nDatas: Int,
-            maxInFlightTxs: Int = 1,
             latency: Int = 2,
             specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked): CScratchpadChannelParams =
-    new CScratchpadChannelParams(name, supportMemRead, supportWriteback, dataWidthBits, nDatas, maxInFlightTxs, latency, specialization)
+    new CScratchpadChannelParams(name, supportMemRead, supportWriteback, dataWidthBits, nDatas, latency, specialization)
 }
