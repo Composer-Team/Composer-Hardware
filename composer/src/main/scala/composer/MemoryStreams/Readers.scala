@@ -13,15 +13,15 @@ class ReadChannelIO(dataBytes: Int, vlen: Int)(implicit p: Parameters) extends B
   val busy = Output(Bool())
 }
 
-abstract class ReaderFetchBehavior
+abstract class txEmitBehavior
 
-case class ReaderFetchAsOneTx() extends ReaderFetchBehavior
-case class ReaderFetchCacheBlock() extends ReaderFetchBehavior
+case class txEmitAsOneTx() extends txEmitBehavior
+case class txEmitCacheBlock() extends txEmitBehavior
 
 class CReader(dataBytes: Int,
               vlen: Int = 1,
               prefetchRows: Int = 0,
-              fetchBehavior: ReaderFetchBehavior,
+              fetchBehavior: txEmitBehavior,
               tlclient: TLClientNode)(implicit p: Parameters) extends Module {
   val usesPrefetch = prefetchRows > 0
   val blockBytes = p(CacheBlockBytes)
@@ -86,9 +86,9 @@ class CReader(dataBytes: Int,
     fromSource = 0.U,
     toAddress = blockAddr,
     lgSize = fetchBehavior match {
-      case ReaderFetchAsOneTx() =>
+      case txEmitAsOneTx() =>
         OHToUInt(len) // log
-      case ReaderFetchCacheBlock() =>
+      case txEmitCacheBlock() =>
         log2Up(blockBytes).U
     }
   )._2
@@ -174,7 +174,7 @@ class CReader(dataBytes: Int,
         when (len === 0.U) {
           state := s_idle
         }.otherwise {
-          if (fetchBehavior.isInstanceOf[ReaderFetchCacheBlock]) {
+          if (fetchBehavior.isInstanceOf[txEmitCacheBlock]) {
             state := s_send_mem_request
           } // if one transaction mode then the beats just keep coming
         }

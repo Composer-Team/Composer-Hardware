@@ -129,7 +129,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
                        vlen: Int,
                        prefetchRows: Int = 0,
                        idx: Option[Int] = None,
-                       transactionEmitBehavior: ReaderFetchBehavior = ReaderFetchCacheBlock()): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
+                       transactionEmitBehavior: txEmitBehavior = txEmitCacheBlock()): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
     val mod = idx match {
       case Some(id_unpack) =>
         val clients = getTLClients(name, outer.readerNodes)
