@@ -47,6 +47,8 @@ val blockBytes = p(CacheBlockBytes)
 lazy val module = new ComposerSystemImp(this)
 }
 
+case class CChannelIdentifier(system_name: String, core_idx: Int, channel_name: String, channel_subidx: Int, io_idx: Int)
+
 class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) {
   val io = IO(new ComposerSystemIO())
   val arbiter = Module(new RRArbiter(new ComposerRoccResponse(), outer.systemParams.nCores))
@@ -89,11 +91,9 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
 
   io.busy := cores.map(_.io.busy).reduce(_ || _)
 
-  val nChannelBits = p(ChannelSelectionBitsKey)
   val lenBits = log2Up(p(MaxChannelTransactionLenKey))
 
-  val channelSelect = cmd.bits.payload1(nChannelBits - 1, 1)
-  val channelRead = cmd.bits.payload1(0)
+  val channelSelect = Cat(cmd.bits.inst.rs1(2, 0), cmd.bits.inst.rs2)
 
   cores.zipWithIndex.foreach { case (core, i) =>
     val coreStart = cmd.fire && funct === FUNC_START.U && coreSelect === i.U
@@ -109,39 +109,41 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
 
   val addr_func_live = cmd.bits.inst.funct === FUNC_ADDR.U && cmd.fire
 
-  // connect readChannels and writeChannels appropriately
-  // TODO don't do this for sparse readers/writers
   if (cores(0).read_ios.nonEmpty) {
     cores(0).read_ios(0)._2.valid := false.B
     cores(0).write_ios(0)._2.valid := true.B
   }
-  val txLenFromCmd = cmd.bits.payload1(nChannelBits + lenBits - 1, nChannelBits)
-
-  val read_ios = cores.zipWithIndex.flatMap(q => q._1.read_ios.map((q._2, _)))
-  val write_ios = cores.zipWithIndex.flatMap(q => q._1.write_ios.map((q._2, _)))
+  val txLenFromCmd = cmd.bits.payload1(lenBits-1, 0)
 
   @tailrec
-  private def assign_channel_addresses(coreId: Int, channelList: List[(String, DecoupledIO[ChannelTransactionBundle])], condition: Bool, assignment: Int = 0): Unit = {
+  private def assign_channel_addresses(coreId: Int, channelList: List[((String, Int), DecoupledIO[ChannelTransactionBundle])],
+                                       assignment: Int = 0,
+                                      // core name, core_id, channel name, channel idx, io_idx
+                                       io_map: List[CChannelIdentifier] = List()): List[CChannelIdentifier] = {
     channelList match {
-      case (_, txio) :: rst =>
+      case (channel_identifier, txio) :: rst =>
         val tx_len = Reg(UInt(log2Up(p(MaxChannelTransactionLenKey)).W))
         val tx_addr_start = Reg(UInt(addressBits.W))
-        when(addr_func_live && coreSelect === coreId.U && channelSelect === assignment.U && condition) {
+        when(addr_func_live && coreSelect === coreId.U && channelSelect === assignment.U) {
           tx_len := txLenFromCmd
           tx_addr_start := cmd.bits.payload2(addressBits - 1, 0)
         }
         txio.valid := cmdFireLatch && functLatch === FUNC_START.U && coreSelectLatch === coreId.U
         txio.bits.addr := tx_addr_start
         txio.bits.len := tx_len
-        assign_channel_addresses(coreId, rst, condition, assignment + 1)
-      case _ => ;
+        assign_channel_addresses(coreId, rst, assignment + 1,
+          CChannelIdentifier(
+            system_name = outer.systemParams.name,
+            core_idx = coreId,
+            channel_name = channel_identifier._1,
+            channel_subidx = channel_identifier._2,
+            io_idx = assignment) :: io_map)
+      case _ => io_map
     }
   }
 
-  cores.zipWithIndex.foreach { case (co, id) =>
-    assign_channel_addresses(id, co.read_ios, channelRead)
-    assign_channel_addresses(id, co.write_ios, !channelRead)
+  val core_io_mappings = cores.zipWithIndex.map { case (co, id) =>
+    assign_channel_addresses(id, co.read_ios ++ co.write_ios)
   }
-
 }
 

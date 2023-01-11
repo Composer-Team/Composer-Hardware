@@ -405,14 +405,12 @@ class WithGemm(withNCores: Int,
         dataWidthBits = gp.dataWidthBytes * 8 * gp.columnParallelism,
         nDatas = gp.rowColDim * gp.rowColDim / gp.columnParallelism,
         specialization = CScratchpadSpecialization.flatPacked),
-      CChannelParams(
+      CReadChannelParams(
         "ChannelA",
-        gp.rowParallelism,
-        CChannelType.ReadChannel),
-      CChannelParams(
+        gp.rowParallelism),
+      CWriteChannelParams(
         "ChannelOut",
-        gp.rowParallelism,
-        CChannelType.WriteChannel))),
+        gp.rowParallelism))),
     nCores = withNCores,
     name = "GemmCore",
     buildCore = {

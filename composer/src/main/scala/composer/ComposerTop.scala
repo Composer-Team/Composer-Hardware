@@ -3,8 +3,7 @@ package composer
 import chisel3._
 import chisel3.util._
 import composer.ComposerTop.{getAddressMask, getAddressSet}
-import composer.CppGenerationUtils.genCPPHeader
-import freechips.rocketchip.amba.axi4
+import composer.CppGeneration.genCPPHeader
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
@@ -187,9 +186,6 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   acc.module.io.cmd <> axil_hub.module.io.rocc_in
   axil_hub.module.io.rocc_out <> acc.module.io.resp
 
-  genCPPHeader(outer.cmd_resp_axilhub.axil_widget.module.crRegistry, acc.acc)
-
-
   val ocl = IO(Flipped(HeterogeneousBag.fromNode(ocl_port.out)))
   (ocl zip ocl_port.out) foreach { case (o, (i, _)) => i <> o }
 
@@ -263,4 +259,7 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
       axil_hub.module.io.rocc_out.bits.data := bWait
     }
   }
+
+  // try to make this the last thing we do
+  genCPPHeader(outer.cmd_resp_axilhub.axil_widget.module.crRegistry, acc.acc)
 }

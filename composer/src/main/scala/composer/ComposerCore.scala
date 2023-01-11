@@ -57,16 +57,17 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
         )))))
     })
   }
-  val writers = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.WriteChannel).map(para =>
+  val writers = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.WriteChannel).map{ p =>
+    val para = p.asInstanceOf[CWriteChannelParams]
     (para.name, List.tabulate(para.nChannels) { i =>
       TLClientNode(List(TLMasterPortParameters.v1(
         List(TLMasterParameters.v1(
           name = s"WriteChannel_sys${system_id}_core${core_id}_${para.name}$i",
-          sourceId = IdRange(0, 4),
+          sourceId = IdRange(0, para.maxInFlightTxs),
           supportsPutFull = TransferSizes(1, maxTxLength),
           supportsPutPartial = TransferSizes(1, maxTxLength),
           supportsProbe = TransferSizes(1, maxTxLength))))))
-    }))
+    }})
   val scratch_mod = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.Scratchpad).map(_.asInstanceOf[CScratchpadChannelParams]).map {
     param =>
       lazy val mod = LazyModule(param.make)
@@ -91,8 +92,8 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   private val outer = composerConstructor.composerCoreWrapper
   val io = IO(new ComposerCoreIO())
 
-  var read_ios: List[(String, DecoupledIO[ChannelTransactionBundle])] = List()
-  var write_ios: List[(String, DecoupledIO[ChannelTransactionBundle])] = List()
+  var read_ios: List[((String, Int), DecoupledIO[ChannelTransactionBundle])] = List()
+  var write_ios: List[((String, Int), DecoupledIO[ChannelTransactionBundle])] = List()
 
   io.resp.bits.system_id := composerCoreParams.system_id.U
   io.resp.bits.core_id := composerCoreParams.core_id.U
@@ -137,13 +138,13 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       case None => getTLClients(name, outer.readerNodes).map(tab_id => Module(new CReader(dataBytes, vlen,
         prefetchRows, transactionEmitBehavior, tab_id)))
     }
-    mod foreach { m =>
+    mod.zipWithIndex foreach { case (m, m_idx) =>
       m.tl_out <> m.tl_outer
       m.suggestName(name)
       if (useSoftwareAddressing) {
         val newio = IO(Flipped(Decoupled(new ChannelTransactionBundle))).suggestName(name)
         newio <> m.io.req
-        read_ios = (List((name, newio)) ++ read_ios).sortBy(_._1)
+        read_ios = List(((name, idx.getOrElse(m_idx)), newio)) ++ read_ios
       }
     }
     (if (useSoftwareAddressing) List()
@@ -159,18 +160,18 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       case Some(id) => List(Module(new SequentialWriter(dataBytes, getTLClients(name, outer.writers)(id))))
       case None => getTLClients(name, outer.writers).map(tab_id => Module(new SequentialWriter(dataBytes, tab_id)))
     }
-    mod foreach { m =>
+    mod.zipWithIndex foreach { case (m, m_idx) =>
       m.tl_out <> m.tl_outer
       m.suggestName(name)
       if (useSoftwareAddressing) {
         val newio = IO(Flipped(Decoupled(new ChannelTransactionBundle))).suggestName(name)
         newio <> m.io.req
-        write_ios = (List((name, newio)) ++ write_ios).sortBy(_._1)
+        write_ios = List(((name, idx.getOrElse(m_idx)), newio)) ++ write_ios
       }
     }
 
-    (if (useSoftwareAddressing) List()
-    else mod.map(_.io.req), mod.map(_.io.channel))
+    (if (useSoftwareAddressing) List() else mod.map(_.io.req),
+      mod.map(_.io.channel))
   }
 
   def getScratchpad(name: String): (Option[DecoupledIO[CScratchpadInitReq]], CScratchpadAccessBundle) = {

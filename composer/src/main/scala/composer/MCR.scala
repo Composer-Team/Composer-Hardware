@@ -2,7 +2,7 @@ package composer
 
 import chisel3._
 import chisel3.util._
-import composer.CppGenerationUtils._
+import composer.CppGeneration._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
@@ -68,20 +68,6 @@ class MCRFileMap() {
   }
 
   // A variation of above which dumps the register map as a series of arrays
-  def genArrayHeader(prefix: String, base: BigInt, sb: mutable.StringBuilder): Unit = {
-    def emitArrays(regs: Seq[(MCRMapEntry, BigInt)], prefix: String): Unit = {
-      sb.append(genConstStatic(s"${prefix}_num_registers", UInt32(regs.size)))
-      sb.append(genArray(s"${prefix}_names", regs.map { x => CStrLit(x._1.name) }))
-      sb.append(genArray(s"${prefix}_addrs", regs.map { x => UInt32(x._2) }))
-    }
-
-    val regAddrs = regList map (reg => reg -> (base + lookupAddress(reg.name).get))
-    val readRegs = regAddrs filter (_._1.permissions.readable)
-    val writeRegs = regAddrs filter (_._1.permissions.writeable)
-    emitArrays(readRegs.toSeq, prefix + "_R")
-    emitArrays(writeRegs.toSeq, prefix + "_W")
-  }
-
   // Returns a copy of the current register map
   def getRegMap = name2addr.toMap
 

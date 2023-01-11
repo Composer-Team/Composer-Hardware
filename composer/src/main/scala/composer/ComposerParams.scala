@@ -110,12 +110,11 @@ class WithKriaMem extends Config((_, _, _) => {
  */
 
 
-class WithComposer(maximumTxLengthBytes: Int = 64) extends Config((site, _, _) => {
+class WithComposer(maximumTxLengthBytes: Int = 64, systemIDbits: Int = 4, coreIdBits: Int = 8) extends Config((site, _, _) => {
   case ComposerSystemsKey => Seq()
-  case SystemIDLengthKey => 4
-  case CoreIDLengthKey => 8
+  case SystemIDLengthKey => systemIDbits
+  case CoreIDLengthKey => coreIdBits
   case TLInterconnectWidthBytes => 16
-  case ChannelSelectionBitsKey => 3
   case MaxChannelTransactionLenKey => 1 << 30
   // Tile parameters
   // Page table levels. We set it higher than rocket chip default because we need to support large virtual addresses

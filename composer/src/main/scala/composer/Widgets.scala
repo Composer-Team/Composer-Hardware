@@ -127,18 +127,6 @@ abstract class WidgetModule(outer: Widget) extends LazyModuleImp(outer) {
       throw new RuntimeException(s"Could not find CR:${name} in widget: $wName"))
   }
 
-  def headerComment(sb: mutable.StringBuilder): Unit = {
-    val name = getWName.toUpperCase
-    sb.append("\n// Widget: %s\n".format(getWName))
-    sb.append(CppGenerationUtils.genMacro(s"${name}(x)", s"${name}_ ## x"))
-  }
-
-  def genHeader(base: BigInt, sb: StringBuilder) {
-    require(_finalized, "Must build Widgets with their companion object")
-    headerComment(sb)
-    crRegistry.genHeader(wName.getOrElse(name).toUpperCase, base, sb)
-  }
-
   def printCRs(ostream: Option[FileWriter] = None): Unit = crRegistry.printCRs(ostream)
 }
 

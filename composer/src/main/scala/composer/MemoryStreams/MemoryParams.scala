@@ -70,15 +70,37 @@ object CChannelType extends Enumeration {
   * Base type for Composer Memory Channel configurations. Subtypes may include special behaviors and interfaces.
   * i.e., scratchpads and caches
   *
-  * @param name        The name of the channel
-  * @param nChannels   number of memory access channels of this type
-  * @param channelType channel type (ex. Read/Write)
+  * @param name      The name of the channel
+  * @param nChannels number of memory access channels of this type
+  * @param location  location of access
   */
-class CChannelParams(val name: String, val nChannels: Int, val channelType: CChannelType.CChannelType, val location: String = "Mem")
+abstract case class CChannelParams(name: String, nChannels: Int, channelType: CChannelType.CChannelType, location: String = "Mem")
 
-object CChannelParams {
-  def apply(name: String, nChannels: Int, channelType: CChannelType, location: String = "Mem"): CChannelParams =
-    new CChannelParams(name, nChannels, channelType, location)
+/**
+  * Read Channel group
+  *
+  * @param name      The name of the channel
+  * @param nChannels number of memory access channels of this type
+  * @param location  location of access
+  */
+class CReadChannelParams(name: String, nChannels: Int, location: String = "Mem") extends CChannelParams(name, nChannels, CChannelType.ReadChannel, location)
+object CReadChannelParams {
+  def apply(name: String, nChannels: Int, location: String = "Mem"): CReadChannelParams =
+    new CReadChannelParams(name, nChannels, location)
+}
+
+/**
+  * Write channel group
+  *
+  * @param name           The name of the channel
+  * @param nChannels      number of memory access channels of this type
+  * @param maxInFlightTxs maximum number of AXI/TileLink memory transactions can be inflight per writer module at once
+  * @param location       location of access
+  */
+class CWriteChannelParams(name: String, nChannels: Int, val maxInFlightTxs: Int = 2, location: String = "Mem") extends CChannelParams(name, nChannels, CChannelType.WriteChannel, location)
+object CWriteChannelParams {
+  def apply(name: String, nChannels: Int, maxInFlightTxs: Int = 2, location: String = "Mem"): CWriteChannelParams =
+    new CWriteChannelParams(name, nChannels, maxInFlightTxs, location)
 }
 
 /**
