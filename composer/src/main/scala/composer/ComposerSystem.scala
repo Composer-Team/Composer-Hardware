@@ -93,7 +93,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
 
   val lenBits = log2Up(p(MaxChannelTransactionLenKey))
 
-  val channelSelect = Cat(cmd.bits.inst.rs1(2, 0), cmd.bits.inst.rs2)
+  val channelSelect = Cat(cmd.bits.inst.rs2(2, 0), cmd.bits.inst.rs1)
 
   cores.zipWithIndex.foreach { case (core, i) =>
     val coreStart = cmd.fire && funct === FUNC_START.U && coreSelect === i.U
