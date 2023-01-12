@@ -10,6 +10,7 @@ rcpluglen=$(wc -l rocket-chip/project/plugins.sbt | grep -o "[0-9]*")
 # In case there's an update to rocket-chip, we need to cleanse some stuff
 rm -rf project
 mkdir project
+mkdir -p vsim/generated-src
 touch project/plugins.sbt
 cat rocket-chip/project/plugins.sbt >> project/plugins.sbt
 
