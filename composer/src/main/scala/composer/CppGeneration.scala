@@ -88,7 +88,7 @@ object CppGeneration {
         if (sys_id < num_systems - 1) f.write(", ")
       }
       f.write("};\n")
-    } else f.write(s"static const char __composer_channel_map[0][0][0][0];\n")
+    } else f.write(s"static const char __composer_channel_map[1][1][1][1] = {{{{-1}}}};\nenum ComposerChannels {};\n")
     f.write(
       """
         |namespace composer {
@@ -102,9 +102,9 @@ object CppGeneration {
 
     f.write(s"static const uint8_t system_id_bits = ${p(SystemIDLengthKey)};\n")
     f.write(s"static const uint8_t core_id_bits = ${p(CoreIDLengthKey)};\n")
-    f.write(//s"static const uint8_t numChannelSelectionBits = ${p(ChannelSelectionBitsKey)}," +
-      s"static const uint8_t channelTransactionLenBits = ${log2Up(p(MaxChannelTransactionLenKey))};\n")
-    f.write(s"static const composer::composer_pack_info pack_cfg(system_id_bits, core_id_bits, numChannelSelectionBits, channelTransactionLenBits);\n")
+//    f.write(//s"static const uint8_t numChannelSelectionBits = ${p(ChannelSelectionBitsKey)}," +
+//      s"static const uint8_t channelTransactionLenBits = ${log2Up(p(MaxChannelTransactionLenKey))};\n")
+    f.write(s"static const composer::composer_pack_info pack_cfg(system_id_bits, core_id_bits);\n")
     val addrSet = ComposerTop.getAddressSet(0)
     f.write(s"static const uint64_t addrMask = ${addrSet.mask};\n")
 
