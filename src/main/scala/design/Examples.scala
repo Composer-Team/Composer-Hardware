@@ -240,8 +240,8 @@ class WithVectorAdder(withNCores: Int, dataWidth: Int) extends Config((site, _, 
   case ComposerSystemsKey => up(ComposerSystemsKey, site) ++ Seq(ComposerSystemParams(
     coreParams = ComposerCoreParams(
       memoryChannelParams = List(
-        CChannelParams("ReadChannel", 1, CChannelType.ReadChannel),
-        CChannelParams("WriteChannel", 1, CChannelType.WriteChannel))
+        CReadChannelParams("ReadChannel", 1),
+        CWriteChannelParams("WriteChannel", 1))
     ),
     nCores = withNCores,
     name = "VectorSystem",
