@@ -4,7 +4,7 @@ echo "sbt.version=1.3.13" > project/build.properties
 
 # rocket-chip
 rm -rf rocket-chip
-git clone -q https://github.com/chipsalliance/rocket-chip.git && cd rocket-chip && git submodule update --init -q && cd ..
+git clone -q https://github.com/chipsalliance/rocket-chip.git && cd rocket-chip && git checkout 21722ddd51957f43b933f910f34b9c645fa54226 && git submodule update --init -q && cd ..
 
 rcpluglen=$(wc -l rocket-chip/project/plugins.sbt | grep -o "[0-9]*")
 # In case there's an update to rocket-chip, we need to cleanse some stuff
