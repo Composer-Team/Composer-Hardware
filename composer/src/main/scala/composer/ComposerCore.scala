@@ -67,7 +67,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
           supportsPutFull = TransferSizes(1, maxTxLength),
           supportsPutPartial = TransferSizes(1, maxTxLength),
           supportsProbe = TransferSizes(1, maxTxLength))))))
-    }})
+    })}
   val scratch_mod = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.Scratchpad).map(_.asInstanceOf[CScratchpadChannelParams]).map {
     param =>
       lazy val mod = LazyModule(param.make)
