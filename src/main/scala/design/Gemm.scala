@@ -421,7 +421,7 @@ class WithGemm(withNCores: Int,
 
 //noinspection ScalaUnusedSymbol
 class GemmTestF1 extends Config(
-  new WithGemm(2, GemmParam(4, 16, 4, 4, 2048)) ++ new WithComposer() ++ new WithAWSMem(1)
+  new WithGemm(4, GemmParam(4, 16, 4, 4, 2048)) ++ new WithComposer() ++ new WithAWSMem(1)
 )
 
 //noinspection ScalaUnusedSymbol
