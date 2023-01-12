@@ -47,7 +47,7 @@ object CppGeneration {
       f.write("};\n")
       val nNames = allChannelNames.length
 
-      val name_invalid_list = "{ " + Seq.fill(max_channels_per_channelGroup - 1)("0xFF, ").foldLeft("")(_ + _) + " 0xFF }"
+      val name_invalid_list = "{ " + Seq.fill(max_channels_per_channelGroup - 1)("(char)0xFF, ").foldLeft("")(_ + _) + " (char)0xFF }"
       val core_invalid_list = "{ " + Seq.fill(nNames - 1)(name_invalid_list + ", ").foldLeft("")(_ + _) + name_invalid_list + " }"
       f.write(s"static const char __composer_channel_map[$num_systems][$max_core_per_system][$nNames][$max_channels_per_channelGroup] = {")
       (0 until num_systems) foreach { sys_id =>
