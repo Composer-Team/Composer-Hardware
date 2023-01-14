@@ -426,5 +426,5 @@ class GemmTestF1 extends Config(
 
 //noinspection ScalaUnusedSymbol
 class GemmTestF1Big extends Config(
-  new WithGemm(8, GemmParam(4, 256, 8, 16, 2048)) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
+  new WithGemm(6, GemmParam(4, 256, 8, 16, 2048)) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
 )
