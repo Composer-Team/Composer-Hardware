@@ -153,8 +153,9 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
 
   //
   OCache zip OAccs foreach { case (oc_per_row, oa_per_row) =>
+    val bread_per_row_stage2 = RegNext(bread_stage)
     oc_per_row zip oa_per_row foreach { case (oc_per_arith, acc_per_arith) =>
-      acc_per_arith := oc_per_arith(bread_stage2)
+      acc_per_arith := oc_per_arith(bread_per_row_stage2)
     }
   }
 
