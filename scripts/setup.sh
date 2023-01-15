@@ -1,6 +1,5 @@
 #!/bin/bash
 mkdir -p project
-echo "sbt.version=1.3.13" > project/build.properties 
 
 # rocket-chip
 rm -rf rocket-chip
@@ -11,6 +10,7 @@ rcpluglen=$(wc -l rocket-chip/project/plugins.sbt | grep -o "[0-9]*")
 rm -rf project
 mkdir project
 mkdir -p vsim/generated-src
+echo "sbt.version=1.3.13" > project/build.properties 
 touch project/plugins.sbt
 cat rocket-chip/project/plugins.sbt >> project/plugins.sbt
 
