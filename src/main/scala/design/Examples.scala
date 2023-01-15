@@ -262,3 +262,11 @@ class exampleConfig extends Config(
   //  - 1 GaloisLFSR that returns random numbers over the command/response interface
   new WithVectorAdder(1, 16) ++ new WithALUs(1) ++ new WithLFSR(1) ++ new WithComposer() ++ new WithAWSMem(1)
 )
+
+class exampleConfigKria extends Config(
+  // example configuration that has
+  //  - 1 SimpleALU that supports add, sub, multiply
+  //  - 1 VectorAdder that uses Readers/Writers to read/write to large chunks of memory
+  //  - 1 GaloisLFSR that returns random numbers over the command/response interface
+  new WithVectorAdder(1, 16) ++ new WithALUs(1) ++ new WithComposer() ++ new WithKriaMem()
+)

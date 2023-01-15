@@ -28,3 +28,7 @@ object GemmBig extends App {
 object TestDriver extends App {
   Composer.buildConfig(new exampleConfig)
 }
+
+object TestDriverKria extends App {
+  Composer.buildConfig(new exampleConfigKria)
+}
