@@ -2,7 +2,6 @@ package composer
 
 import chisel3._
 import chisel3.util._
-import composer.CppGeneration._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
@@ -38,6 +37,9 @@ case class RegisterEntry(node: Data, name: String, permissions: Permissions) ext
 
 
 class MCRFileMap() {
+  // DO NOT put the MMIOs in the first page. For unified memory systems this will result in null pointer dereferences
+  // not segfaulting
+  val baseAddress = 1 << 12
   private val name2addr = mutable.LinkedHashMap[String, Int]()
   private val regList = ArrayBuffer[MCRMapEntry]()
 
@@ -59,21 +61,10 @@ class MCRFileMap() {
     case (e: RegisterEntry, addr) => mcrIO.bindReg(e, addr)
   }
 
-  def genHeader(prefix: String, base: BigInt, sb: mutable.StringBuilder): Unit = {
-    name2addr.toList foreach { case (regName, idx) =>
-      val fullName = s"${prefix}_$regName"
-      val address = base + idx
-      sb append s"#define $fullName $address\n"
-    }
-  }
-
-  // A variation of above which dumps the register map as a series of arrays
-  // Returns a copy of the current register map
-  def getRegMap = name2addr.toMap
-
   def printCRs(outStream: Option[FileWriter] = None): Unit = {
     regList.zipWithIndex foreach { case (entry, i) =>
-      val addr = i << 2
+      val addr = baseAddress | (i << 2)
+      require(i < 1024)
       outStream match {
         case a: Some[FileWriter] => a.get.write(s"#define ${entry.name.toUpperCase()} ($addr)\n")
         case None => println(s"Name: ${entry.name}, ID: $i, Addr: $addr")
@@ -119,10 +110,10 @@ class MCRIO(numCRs: Int)(implicit p: Parameters) extends ParameterizedBundle()(p
 }
 
 class MCRFile(numRegs: Int)(implicit p: Parameters) extends LazyModule {
-
+  require((p(MMIOBaseAddress) & 0x3FFL) == 0)
   val node = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
     slaves = Seq(AXI4SlaveParameters(
-      address = List(AddressSet(if(p(MMIOBaseAddress).isDefined) p(MMIOBaseAddress).get else 0L, 0x3F)),
+      address = List(AddressSet(p(MMIOBaseAddress), (1 << (log2Up(numRegs)+2)) - 1)),
       regionType = RegionType.UNCACHED,
       supportsWrite = TransferSizes(1, 4),
       supportsRead = TransferSizes(1, 4)
@@ -139,20 +130,23 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
     val mcr = new MCRIO(numRegs)
   })
 
+  val logNumRegs = log2Up(numRegs)
+  val lnr_mo = logNumRegs - 1
+
   val (in, _) = outer.node.in(0)
 
   val sWriteIdle :: sGetWrite :: sDoWrite :: sWriteResp :: sWriteErrorWait :: sWriteErrorWb :: Nil = Enum(6)
   val sReadIdle :: sGetReadData :: sPublishRead :: sReadError :: Nil = Enum(4)
 
   val writeState = RegInit(sWriteIdle)
-  val writeAddr = Reg(UInt(log2Up(numRegs).W))
+  val writeAddr = Reg(UInt(12.W))
   val writeLen = Reg(UInt(in.aw.bits.len.getWidth.W))
   val writeId = Reg(UInt(in.aw.bits.id.getWidth.W))
   val wStrb = Reg(UInt(io.mcr.wstrb.getWidth.W))
   val wData = Reg(UInt(in.w.bits.data.getWidth.W))
 
   val readState = RegInit(sReadIdle)
-  val readAddr = Reg(UInt(log2Up(numRegs).W))
+  val readAddr = Reg(UInt(12.W))
   val readLen = Reg(UInt(in.aw.bits.len.getWidth.W))
   val readID = Reg(UInt(in.ar.bits.id.getWidth.W))
   val readData = Reg(UInt(in.r.bits.data.getWidth.W))
@@ -186,7 +180,7 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
   switch(writeState) {
     is(sWriteIdle) {
       when(in.aw.valid) {
-        writeAddr := (in.aw.bits.addr >> 2)(log2Up(numRegs) - 1, 0)
+        writeAddr := (in.aw.bits.addr >> 2)(lnr_mo, 0)
         writeState := sGetWrite
         writeLen := in.aw.bits.len
         // this only actually asserts during simulation. During a real execution, we return errors for each beat instead
@@ -243,7 +237,7 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
   switch(readState) {
     is(sReadIdle) {
       when(in.ar.valid) {
-        readAddr := (in.ar.bits.addr >> 2)(log2Up(numRegs) - 1, 0)
+        readAddr := (in.ar.bits.addr >> 2)(lnr_mo, 0)
         readState := sGetReadData
         readLen := in.ar.bits.len
         readID := in.ar.bits.id

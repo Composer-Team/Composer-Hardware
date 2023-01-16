@@ -20,7 +20,7 @@ object CppGeneration {
     if (p(HasDiscreteMemory)) {
       f.write("#define COMPOSER_USE_CUSTOM_ALLOC\n" +
         "#define NUM_DDR_CHANNELS " + mem.nMemoryChannels + "\n" +
-          "using composer_allocator=composer::device_allocator<" + mem.master.size + ">;\n")
+        "using composer_allocator=composer::device_allocator<" + mem.master.size + ">;\n")
     }
     cr.printCRs(Some(f))
 
@@ -147,12 +147,8 @@ object CppGeneration {
       case None =>
         f.write("// No memory detected, not defining Address Sim Dtype\n")
     }
-    p(MMIOBaseAddress) match {
-      case Some(a) =>
-        f.write("const uint64_t ComposerMMIOOffset = " + a + "L;\n")
-      case _ =>
-        f.write("#define COMPOSER_NO_MMIO\n")
-    }
+    f.write("const uint64_t ComposerMMIOOffset = " + p(MMIOBaseAddress) + "L;\n")
+
 
     f.write("#endif\n")
     f.close()

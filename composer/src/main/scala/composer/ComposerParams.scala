@@ -9,7 +9,7 @@ import freechips.rocketchip.rocket.PgLevels
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
 
-case object MMIOBaseAddress extends Field[Option[Long]]
+case object MMIOBaseAddress extends Field[Long]
 
 case object HasDiscreteMemory extends Field[Boolean]
 
@@ -75,7 +75,7 @@ class WithAWSMem(nMemoryChannels: Int) extends Config((_, _, _) => {
     q
   case HasDMA => Some(6)
   case HasAXILExternalMMIO => true
-  case MMIOBaseAddress => None // MMIO is not real, it's just a PCIE bus transaction that pretends to be MMIO
+  case MMIOBaseAddress => 0x0L // MMIO is not real, it's just a PCIE bus transaction that pretends to be MMIO
   // TODO this can be tuned
   case CChannelXBarWidth => 16
   case HasDiscreteMemory => true
@@ -89,7 +89,7 @@ class WithKriaMem extends Config((_, _, _) => {
     idBits = 6
   ), 1))
   // MMIO is real - part of the address space is reserved for MMIO communications
-  case MMIOBaseAddress => Some(0xB0000000L)
+  case MMIOBaseAddress => (1 << 12).toLong // put on the 2nd page. Skip first 4KB page to preserve behavior of *(nullptr)
   case HasDMA => None
   // TODO this can be tuned
   case CChannelXBarWidth => 8
