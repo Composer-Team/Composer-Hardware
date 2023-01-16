@@ -15,9 +15,13 @@ object CppGeneration {
       "#include <composer/rocc_cmd.h>\n" +
       "#include <cinttypes>\n" +
       "#ifndef COMPOSER_ALLOCATOR_GEN\n" +
-      "#define COMPOSER_ALLOCATOR_GEN\n" +
-      "#define NUM_DDR_CHANNELS " + mem.nMemoryChannels + "\n" +
-      "using composer_allocator=composer::device_allocator<" + mem.master.size + ">;\n")
+      "#define COMPOSER_ALLOCATOR_GEN\n")
+
+    if (p(HasDiscreteMemory)) {
+      f.write("#define COMPOSER_USE_CUSTOM_ALLOC\n" +
+        "#define NUM_DDR_CHANNELS " + mem.nMemoryChannels + "\n" +
+          "using composer_allocator=composer::device_allocator<" + mem.master.size + ">;\n")
+    }
     cr.printCRs(Some(f))
 
     val num_systems = acc.systems.length
@@ -102,8 +106,8 @@ object CppGeneration {
 
     f.write(s"static const uint8_t system_id_bits = ${p(SystemIDLengthKey)};\n")
     f.write(s"static const uint8_t core_id_bits = ${p(CoreIDLengthKey)};\n")
-//    f.write(//s"static const uint8_t numChannelSelectionBits = ${p(ChannelSelectionBitsKey)}," +
-//      s"static const uint8_t channelTransactionLenBits = ${log2Up(p(MaxChannelTransactionLenKey))};\n")
+    //    f.write(//s"static const uint8_t numChannelSelectionBits = ${p(ChannelSelectionBitsKey)}," +
+    //      s"static const uint8_t channelTransactionLenBits = ${log2Up(p(MaxChannelTransactionLenKey))};\n")
     f.write(s"static const composer::composer_pack_info pack_cfg(system_id_bits, core_id_bits);\n")
     val addrSet = ComposerTop.getAddressSet(0)
     f.write(s"static const uint64_t addrMask = ${addrSet.mask};\n")

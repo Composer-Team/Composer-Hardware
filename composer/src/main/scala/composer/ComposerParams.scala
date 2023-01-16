@@ -11,6 +11,8 @@ import freechips.rocketchip.tile._
 
 case object MMIOBaseAddress extends Field[Option[Long]]
 
+case object HasDiscreteMemory extends Field[Boolean]
+
 case object ComposerSystemsKey extends Field[List[ComposerSystemParams]]
 
 /* TODO UG: How many bits we are using to identify a system. Ensure that no system has the same ID and the largest ID
@@ -22,8 +24,6 @@ case object SystemIDLengthKey extends Field[Int]
  *           identified by this many bits.
  */
 case object CoreIDLengthKey extends Field[Int]
-
-case object ChannelSelectionBitsKey extends Field[Int]
 
 case object MaxChannelTransactionLenKey extends Field[Int]
 
@@ -78,6 +78,7 @@ class WithAWSMem(nMemoryChannels: Int) extends Config((_, _, _) => {
   case MMIOBaseAddress => None // MMIO is not real, it's just a PCIE bus transaction that pretends to be MMIO
   // TODO this can be tuned
   case CChannelXBarWidth => 16
+  case HasDiscreteMemory => true
 })
 
 class WithKriaMem extends Config((_, _, _) => {
@@ -93,6 +94,7 @@ class WithKriaMem extends Config((_, _, _) => {
   // TODO this can be tuned
   case CChannelXBarWidth => 8
   case HasAXILExternalMMIO => false // use full AXI4
+  case HasDiscreteMemory => false
 })
 
 

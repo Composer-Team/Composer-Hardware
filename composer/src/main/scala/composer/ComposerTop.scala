@@ -10,6 +10,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
+import chisel3.util.experimental.forceName
 import freechips.rocketchip.util._
 
 import scala.annotation.tailrec
@@ -56,9 +57,9 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   private val device = new MemoryDevice
 
   // AXI-L Port - commands come through here
-  val ocl_port = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+  val S00_AXI = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     masters = Seq(AXI4MasterParameters(
-      name = "ocl",
+      name = "S00_AXI",
       //      aligned = false, // could be true?
       maxFlight = Some(1),
       id = IdRange(0, 1 << 16)
@@ -66,7 +67,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     //    userBits = 0
   )))
   // AXI4 DRAM Ports
-  val dram_ports = AXI4SlaveNode(Seq.tabulate(nMemChannels) { channel =>
+  val M00_AXI = AXI4SlaveNode(Seq.tabulate(nMemChannels) { channel =>
     // TODO Brendan? DDR Controllers on F1 are oblivious to address mappings
     //    It seems like RocketChip wrote the following stuff up assuming different DRAM rows would be on separate DIMMs
     //    and that something else would be filtering out the bits for that but F1 controllers certainly don't seem to
@@ -105,7 +106,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   val dma_port =  if (p(HasDMA).isDefined) {
     val dma_node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
       masters = Seq(AXI4MasterParameters(
-        name = "dma",
+        name = "S01_AXI",
         maxFlight = Some(2),
         aligned = true,
         id = IdRange(0, 1 << p(HasDMA).get),
@@ -154,13 +155,13 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   }
 
   mem_tops foreach { mt =>
-    dram_ports := AXI4Buffer() := AXI4UserYanker() := AXI4Buffer() := AXI4IdIndexer(extMemIDBits) := AXI4Buffer() := mt
+    M00_AXI := AXI4Buffer() := AXI4UserYanker() := AXI4Buffer() := AXI4IdIndexer(extMemIDBits) := AXI4Buffer() := mt
   }
 
   val cmd_resp_axilhub = LazyModule(new AXILHub()(dummyTL))
 
   // connect axil hub to external axil port
-  cmd_resp_axilhub.node := AXI4Buffer() := AXI4IdIndexer(2) := ocl_port
+  cmd_resp_axilhub.node := AXI4Buffer() := AXI4IdIndexer(2) := S00_AXI
   // connect axil hub to accelerator
 
   (acc.hostmem
@@ -181,26 +182,29 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   val acc = outer.acc
   val axil_hub = outer.cmd_resp_axilhub
-  val ocl_port = outer.ocl_port
-  val dram_ports = outer.dram_ports
+  val ocl_port = outer.S00_AXI
+  val dram_ports = outer.M00_AXI
   acc.module.io.cmd <> axil_hub.module.io.rocc_in
   axil_hub.module.io.rocc_out <> acc.module.io.resp
 
-  val ocl = IO(Flipped(HeterogeneousBag.fromNode(ocl_port.out)))
-  (ocl zip ocl_port.out) foreach { case (o, (i, _)) => i <> o }
+  val S00_AXI = IO(Flipped(new AXI4Compat(ocl_port.out(0)._1.params)))
+  AXI4Compat.connectCompatSlave(S00_AXI, ocl_port.out(0)._1)
 
-  val mem: Seq[AXI4Bundle] = dram_ports.in.map(a => {
-    IO(new AXI4Bundle(a._1.params))
+  val M00_AXI = dram_ports.in.zipWithIndex.map(a => {
+    val io = IO(new AXI4Compat(a._1._1.params))
+    io.suggestName(s"M0${a._2}_AXI")
+    io
   })
+  //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
+  (M00_AXI zip dram_ports.in) foreach { case (i, (o, _)) => AXI4Compat.connectCompatMaster(i, o) }
+
 
   // make incoming dma port and connect it
 
   if (p(HasDMA).isDefined) {
-    val dma = IO(Flipped(new AXI4Bundle(outer.dram_ports.in(0)._1.params)))
-    outer.dma_port.get.out(0)._1 <> dma
+    val dma = IO(Flipped(new AXI4Compat(outer.M00_AXI.in(0)._1.params)))
+    AXI4Compat.connectCompatSlave(dma, outer.dma_port.get.out(0)._1)
   }
-  //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
-  (mem zip dram_ports.in) foreach { case (i, (o, _)) => i <> o }
 
   //add thing to here
   val arCnt = RegInit(0.U(64.W))
