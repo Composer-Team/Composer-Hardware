@@ -39,7 +39,6 @@ case class RegisterEntry(node: Data, name: String, permissions: Permissions) ext
 class MCRFileMap() {
   // DO NOT put the MMIOs in the first page. For unified memory systems this will result in null pointer dereferences
   // not segfaulting
-  val baseAddress = 1 << 12
   private val name2addr = mutable.LinkedHashMap[String, Int]()
   private val regList = ArrayBuffer[MCRMapEntry]()
 
@@ -61,9 +60,9 @@ class MCRFileMap() {
     case (e: RegisterEntry, addr) => mcrIO.bindReg(e, addr)
   }
 
-  def printCRs(outStream: Option[FileWriter] = None): Unit = {
+  def printCRs(outStream: Option[FileWriter] = None)(implicit p: Parameters): Unit = {
     regList.zipWithIndex foreach { case (entry, i) =>
-      val addr = baseAddress | (i << 2)
+      val addr = p(MMIOBaseAddress) | (i << 2)
       require(i < 1024)
       outStream match {
         case a: Some[FileWriter] => a.get.write(s"#define ${entry.name.toUpperCase()} ($addr)\n")

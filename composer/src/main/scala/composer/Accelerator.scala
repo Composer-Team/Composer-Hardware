@@ -53,7 +53,6 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   accCmd.bits.inst.xs1 := cmdRouter.io.out(1).bits.inst.xs1
   accCmd.bits.inst.xs2 := cmdRouter.io.out(1).bits.inst.xs2
   accCmd.bits.inst.opcode := cmdRouter.io.out(1).bits.inst.opcode
-  // TODO UG: The top bits in funct refer to the system_id. Ensure that we extract the bits according to our param
   val nSystemIDBits = p(SystemIDLengthKey)
   require(nSystemIDBits <= 7)
   accCmd.bits.inst.funct := cmdRouter.io.out(1).bits.inst.funct(6-nSystemIDBits, 0)
