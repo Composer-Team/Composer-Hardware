@@ -10,31 +10,19 @@ import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
 
 case object MMIOBaseAddress extends Field[Long]
-
 case object HasDiscreteMemory extends Field[Boolean]
-
 case object ComposerSystemsKey extends Field[List[ComposerSystemParams]]
-
-/* TODO UG: How many bits we are using to identify a system. Ensure that no system has the same ID and the largest ID
- *           can be represented with this many bits
- */
 case object SystemIDLengthKey extends Field[Int]
-
-/* TODO UG: How many bits are we using to identify a core. Ensure that no system has more cores than can be uniquely
- *           identified by this many bits.
- */
 case object CoreIDLengthKey extends Field[Int]
-
 case object MaxChannelTransactionLenKey extends Field[Int]
-
 case object TLInterconnectWidthBytes extends Field[Int]
-
 // if we support a dedicated DMA port, provide the number of ID bits
 case object HasDMA extends Field[Option[Int]]
-
 case object HasAXILExternalMMIO extends Field[Boolean]
-
 case object CChannelXBarWidth extends Field[Int]
+case object MaximumTransactionLength extends Field[Int]
+case object SystemName2IdMapKey extends Field[Map[String, Int]]
+case object RequireInternalCommandRouting extends Field[Boolean]
 
 case class ComposerCoreParams(memoryChannelParams: List[CChannelParams] = List(),
                               customRead: Boolean = false,
@@ -42,7 +30,6 @@ case class ComposerCoreParams(memoryChannelParams: List[CChannelParams] = List()
                               system_id: Int = 0, // for internal use
                               nMemXacts: Int = 1 // not for production release
                              )
-case object MaximumTransactionLength extends Field[Int]
 
 case class ComposerConstructor(composerCoreParams: ComposerCoreParams, composerCoreWrapper: ComposerCoreWrapper)
 
@@ -58,6 +45,8 @@ case class ComposerSystemParams(nCores: Int,
                                 bufMasked: Boolean = false,
                                 doubleBuf: Boolean = false,
                                 channelQueueDepth: Int = 32,
+                                canReceiveSoftwareCommands: Boolean = true,
+                                canIssueCoreCommands: Boolean = false
                                )
 
 
@@ -130,7 +119,8 @@ class WithComposer(maximumTxLengthBytes: Int = 64, systemIDbits: Int = 4, coreId
   case SystemBusKey => SystemBusParams(
     beatBytes = site(XLen) / 8,
     blockBytes = site(CacheBlockBytes))
-  case ControlBusKey => PeripheryBusParams(
+  case ControlBusKey => //noinspection DuplicatedCode
+    PeripheryBusParams(
     beatBytes = site(XLen) / 8,
     blockBytes = site(CacheBlockBytes),
     errorDevice = Some(BuiltInErrorDeviceParams(

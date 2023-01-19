@@ -55,7 +55,7 @@ object AXI4Compat {
   def connectCompatMaster(compat: AXI4Compat, axi4: AXI4Bundle): Unit = {
     axi4.r.bits.id := compat.rid
     axi4.r.bits.data := compat.rdata
-    axi4.r.bits.data := compat.rresp
+    axi4.r.bits.resp := compat.rresp
     axi4.r.bits.last := compat.rlast
     axi4.r.valid := compat.rvalid
     compat.rready := axi4.r.ready
@@ -101,7 +101,7 @@ object AXI4Compat {
   def connectCompatSlave(compat: AXI4Compat, axi4: AXI4Bundle): Unit = {
     compat.rid := axi4.r.bits.id
     compat.rdata := axi4.r.bits.data
-    compat.rresp := axi4.r.bits.data
+    compat.rresp := axi4.r.bits.resp
     compat.rlast := axi4.r.bits.last
     compat.rvalid := axi4.r.valid
     axi4.r.ready := compat.rready

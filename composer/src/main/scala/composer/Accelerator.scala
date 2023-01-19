@@ -2,7 +2,6 @@ package composer
 
 import chisel3._
 import chisel3.util._
-import composer.RoccConstants.FUNC_START
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tile._
@@ -12,10 +11,26 @@ import freechips.rocketchip.subsystem.ExtMem
 import scala.language.postfixOps
 
 class ComposerAcc(implicit p: Parameters) extends LazyModule {
-
   val configs = p(ComposerSystemsKey)
-  val system_tups = configs.zipWithIndex.map { case (c: ComposerSystemParams, id: Int) =>
-    (LazyModule(new ComposerSystem(c, id)), id, c)
+  val name2Id = scala.collection.immutable.Map.from(configs.zipWithIndex.map(a => (a._1.name, a._2)))
+  val requireInternalCmdRouting = configs.map(_.canIssueCoreCommands).reduce(_ || _)
+  val pWithMap = p.alterPartial({
+    case SystemName2IdMapKey => name2Id
+    case RequireInternalCommandRouting => requireInternalCmdRouting
+  })
+  val system_tups = name2Id.keys.map { name =>
+    val id = name2Id(name)
+    val config = configs(id)
+    (LazyModule(new ComposerSystem(config, id)(pWithMap)), id, config)
+  }.toSeq
+
+  // for each system that can issue commands, connect them to the other systems in the accelerator
+  system_tups.filter(_._3.canIssueCoreCommands).foreach { sy_tup =>
+    // self loops are violation of TL protocol
+    system_tups.filter(_._3.name != sy_tup._3.name).foreach { recieve_tup =>
+      recieve_tup._1.incomingInternalCommandXbar.get := TLBuffer() := sy_tup._1.outgoingCommandXbar.get
+      sy_tup._1.incomingInternalResponseXBar.get := TLBuffer() := recieve_tup._1.outgoingInternalResponseXbar.get
+    }
   }
 
   val systems = system_tups.map(_._1)
@@ -28,13 +43,12 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   val io = IO(new Bundle {
     val cmd = Flipped(Decoupled(new RoCCCommand))
     val resp = Decoupled(new RoCCResponse)
-    val busy = Output(Bool())
   })
 
   val cmd = Queue(io.cmd)
 
   val cmdArb = Module(new RRArbiter(new RoCCCommand, 1))
-  cmdArb.io.in <> Seq(cmd)
+  cmdArb.io.in(0) <> cmd
 
   // route cmds between:
   //  custom0: control opcodes (used for WAIT commands)
@@ -42,7 +56,6 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   val cmdRouter = Module(new RoccCommandRouter(Seq(OpcodeSet.custom0, OpcodeSet.custom3)))
   cmdRouter.io.in <> cmdArb.io.out
 
-  val optionCmd = cmdRouter.io.out(0) // CUSTOM0, used for WAIT
   val accCmd = Wire(Decoupled(new ComposerRoccCommand)) //CUSTOM3, used for everything else
   accCmd.valid := cmdRouter.io.out(1).valid
   cmdRouter.io.out(1).ready := accCmd.ready
@@ -53,72 +66,61 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   accCmd.bits.inst.xs1 := cmdRouter.io.out(1).bits.inst.xs1
   accCmd.bits.inst.xs2 := cmdRouter.io.out(1).bits.inst.xs2
   accCmd.bits.inst.opcode := cmdRouter.io.out(1).bits.inst.opcode
+
   val nSystemIDBits = p(SystemIDLengthKey)
   require(nSystemIDBits <= 7)
   accCmd.bits.inst.funct := cmdRouter.io.out(1).bits.inst.funct(6-nSystemIDBits, 0)
   accCmd.bits.inst.system_id := cmdRouter.io.out(1).bits.inst.funct(6, 6-nSystemIDBits+1)
-  // TODO UG: same thing with Core ID. Get parameter and extract bits right for core_id and rs1
+
   val nCoreIDBits = p(CoreIDLengthKey)
   require(nCoreIDBits < 64)
   accCmd.bits.core_id := cmdRouter.io.out(1).bits.rs1(63, 64-nCoreIDBits)
   accCmd.bits.payload1 := cmdRouter.io.out(1).bits.rs1(63-nCoreIDBits, 0)
   accCmd.bits.payload2 := cmdRouter.io.out(1).bits.rs2
+
   val system_id = accCmd.bits.inst.system_id
   accCmd.ready := false.B //base case
 
-  val maxCore = outer.systems.map(_.nCores).max
-  val hostRespFile = RegInit(VecInit(Seq.fill(outer.systems.length)(VecInit(Seq.fill(maxCore)(false.B)))))
-  val monitorWaiting = RegInit(false.B)
+  val waitingToFlush = RegInit(false.B)
+  cmdRouter.io.out(0).ready := !waitingToFlush
+  when (cmdRouter.io.out(0).fire) {
+    waitingToFlush := true.B
+  }
 
-  val systemQueues = outer.systems.map(_ => Module(new Queue(new ComposerRoccCommand, 2)))
-  outer.system_tups zip systemQueues foreach { case (tup, q) =>
-    q.io.enq.valid := (accCmd.valid && system_id === tup._2.U /* && !monitorWaiting*/)
-    q.io.enq.bits := accCmd.bits
-    when(system_id === tup._2.U) {
-      accCmd.ready := q.io.enq.ready
+  val systemSoftwareResps = outer.system_tups.zipWithIndex.filter(_._1._3.canReceiveSoftwareCommands) map { case (sys_tup, sys_idx) =>
+    val sys_queue = Module(new Queue(new ComposerRoccCommand, entries = 2))
+
+    // enqueue commands from software
+    sys_queue.io.enq.valid := accCmd.valid && sys_idx.U === system_id
+    sys_queue.io.enq.bits := accCmd.bits
+    when (system_id === sys_idx.U) {
+      accCmd.ready := sys_queue.io.enq.ready
     }
-    tup._1.module.io.cmd <> q.io.deq
-    when(q.io.deq.fire && isStart(q.io.deq.bits)) {
-      hostRespFile(q.io.deq.bits.inst.system_id)(q.io.deq.bits.core_id) := q.io.deq.bits.inst.xd
+
+    // dequeue
+    sys_tup._1.module.sw_io.get.cmd <> sys_queue.io.deq
+
+    // while we're flushing don't let anything get in
+    when(waitingToFlush) {
+      sys_queue.io.deq.ready := false.B
+      sys_tup._1.module.sw_io.get.cmd.valid := false.B
     }
-    when(monitorWaiting) {
-      q.io.deq.ready := false.B
-      tup._1.module.io.cmd.valid := false.B
+    sys_tup._1.module.sw_io.get.resp
+  }
+
+  if (systemSoftwareResps.isEmpty) {
+    io.resp.valid := false.B
+    io.resp.bits := DontCare
+  } else {
+    val respArbiter = Module(new RRArbiter[RoCCResponse](new RoCCResponse, systemSoftwareResps.size))
+    respArbiter.io.in.zip(systemSoftwareResps).foreach { case (arbio, sysio) =>
+      arbio.bits.data := sysio.bits.pack
+      arbio.bits.rd := sysio.bits.rd
+      arbio.valid := sysio.valid
+      sysio.ready := arbio.ready
     }
+    respArbiter.io.out <> io.resp
   }
-
-  val anyBusy = outer.system_tups.map(_._1.module.io.busy).reduce(_ || _)
-  when(monitorWaiting === true.B && !anyBusy) {
-    monitorWaiting := false.B
-  }
-  when(optionCmd.fire) {
-    monitorWaiting := true.B
-  }
-  optionCmd.ready := !monitorWaiting
-
-  def isStart(x: ComposerRoccCommand): Bool = {
-    x.inst.funct === FUNC_START.U
-  }
-
-
-  val respIF = outer.systems.map(_.module.io.resp)
-  val respArb = Module(new RRArbiter(new ComposerRoccResponse(), respIF.size))
-  when(respArb.io.out.fire) {
-    hostRespFile(respArb.io.out.bits.system_id)(respArb.io.out.bits.core_id) := false.B
-  }
-
-  respArb.io.in <> respIF
-  //io.resp <> respArb.io.out
-  respArb.io.out.ready := io.resp.ready
-
-  io.resp.bits.rd := respArb.io.out.bits.rd
-  // TODO UG: fix this to extract the correct bits according to the parameter
-  io.resp.bits.data := respArb.io.out.bits.packData()
-  io.resp.valid := respArb.io.out.valid && hostRespFile(respArb.io.out.bits.system_id)(respArb.io.out.bits.core_id)
-  // MONITOR CODE END
-
-  io.busy := cmdArb.io.out.valid || accCmd.valid || outer.systems.map(_.module.io.busy).reduce(_ || _) || systemQueues.map(_.io.count =/= 0.U).reduce(_ || _)
-
 }
 
 class ComposerAccSystem(implicit p: Parameters) extends LazyModule {

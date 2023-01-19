@@ -2,7 +2,7 @@ package composer
 
 import chisel3._
 import chisel3.util._
-import composer.ComposerTop.{getAddressMask, getAddressSet}
+import composer.ComposerTop._
 import composer.CppGeneration.genCPPHeader
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
@@ -10,8 +10,6 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
-import chisel3.util.experimental.forceName
-import freechips.rocketchip.util._
 
 import scala.annotation.tailrec
 import scala.language.implicitConversions
@@ -67,7 +65,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     //    userBits = 0
   )))
   // AXI4 DRAM Ports
-  val M00_AXI = AXI4SlaveNode(Seq.tabulate(nMemChannels) { channel =>
+  val AXI_MEM = AXI4SlaveNode(Seq.tabulate(nMemChannels) { channel =>
     AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
         address = Seq(getAddressSet(channel)),
@@ -132,14 +130,12 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       xb := dma
     }
     dma_mem_xbar
-//    dma_mem_xbar foreach (dram_ports := AXI4Buffer() := AXI4IdIndexer(extMemIDBits) := AXI4Buffer() := _)
   } else {
-//    composer_mems foreach (dram_ports := AXI4Buffer() := AXI4IdIndexer(extMemIDBits) := AXI4Buffer() := _)
     composer_mems
   }
 
   mem_tops foreach { mt =>
-    M00_AXI := AXI4Buffer() := AXI4UserYanker() := AXI4Buffer() := AXI4IdIndexer(extMemIDBits) := AXI4Buffer() := mt
+    AXI_MEM := AXI4Buffer() := AXI4UserYanker() := AXI4Buffer() := AXI4IdIndexer(extMemIDBits) := AXI4Buffer() := mt
   }
 
   val cmd_resp_axilhub = LazyModule(new AXILHub()(dummyTL))
@@ -167,7 +163,7 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   val acc = outer.acc
   val axil_hub = outer.cmd_resp_axilhub
   val ocl_port = outer.S00_AXI
-  val dram_ports = outer.M00_AXI
+  val dram_ports = outer.AXI_MEM
   acc.module.io.cmd <> axil_hub.module.io.rocc_in
   axil_hub.module.io.rocc_out <> acc.module.io.resp
 
@@ -186,7 +182,7 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   // make incoming dma port and connect it
 
   if (p(HasDMA).isDefined) {
-    val dma = IO(Flipped(new AXI4Compat(outer.M00_AXI.in(0)._1.params)))
+    val dma = IO(Flipped(new AXI4Compat(outer.AXI_MEM.in(0)._1.params)))
     AXI4Compat.connectCompatSlave(dma, outer.dma_port.get.out(0)._1)
   }
 
@@ -225,25 +221,25 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   }
 
   switch(acc.module.io.resp.bits.rd) {
-    is(16.U) {
+    is(RDReserves.arCnt.U) {
       axil_hub.module.io.rocc_out.bits.data := arCnt
     }
-    is(17.U) {
+    is(RDReserves.awCnt.U) {
       axil_hub.module.io.rocc_out.bits.data := awCnt
     }
-    is(18.U) {
+    is(RDReserves.rCnt.U) {
       axil_hub.module.io.rocc_out.bits.data := rCnt
     }
-    is(19.U) {
+    is(RDReserves.wCnt.U) {
       axil_hub.module.io.rocc_out.bits.data := wCnt
     }
-    is(20.U) {
+    is(RDReserves.bCnt.U) {
       axil_hub.module.io.rocc_out.bits.data := bCnt
     }
-    is(21.U) {
+    is(RDReserves.rWait.U) {
       axil_hub.module.io.rocc_out.bits.data := rWait
     }
-    is(22.U) {
+    is(RDReserves.bWait.U) {
       axil_hub.module.io.rocc_out.bits.data := bWait
     }
   }

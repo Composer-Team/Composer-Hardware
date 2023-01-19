@@ -3,6 +3,7 @@ package composer
 import chisel3._
 import chisel3.util._
 import composer.MemoryStreams._
+import composer.TLManagement.TLClientModule
 import freechips.rocketchip.util._
 import freechips.rocketchip.config._
 import composer.common._
@@ -12,7 +13,7 @@ import freechips.rocketchip.tilelink._
 
 class ComposerCoreIO(implicit p: Parameters) extends ParameterizedBundle()(p) {
   val req = Flipped(DecoupledIO(new ComposerRoccCommand))
-  val resp = DecoupledIO(new ComposerRoccResponse)
+  val resp = DecoupledIO(new ComposerRoccUserResponse)
   val busy = Output(Bool())
 }
 
@@ -22,7 +23,7 @@ class DataChannelIO(dataBytes: Int, vlen: Int = 1) extends Bundle {
   val finished = Output(Bool())
 }
 
-class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_id: Int, system_id: Int)(implicit p: Parameters) extends LazyModule {
+class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val core_id: Int, system_id: Int)(implicit p: Parameters) extends LazyModule {
   val coreParams = composerSystemParams.coreParams.copy(core_id = core_id, system_id = system_id)
   val blockBytes = p(CacheBlockBytes)
   val maxTxLength = p(MaximumTransactionLength)
@@ -57,7 +58,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
         )))))
     })
   }
-  val writers = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.WriteChannel).map{ p =>
+  val writers = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.WriteChannel).map { p =>
     val para = p.asInstanceOf[CWriteChannelParams]
     (para.name, List.tabulate(para.nChannels) { i =>
       TLClientNode(List(TLMasterPortParameters.v1(
@@ -67,13 +68,22 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
           supportsPutFull = TransferSizes(1, maxTxLength),
           supportsPutPartial = TransferSizes(1, maxTxLength),
           supportsProbe = TransferSizes(1, maxTxLength))))))
-    })}
+    })
+  }
   val scratch_mod = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.Scratchpad).map(_.asInstanceOf[CScratchpadChannelParams]).map {
     param =>
       lazy val mod = LazyModule(param.make)
       (param.name, mod)
   }
   val readerNodes = unCachedReaders ++ CacheNodes.map(i => (i._1, i._2._2))
+
+  val externalCoreCommNodes = if (composerSystemParams.canIssueCoreCommands) {
+    Some(TLClientNode(Seq(TLMasterPortParameters.v1(clients = Seq(TLMasterParameters.v1(
+      s"${composerSystemParams.name}_core${core_id}_toOtherCores",
+      supportsProbe = TransferSizes(8),
+      supportsPutFull = TransferSizes(8)
+    ))))))
+  } else None
 
   val mem_nodes = (
     CacheNodes.map(i => (i._1, i._2._2)) ++
@@ -88,15 +98,11 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
 class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Parameters) extends
   LazyModuleImp(composerConstructor.composerCoreWrapper) {
 
-  private val composerCoreParams = composerConstructor.composerCoreParams
   private val outer = composerConstructor.composerCoreWrapper
   val io = IO(new ComposerCoreIO())
 
   var read_ios: List[((String, Int), DecoupledIO[ChannelTransactionBundle])] = List()
   var write_ios: List[((String, Int), DecoupledIO[ChannelTransactionBundle])] = List()
-
-  io.resp.bits.system_id := composerCoreParams.system_id.U
-  io.resp.bits.core_id := composerCoreParams.core_id.U
 
   val cache_invalidate_ios = composerConstructor.composerCoreWrapper.CacheNodes.map(_._2._1.module.io_invalidate)
 
@@ -138,6 +144,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       case None => getTLClients(name, outer.readerNodes).map(tab_id => Module(new CReader(dataBytes, vlen,
         prefetchRows, transactionEmitBehavior, tab_id)))
     }
+    //noinspection DuplicatedCode
     mod.zipWithIndex foreach { case (m, m_idx) =>
       m.tl_out <> m.tl_outer
       m.suggestName(name)
@@ -160,6 +167,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       case Some(id) => List(Module(new SequentialWriter(dataBytes, getTLClients(name, outer.writers)(id))))
       case None => getTLClients(name, outer.writers).map(tab_id => Module(new SequentialWriter(dataBytes, tab_id)))
     }
+    //noinspection DuplicatedCode
     mod.zipWithIndex foreach { case (m, m_idx) =>
       m.tl_out <> m.tl_outer
       m.suggestName(name)
@@ -183,10 +191,43 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     (mod.req, mod.access)
   }
 
+  val composer_response_io = if (outer.composerSystemParams.canIssueCoreCommands) {
+    Some(IO(new ComposerRoccResponse()))
+  } else None
+
+  val composer_command_io = if (outer.composerSystemParams.canIssueCoreCommands) {
+    val node = outer.externalCoreCommNodes.get
+    val mod = Module(new TLClientModule(node))
+    node.out(0)._1 <> mod.tl
+    val wire = Decoupled(new ComposerRoccCommand)
+    wire.ready := mod.io.ready
+    mod.io.valid := wire.valid
+    mod.io.bits := wire.bits.pack()
+    wire
+  }
+
+  def genCoreCommand(name: String, expectResponse: Bool, rs1: UInt = 0.U, rs2: UInt = 0.U, rd: UInt = 0.U,
+                     xs2: UInt = 0.U, coreId: UInt = 0.U, payload1: UInt = 0.U, payload2: UInt = 0.U,
+                     funct: ComposerFunc.Value): UInt = {
+    val wire = Wire(new ComposerRoccCommand())
+    wire.inst.rs1 := rs1
+    wire.inst.rs2 := rs2
+    wire.inst.rd := rd
+    // flag for internally routed command
+    wire.inst.xs1 := true.B
+    wire.inst.xs2 := xs2
+    wire.inst.xd := expectResponse
+    wire.inst.system_id := p(SystemName2IdMapKey)(name).U
+    wire.inst.funct := funct.id.U
+    wire.inst.opcode := ComposerOpcode.ACCEL
+    wire.core_id := coreId
+    wire.payload1 := payload1
+    wire.payload2 := payload2
+    wire.pack()
+  }
 }
 
 class ComposerSystemIO(implicit p: Parameters) extends Bundle {
   val cmd = Flipped(Decoupled(new ComposerRoccCommand))
   val resp = Decoupled(new ComposerRoccResponse())
-  val busy = Output(Bool())
 }
