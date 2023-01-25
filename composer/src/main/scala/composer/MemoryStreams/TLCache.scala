@@ -31,8 +31,8 @@ class TLCache(cacheSize: Int, associativity: Int, nClients: Int,
     Seq(AddressSet(mbase, mmask)),
     regionType = RegionType.UNCACHED,
     supports = TLMasterToSlaveTransferSizes(
-      get = TransferSizes(1, blockBytes),
-      putFull = TransferSizes(1, blockBytes)
+      get = TransferSizes(blockBytes),
+      putFull = TransferSizes(blockBytes)
     ))),
     beatBytes = blockBytes)))
 

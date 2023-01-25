@@ -3,9 +3,25 @@ package composer
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.log2Up
 import freechips.rocketchip.subsystem.ExtMem
+
 import java.io.FileWriter
 
 object CppGeneration {
+
+  private case class CppDefinition(ty: String, name: String, value: String)
+
+  private var user_defs: List[CppDefinition] = List()
+
+  def addUserCppDefinition[t](ty: String, name: String, value: t): Unit = {
+    val existingDefs = user_defs.filter(_.name == name)
+    existingDefs.foreach(a => require(a.ty == ty && a.value == value.toString))
+    user_defs = CppDefinition(ty, name, value.toString) :: user_defs
+  }
+
+  def addUserCppDefinition[t](elems: Seq[(String, String, t)]): Unit = {
+    elems.foreach( a => addUserCppDefinition(a._1, a._2, a._3))
+  }
+
   def genCPPHeader(cr: MCRFileMap, acc: ComposerAcc)(implicit p: Parameters): Unit = {
     // we might have multiple address spaces...
     val f = new FileWriter("vsim/generated-src/composer_allocator_declaration.h")
@@ -22,6 +38,12 @@ object CppGeneration {
         "#define NUM_DDR_CHANNELS " + mem.nMemoryChannels + "\n" +
         "using composer_allocator=composer::device_allocator<" + mem.master.size + ">;\n")
     }
+
+    f.write(s"const uint8_t composerNumAddrBits = ${log2Up(mem.master.size)};\n")
+
+    user_defs foreach { deff =>
+      f.write(s"const ${deff.ty} ${deff.name} = ${deff.value};\n")
+    }
     cr.printCRs(Some(f))
 
     val num_systems = acc.systems.length
@@ -33,12 +55,11 @@ object CppGeneration {
       else g.max + 1
     }
 
-    acc.system_tups foreach { tup =>
+    acc.system_tups.filter(_._3.canReceiveSoftwareCommands) foreach { tup =>
       val sys_id = tup._2
       val sys_name = tup._3.name
       // write out system id so that users can reference it directly
       f.write(s"const uint8_t ${sys_name}_ID = $sys_id;\n")
-
     }
     f.write("// index by... sys_id, core_id, name_id, id_within_channel\n")
     if (max_channels_per_channelGroup > 0) {

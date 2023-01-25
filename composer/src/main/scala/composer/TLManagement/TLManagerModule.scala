@@ -4,10 +4,9 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 
-class TLManagerModule(tlmanager: TLManagerNode) extends Module {
-  val (tlbundle, tledge) = tlmanager.in(0)
+class TLManagerModule(tlbundle: TLBundle, tledge: TLEdgeIn) extends Module {
   val io = IO(Decoupled(UInt(tlbundle.params.dataBits.W)))
-  val tl = IO(new TLBundle(tlbundle.params))
+  val tl = IO(Flipped(tlbundle.cloneType))
 
   val s_canRecieveA :: s_Ack :: Nil = Enum(2)
   val state = RegInit(s_canRecieveA)
@@ -16,16 +15,16 @@ class TLManagerModule(tlmanager: TLManagerNode) extends Module {
   io.valid := false.B
   io.bits := DontCare
 
-  tl.a.ready := false.B
-
   tl.d.valid := false.B
   tl.d.bits := DontCare
+
+  tl.a.ready := false.B
 
   switch(state) {
     is (s_canRecieveA) {
       io.valid := tl.a.valid
       tl.a.ready := io.ready
-      io.bits := tl.a.bits
+      io.bits := tl.a.bits.data
       when (io.fire) {
         state := s_Ack
         toAck := tl.a.bits.source

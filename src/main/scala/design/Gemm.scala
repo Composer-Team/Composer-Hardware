@@ -66,8 +66,8 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   val AAddrs = List.fill(coreP.rowParallelism)(Reg(UInt(addrWidth.W)))
 
   // initialize some of the channels
-  reqChannelB.valid := false.B
-  reqChannelB.bits := DontCare
+  reqChannelB.request.valid := false.B
+  reqChannelB.request.bits := DontCare
   reqChannelRow foreach { ioa =>
     ioa.bits.len := submatrixRowSizeBytes.U
     ioa.valid := false.B
@@ -176,7 +176,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   io.resp.valid := false.B
   io.req.ready := state === s_idle &&
     (reqChannelRow map { ioa => ioa.ready } reduce (_ && _)) &&
-    reqChannelB.ready &&
+    reqChannelB.request.ready &&
     (reqChannelOut map { io => io.ready } reduce (_ && _))
 
   val buffer_valid = Seq.fill(coreP.rowParallelism)(RegInit(false.B))
@@ -242,13 +242,13 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       when(prefetch_B_valid_sig) {
         prefetch_B_valid_sig := false.B
       }
-      reqChannelB.valid := prefetch_B_valid_sig
+      reqChannelB.request.valid := prefetch_B_valid_sig
       // since column parallelism increases # items read / cycle, they need to all live in the same SRAM/URAM cell,
       //    reducing the number of separable items in a row to rowColDim/columnParallelism
-      reqChannelB.bits.scAddr := Cat(currentBRow, 0.U(log2Up(coreP.rowColDim / coreP.columnParallelism).W))
-      reqChannelB.bits.memAddr := BAddr
-      reqChannelB.bits.len := submatrixRowSizeBytes.U
-      when(reqChannelB.ready && !prefetch_B_valid_sig) {
+      reqChannelB.request.bits.scAddr := Cat(currentBRow, 0.U(log2Up(coreP.rowColDim / coreP.columnParallelism).W))
+      reqChannelB.request.bits.memAddr := BAddr
+      reqChannelB.request.bits.len := submatrixRowSizeBytes.U
+      when(reqChannelB.request.ready && !prefetch_B_valid_sig) {
         when(currentBRow === maxRowColDim.U) {
           currentBRow := 0.U
           state := s_load_C_addr
@@ -295,7 +295,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       }
     }
     is(s_addr_wait_AB) {
-      val inputs_ready = reqChannelB.ready && reqChannelRow.map(_.ready).reduce(_ && _)
+      val inputs_ready = reqChannelB.request.ready && reqChannelRow.map(_.ready).reduce(_ && _)
       // reqBIdle ensures that B has been entirely fetched
       when(inputs_ready) {
         state := s_addr_commit

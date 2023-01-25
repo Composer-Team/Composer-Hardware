@@ -1,6 +1,7 @@
 package design
 
 import chipsalliance.rocketchip.config.Config
+import chisel3.stage.PrintFullStackTraceAnnotation
 import composer.{WithAWSMem, WithComposer, WithKriaMem}
 import firrtl.options.StageMain
 import freechips.rocketchip.system.{RocketChipStage, RocketChiselStage}
@@ -13,8 +14,11 @@ object Composer {
     val full_name = config.getClass.getCanonicalName
     val short_name = full_name.split('.').last
     println(full_name + " " + short_name)
-    new RocketChipStage().execute(Array("-td", hw_idr, "-T", "composer.ComposerTop", "-C", full_name, "--emission-options=disableMemRandomization,disableRegisterRandomization"), Seq())
-    FirrtlMain.stage.execute(Array("-i", hw_idr + "/composer." + short_name + ".fir", "-o", hw_idr + "composer.v", "-X", "verilog", "--emission-options=disableMemRandomization,disableRegisterRandomization"), Seq())
+    new RocketChipStage().execute(
+      Array("-td", hw_idr, "-T", "composer.ComposerTop", "-C", full_name, "--emission-options=disableMemRandomization,disableRegisterRandomization"), Seq())
+    FirrtlMain.stage.execute(
+      args = Array("-i", hw_idr + "/composer." + short_name + ".fir", "-o", hw_idr + "composer.v", "-X", "verilog", "--emission-options=disableMemRandomization,disableRegisterRandomization"),
+      annotations = Seq(PrintFullStackTraceAnnotation))
   }
 }
 
@@ -28,6 +32,7 @@ object GemmBigger extends App {
 object GemmBig extends App {
   Composer.buildConfig(new GemmTestF1Big)
 }
+
 object TestDriver extends App {
   Composer.buildConfig(new exampleConfig)
 }
