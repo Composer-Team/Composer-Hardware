@@ -19,10 +19,13 @@ class CScratchpadAccessBundle(supportWriteback: Boolean,
   }))) else None
 }
 
-class CScratchpadInitReq(mem_out: TLBundle, nDatas: Int, upperboundBytesPerData: Int) extends Bundle {
-  val memAddr = UInt(mem_out.params.addressBits.W)
-  val scAddr = UInt(log2Up(nDatas).W)
-  val len = UInt(log2Up(nDatas * upperboundBytesPerData).W)
+class CScratchpadInitReqIO(mem_out: TLBundle, nDatas: Int, upperboundBytesPerData: Int) extends Bundle {
+  val progress = Output(Bool())
+  val request = Flipped(Decoupled(new Bundle() {
+    val memAddr = UInt(mem_out.params.addressBits.W)
+    val scAddr = UInt(log2Up(nDatas).W)
+    val len = UInt((log2Up(nDatas * upperboundBytesPerData)+1).W)
+  }))
 }
 
 
@@ -72,14 +75,14 @@ class CScratchpadImp(supportMemRead: Boolean,
 
   val access = IO(new CScratchpadAccessBundle(supportWrite, scReqBits, dataWidthBits))
   val req = if (supportMemRead) {
-    Some(IO(Flipped(Decoupled(new CScratchpadInitReq(mem_out, nDatas,
+    Some(IO(new CScratchpadInitReqIO(mem_out, nDatas,
       specialization match {
         case psw: PackedSubwordScratchpadParams =>
           val c = Math.ceil(psw.wordSizeBits.toFloat / psw.datsPerSubword).toInt
           (c + c % 8) / 8
         case _: FlatPackScratchpadParams =>
           (dataWidthBits + (dataWidthBits % 8)) / 8
-      })))))
+      })))
   } else None
 
 
@@ -102,24 +105,30 @@ class CScratchpadImp(supportMemRead: Boolean,
     access.readRes.bits := (if (latency == 1) rval else RegNext(rval))
     // in-flight read tx busy bits
 
-    scratchpad_req_io.ready := read_state === read_idle
+    scratchpad_req_io.request.ready := read_state === read_idle
 
     // only consider non-busy transactions to be the
-    val req_cache = Reg(Output(scratchpad_req_io.cloneType))
+    val req_cache = Reg(new Bundle() {
+      val memoryAddress = UInt(scratchpad_req_io.request.bits.memAddr.getWidth.W)
+      val scratchpadAddress = UInt(scratchpad_req_io.request.bits.scAddr.getWidth.W)
+      val memoryLength = UInt(scratchpad_req_io.request.bits.len.getWidth.W)
+    })
 
-    when ((scratchpad_req_io.bits.len & (scratchpad_req_io.bits.len - 1.U)) =/= 0.U) {
-      printf("Len is not pow2: %d\n", scratchpad_req_io.bits.len)
+    when (scratchpad_req_io.request.valid && ((scratchpad_req_io.request.bits.len & (scratchpad_req_io.request.bits.len - 1.U)) =/= 0.U)) {
+      printf("Len is not pow2: %d\n", scratchpad_req_io.request.bits.len)
       assert(false.B)
     }
     mem_out.a.bits := mem_edge.Get(0.U,
-      req_cache.bits.memAddr,
-      OHToUInt(req_cache.bits.len))._2
+      req_cache.memoryAddress,
+      OHToUInt(req_cache.memoryLength))._2
     mem_out.a.valid := read_state === read_send
 
     switch(read_state) {
       is (read_idle) {
-        when(scratchpad_req_io.fire) {
-          req_cache := scratchpad_req_io
+        when(scratchpad_req_io.request.fire) {
+          req_cache.memoryLength := scratchpad_req_io.request.bits.len
+          req_cache.scratchpadAddress := scratchpad_req_io.request.bits.scAddr
+          req_cache.memoryAddress := scratchpad_req_io.request.bits.memAddr
           read_state := read_send
         }
       }
@@ -136,15 +145,15 @@ class CScratchpadImp(supportMemRead: Boolean,
     }
     loader.io.cache_block_in.valid := mem_out.d.valid
     loader.io.cache_block_in.bits.dat := mem_out.d.bits.data
-    loader.io.cache_block_in.bits.idxBase := req_cache.bits.scAddr
+    loader.io.cache_block_in.bits.idxBase := req_cache.scratchpadAddress
     mem_out.d.ready := loader.io.cache_block_in.ready
     loader.io.sp_write_out.ready := true.B
     when (loader.io.cache_block_in.fire) {
-      req_cache.bits.scAddr := req_cache.bits.scAddr + loader.spEntriesPerBeat.U
+      req_cache.scratchpadAddress := req_cache.scratchpadAddress + loader.spEntriesPerBeat.U
     }
     when(mem_out.d.fire) {
-      req_cache.bits.len := req_cache.bits.len - beatSize.U
-      when (req_cache.bits.len <= beatSize.U) {
+      req_cache.memoryLength := req_cache.memoryLength - beatSize.U
+      when (req_cache.memoryLength <= beatSize.U) {
         read_state := read_idle
       }
     }

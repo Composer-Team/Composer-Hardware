@@ -52,55 +52,51 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
   // cores have their own independent command client nodes
 
   // SEND OUT COMMAND RESPONSES FROM A SYSTEM HERE
-  val outgoingInternalResponseClient = if (p(RequireInternalCommandRouting))
-    Some(TLClientNode(Seq(TLMasterPortParameters.v1(
+  val (outgoingInternalResponseClient, outgoingInternalResponseXbar) = if (p(RequireInternalCommandRouting)) {
+    val client = TLClientNode(Seq(TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
         name = s"InternalReponseNode_${systemParams.name}",
         sourceId = IdRange(0, 1),
-        supportsProbe = TransferSizes(log2Up(ComposerRoccCommand.packLengthBytes)),
-        supportsPutFull = TransferSizes(log2Up(ComposerRoccCommand.packLengthBytes))
-      )))))) else None
-
-  val outgoingInternalResponseXbar = if (p(RequireInternalCommandRouting)) {
+        // TODO this only needs 20B but we ask for 32 - wasteful?
+        supportsProbe = TransferSizes(1 << log2Up(ComposerRoccResponse.getWidthBytes)),
+        supportsPutFull = TransferSizes(1 << log2Up(ComposerRoccResponse.getWidthBytes))
+      )))))
     val xbar = TLXbar()
-    xbar := outgoingInternalResponseClient.get
-    Some(xbar)
-  } else None
-
+    xbar := client
+    (Some(client), Some(xbar))
+  } else (None, None)
 
   /* RECIEVE STUFF */
 
   // INTERNAL COMMAND MANAGER NODE
-  val internalCommandManager = if (p(RequireInternalCommandRouting)) {
+  val (internalCommandManager, incomingInternalCommandXbar) = if (p(RequireInternalCommandRouting)) {
     val l2u_crc = 1 << log2Up(ComposerRoccCommand.packLengthBytes)
-    Some(TLManagerNode(Seq(TLSlavePortParameters.v1(
-      Seq(TLSlaveParameters.v1(
-        Seq(ComposerConsts.getInternalCmdRoutingAddressSet(system_id)),
-        supportsPutFull = TransferSizes(l2u_crc))), beatBytes = l2u_crc
-    ))))
-  } else None
 
-  // RECIEVE INTERNAL COMMANDS ROUTE THROUGH XBAR FIRST
-  val incomingInternalCommandXbar = if (p(RequireInternalCommandRouting)) {
+    val manager = TLManagerNode(Seq(TLSlavePortParameters.v1(
+      managers = Seq(TLSlaveParameters.v2(
+        address = Seq(ComposerConsts.getInternalCmdRoutingAddressSet(system_id)),
+        supports = TLMasterToSlaveTransferSizes(
+          putFull = TransferSizes(l2u_crc)
+        ))),
+      beatBytes = l2u_crc)))
     val xbar = TLXbar()
-    internalCommandManager.get := TLBuffer() := xbar
-    Some(xbar)
-  } else None
+    manager := TLBuffer() := xbar
 
-  val incomingInternalResponseManager = if (systemParams.canIssueCoreCommands) Some(TLManagerNode(
-    Seq(TLSlavePortParameters.v1(
-      managers = Seq(TLSlaveParameters.v1(
-        Seq(ComposerConsts.getInternalCmdRoutingAddressSet(system_id)),
-        supportsPutFull = TransferSizes(ComposerRoccResponse.getWidthBytes)
-      )), beatBytes = ComposerRoccResponse.getWidthBytes
-    ))))
-  else None
+    (Some(manager), Some(xbar))
+  } else (None, None)
 
-  val incomingInternalResponseXBar = if (systemParams.canIssueCoreCommands) {
+  val (incomingInternalResponseManager, incomingInternalResponseXBar) = if (systemParams.canIssueCoreCommands) {
+    val manager = TLManagerNode(
+      Seq(TLSlavePortParameters.v1(
+        managers = Seq(TLSlaveParameters.v1(
+          Seq(ComposerConsts.getInternalCmdRoutingAddressSet(system_id)),
+          supportsPutFull = TransferSizes(ComposerRoccResponse.getWidthBytes)
+        )), beatBytes = ComposerRoccResponse.getWidthBytes
+      )))
     val xbar = TLXbar()
-    incomingInternalResponseManager.get := xbar
-    Some(xbar)
-  } else None
+    manager := xbar
+    (Some(manager), Some(xbar))
+  } else (None, None)
 
   lazy val module = new ComposerSystemImp(this)
 }
@@ -119,7 +115,8 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   val cmdArbiter = Module(new RRArbiter(new ComposerRoccCommand(), validSrcs.length))
   val icmAsCmdSrc = if (outer.internalCommandManager.isDefined) {
     val managerNode = outer.internalCommandManager.get
-    val manager = Module(new TLManagerModule(managerNode))
+    val (b, e) = managerNode.in(0)
+    val manager = Module(new TLManagerModule(b, e))
     managerNode.in(0)._1 <> manager.tl
 
     val cmdIO = Wire(Flipped(Decoupled(new ComposerRoccCommand())))
@@ -205,6 +202,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
 
     val respClient = outer.outgoingInternalResponseClient.get
     val internalRespDispatcher = Module(new TLClientModule(respClient))
+    internalRespDispatcher.tl <> respClient.out(0)._1
     internalRespDispatcher.io.bits.dat := wire.pack
     internalRespDispatcher.io.bits.addr := ComposerConsts.getInternalCmdRoutingAddress(wire.system_id)
     Some(internalRespDispatcher)
@@ -238,12 +236,28 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     // simple case!
     sw_io.get.resp <> respQ
   } else if (p(RequireInternalCommandRouting)) {
-    resp.ready := internalRespDispatchModule.get.io.ready
+    respQ.ready := internalRespDispatchModule.get.io.ready
     internalRespDispatchModule.get.io.valid := resp.valid
+    internalRespDispatchModule.get.io.bits.dat := respQ.bits.pack
+    internalRespDispatchModule.get.io.bits.addr := ComposerConsts.getInternalCmdRoutingAddress(respQ.bits.system_id)
   } else {
     throw new Exception("System unreachable!")
   }
 
+  if (outer.systemParams.canIssueCoreCommands) {
+    val managerNode = outer.incomingInternalResponseManager.get
+    val (mBundle, mEdge) = managerNode.in(0)
+    val responseManager = Module(new TLManagerModule(mBundle, mEdge))
+    responseManager.tl <> outer.incomingInternalResponseManager.get.in(0)._1
+    val response = ComposerRoccResponse(responseManager.io.bits)
+
+    cores.zipWithIndex.foreach { case (core, core_idx) =>
+      core.composer_response_io.get.valid := responseManager.io.valid && response.core_id === core_idx.U
+      core.composer_response_io.get.bits := response
+    }
+
+    responseManager.io.ready := VecInit(cores.map(_.composer_response_io.get.ready))(response.core_id)
+  }
   val lenBits = log2Up(p(MaxChannelTransactionLenKey))
 
   val channelSelect = Cat(cmd.bits.inst.rs2(2, 0), cmd.bits.inst.rs1)

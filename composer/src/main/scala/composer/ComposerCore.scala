@@ -73,6 +73,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
   val scratch_mod = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.Scratchpad).map(_.asInstanceOf[CScratchpadChannelParams]).map {
     param =>
       lazy val mod = LazyModule(param.make)
+      mod.suggestName(param.name)
       (param.name, mod)
   }
   val readerNodes = unCachedReaders ++ CacheNodes.map(i => (i._1, i._2._2))
@@ -80,8 +81,8 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
   val externalCoreCommNodes = if (composerSystemParams.canIssueCoreCommands) {
     Some(TLClientNode(Seq(TLMasterPortParameters.v1(clients = Seq(TLMasterParameters.v1(
       s"${composerSystemParams.name}_core${core_id}_toOtherCores",
-      supportsProbe = TransferSizes(8),
-      supportsPutFull = TransferSizes(8)
+      supportsProbe = TransferSizes(1 << log2Up(ComposerRoccCommand.packLengthBytes)),
+      supportsPutFull = TransferSizes(1 << log2Up(ComposerRoccCommand.packLengthBytes))
     ))))))
   } else None
 
@@ -182,7 +183,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       mod.map(_.io.channel))
   }
 
-  def getScratchpad(name: String): (Option[DecoupledIO[CScratchpadInitReq]], CScratchpadAccessBundle) = {
+  def getScratchpad(name: String): (Option[CScratchpadInitReqIO], CScratchpadAccessBundle) = {
     val outer = composerConstructor.composerCoreWrapper
     val lm = outer.scratch_mod.filter(_._1 == name)(0)._2
     lm.suggestName(name)
@@ -192,19 +193,22 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   }
 
   val composer_response_io = if (outer.composerSystemParams.canIssueCoreCommands) {
-    Some(IO(new ComposerRoccResponse()))
+    Some(IO(Flipped(Decoupled(new ComposerRoccResponse()))))
   } else None
 
   val composer_command_io = if (outer.composerSystemParams.canIssueCoreCommands) {
     val node = outer.externalCoreCommNodes.get
     val mod = Module(new TLClientModule(node))
     node.out(0)._1 <> mod.tl
-    val wire = Decoupled(new ComposerRoccCommand)
+    val wire = Wire(Decoupled(new ComposerRoccCommand))
     wire.ready := mod.io.ready
     mod.io.valid := wire.valid
-    mod.io.bits := wire.bits.pack()
-    wire
-  }
+    mod.io.bits.dat := wire.bits.pack()
+    mod.io.bits.addr := ComposerConsts.getInternalCmdRoutingAddress(wire.bits.inst.system_id)
+    Some(wire)
+  } else None
+
+  def getSystemID(name: String): UInt = p(SystemName2IdMapKey)(name).U
 
   def genCoreCommand(name: String, expectResponse: Bool, rs1: UInt = 0.U, rs2: UInt = 0.U, rd: UInt = 0.U,
                      xs2: UInt = 0.U, coreId: UInt = 0.U, payload1: UInt = 0.U, payload2: UInt = 0.U,

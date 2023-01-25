@@ -25,7 +25,6 @@ case object SystemName2IdMapKey extends Field[Map[String, Int]]
 case object RequireInternalCommandRouting extends Field[Boolean]
 
 case class ComposerCoreParams(memoryChannelParams: List[CChannelParams] = List(),
-                              customRead: Boolean = false,
                               core_id: Int = 0, // for internal use
                               system_id: Int = 0, // for internal use
                               nMemXacts: Int = 1 // not for production release
@@ -41,9 +40,6 @@ case class ComposerSystemParams(nCores: Int,
                                   * In elements, per write channel, scaled by the number of bytes
                                   */
                                 coreParams: ComposerCoreParams = ComposerCoreParams(),
-                                bufSize: Int = 1024,
-                                bufMasked: Boolean = false,
-                                doubleBuf: Boolean = false,
                                 channelQueueDepth: Int = 32,
                                 canReceiveSoftwareCommands: Boolean = true,
                                 canIssueCoreCommands: Boolean = false
@@ -89,17 +85,6 @@ class WithKriaMem extends Config((_, _, _) => {
 
 // TODO work DMA into Trait
 // TODO work Kria Memory (4GB) into Trait
-// TODO MMIO between CPU & Composer very doable
-
-/*TODO: copy over template and change names to match the name of the scala file
- * Make sure CoreParams matches what is in the scala file
- * Seq in readElementsSize and readLocations should have the same number of entry
- * They correspond to the number of inputs
- * similar concept applies to write
- * opcode correspond to the base address number for sending the command
- * (BASE addr in $CL_DIR/software/runtime/include/rocc.h for this should be opcode <<< 3)
- */
-
 
 class WithComposer(maximumTxLengthBytes: Int = 64, systemIDbits: Int = 4, coreIdBits: Int = 8) extends Config((site, _, _) => {
   case ComposerSystemsKey => Seq()

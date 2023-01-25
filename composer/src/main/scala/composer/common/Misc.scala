@@ -131,7 +131,7 @@ class ComposerRoccResponse()(implicit p: Parameters) extends Bundle {
 
   def pack: UInt = {
     val q = Wire(UInt(64.W))
-    q := Cat(system_id, core_id, data)
+    q := Cat(system_id, core_id, rd, data)
     q
   }
 }
@@ -142,7 +142,8 @@ object ComposerRoccResponse {
     val wire = Wire(new ComposerRoccResponse())
     val syswid = p(SystemIDLengthKey)
     val corewid = p(CoreIDLengthKey)
-    wire.data := a(63-syswid - corewid, 0)
+    wire.data := a(58-syswid - corewid, 0)
+    wire.rd := a(63-syswid - corewid, 59-syswid-corewid)
     wire.core_id := a(63-syswid, 64-syswid - corewid)
     wire.system_id := a(63, 64-syswid)
     wire

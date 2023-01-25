@@ -13,14 +13,14 @@ import scala.language.postfixOps
 class ComposerAcc(implicit p: Parameters) extends LazyModule {
   val configs = p(ComposerSystemsKey)
   val name2Id = scala.collection.immutable.Map.from(configs.zipWithIndex.map(a => (a._1.name, a._2)))
-  val requireInternalCmdRouting = configs.map(_.canIssueCoreCommands).reduce(_ || _)
-  val pWithMap = p.alterPartial({
-    case SystemName2IdMapKey => name2Id
-    case RequireInternalCommandRouting => requireInternalCmdRouting
-  })
   val system_tups = name2Id.keys.map { name =>
     val id = name2Id(name)
     val config = configs(id)
+    val requireInternalCmdRouting = configs.filter(_.name != name).map(_.canIssueCoreCommands).reduce(_ || _)
+    val pWithMap = p.alterPartial({
+      case SystemName2IdMapKey => name2Id
+      case RequireInternalCommandRouting => requireInternalCmdRouting
+    })
     (LazyModule(new ComposerSystem(config, id)(pWithMap)), id, config)
   }.toSeq
 
