@@ -2,9 +2,9 @@ package design
 
 import chipsalliance.rocketchip.config.Config
 import chisel3.stage.PrintFullStackTraceAnnotation
-import composer.{WithAWSMem, WithComposer, WithKriaMem}
-import firrtl.options.StageMain
-import freechips.rocketchip.system.{RocketChipStage, RocketChiselStage}
+import design.Gemm.{GemmTestF1, GemmTestF1Big}
+import design.unit.{exampleConfig, exampleConfigKria}
+import freechips.rocketchip.system._
 import firrtl.stage.FirrtlMain
 
 object Composer {

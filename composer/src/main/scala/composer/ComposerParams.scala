@@ -82,6 +82,8 @@ class WithKriaMem extends Config((_, _, _) => {
   case HasDiscreteMemory => false
 })
 
+class WithNoMem extends WithAWSMem(1)
+
 
 // TODO work DMA into Trait
 // TODO work Kria Memory (4GB) into Trait
