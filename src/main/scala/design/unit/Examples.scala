@@ -1,4 +1,4 @@
-package design
+package design.unit
 
 import chipsalliance.rocketchip.config.{Config, Field, Parameters}
 import chisel3._

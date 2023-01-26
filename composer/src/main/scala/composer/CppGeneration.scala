@@ -1,6 +1,7 @@
 package composer
 
 import chipsalliance.rocketchip.config.Parameters
+import chisel3.experimental.{ChiselEnum, EnumFactory}
 import chisel3.util.log2Up
 import freechips.rocketchip.subsystem.ExtMem
 
@@ -10,16 +11,21 @@ object CppGeneration {
 
   private case class CppDefinition(ty: String, name: String, value: String)
 
+  private var user_enums: List[EnumFactory] = List()
   private var user_defs: List[CppDefinition] = List()
 
   def addUserCppDefinition[t](ty: String, name: String, value: t): Unit = {
     val existingDefs = user_defs.filter(_.name == name)
-    existingDefs.foreach(a => require(a.ty == ty && a.value == value.toString))
+    existingDefs.foreach(a => require(a.ty == ty && a.value == value.toString, s"Redefining ${a.name} from (${a.ty}, ${a.value}) to ($ty, $value)"))
     user_defs = CppDefinition(ty, name, value.toString) :: user_defs
   }
 
   def addUserCppDefinition[t](elems: Seq[(String, String, t)]): Unit = {
-    elems.foreach( a => addUserCppDefinition(a._1, a._2, a._3))
+    elems.foreach(a => addUserCppDefinition(a._1, a._2, a._3))
+  }
+
+  def exportChiselEnum(enum: ChiselEnum): Unit = {
+    user_enums = enum :: user_enums
   }
 
   def genCPPHeader(cr: MCRFileMap, acc: ComposerAcc)(implicit p: Parameters): Unit = {
@@ -44,6 +50,23 @@ object CppGeneration {
     user_defs foreach { deff =>
       f.write(s"const ${deff.ty} ${deff.name} = ${deff.value};\n")
     }
+
+    user_enums foreach { myEnum =>
+      val enumClassName = myEnum.getClass.getSimpleName.split("\\$")(0)
+      f.write(s"enum $enumClassName {\n")
+      myEnum.all.foreach { enumMember =>
+        val a = enumMember.toString()
+        val byparen = a.split("\\(")
+        // before paren is just class name
+        // after is $name=$value)
+        val byeq = byparen(1).split("=")
+        val value = byeq(0).toInt
+        val name = byeq(1).substring(0, byeq(1).length - 1)
+        f.write(s"\t$name = $value ,\n")
+      }
+      f.write("};\n")
+    }
+
     cr.printCRs(Some(f))
 
     val num_systems = acc.systems.length
