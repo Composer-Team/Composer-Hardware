@@ -31,6 +31,10 @@ class WorkingF1NoDispatcher extends Config(
   new WithGemm(5, GP.workingF1Params) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
 )
 
+class FirstTryF1WithDispatcher extends Config(
+  new GemmWithDispatchConfig(5, GP.workingF1Params) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
+)
+
 //noinspection ScalaUnusedSymbol
 class GemmTestF1 extends Config(
   new WithGemm(4, GP.unitParams) ++ new WithComposer() ++ new WithAWSMem(1)
