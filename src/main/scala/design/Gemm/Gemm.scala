@@ -1,7 +1,8 @@
-package design
+package design.Gemm
 // 32 fused mulAdd - integer version - reading 32 elements at each time - writing 8 elems each cycle
 
 import chipsalliance.rocketchip.config.Config
+import chisel3.experimental.ChiselEnum
 import chisel3.{UInt, _}
 import chisel3.util._
 import composer.MemoryStreams._
@@ -19,7 +20,13 @@ case class GemmParam(dataWidthBytes: Int,
                      rowColDim: Int,
                      columnParallelism: Int,
                      rowParallelism: Int,
-                     maxRCDim: Int)
+                     maxRCDim: Int){
+  require(columnParallelism > 1)
+}
+
+object GemmCoreCommands extends ChiselEnum {
+  val A, B, C, rowAndGo = Value
+}
 
 class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implicit p: Parameters)
   extends ComposerCore(composerCoreParams)(p) {
@@ -172,7 +179,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
    * END DATA PIPELINE
    */
 
-  io.resp.bits.data := 0.U
+  io.resp.bits.data := composerConstructor.composerCoreWrapper.core_id.U
   io.resp.valid := false.B
   io.req.ready := state === s_idle &&
     (reqChannelRow map { ioa => ioa.ready } reduce (_ && _)) &&
@@ -182,30 +189,32 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   val buffer_valid = Seq.fill(coreP.rowParallelism)(RegInit(false.B))
   val prefetch_B_valid_sig = RegInit(false.B)
 
+  CppGeneration.exportChiselEnum(GemmCoreCommands)
+
   switch(state) {
     is(s_idle) {
       haveCachedB := false.B
       when(io.req.fire) {
         // get ready to load in row of matrix B
         val inst = io.req.bits.inst
-        switch(inst.rs1) {
-          is(0.U) {
+        switch(GemmCoreCommands(inst.rs1(GemmCoreCommands.getWidth-1, 0))) {
+          is(GemmCoreCommands.rowAndGo) {
             // BEGIN COMPUTATION
             currentBRow := 1.U
             realRowLength := io.req.bits.payload2(realRowBits - 1, 0)
             ACounter := 0.U
             state := s_addr_comp
           }
-          is(1.U) {
+          is(GemmCoreCommands.A) {
             // STORE A_BASE
             AAddrs(0) := io.req.bits.payload2(addrWidth - 1, 0)
           }
-          is(2.U) {
+          is(GemmCoreCommands.B) {
             // STORE B_BASE
             BAddr := io.req.bits.payload2(addrWidth - 1, 0)
             BSave := io.req.bits.payload2(addrWidth - 1, 0)
           }
-          is(3.U) {
+          is(GemmCoreCommands.C) {
             // STORE OUTPUT_BASE
             OutputAddr(0) := io.req.bits.payload2(addrWidth - 1, 0)
           }
@@ -377,7 +386,6 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       when((reqChannelOut.map(_.ready) ++ dataChannelOut.map(_.channelIdle)).reduce(_ && _)) {
         when(ACounter === lastA.U) {
           io.resp.valid := true.B
-          io.resp.bits.data := 1.U
           when(io.resp.fire) {
             state := s_idle
             ACounter := 0.U
@@ -420,12 +428,3 @@ class WithGemm(withNCores: Int,
     }))
 })
 
-//noinspection ScalaUnusedSymbol
-class GemmTestF1 extends Config(
-  new WithGemm(4, GemmParam(4, 16, 4, 4, 2048)) ++ new WithComposer() ++ new WithAWSMem(1)
-)
-
-//noinspection ScalaUnusedSymbol
-class GemmTestF1Big extends Config(
-  new WithGemm(6, GemmParam(4, 256, 2, 8, 2048)) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
-)
