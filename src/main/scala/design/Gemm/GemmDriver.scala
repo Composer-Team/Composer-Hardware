@@ -24,7 +24,7 @@ object GP {
     rowColDim = 256,
     columnParallelism = 2,
     rowParallelism = 8,
-    maxRCDim = 64) // with 5 Cores
+    maxRCDim = 2048) // with 5 Cores
 }
 
 class WorkingF1NoDispatcher extends Config(
@@ -51,5 +51,5 @@ object GemmFloatDriver extends App {
 class GemmDispatchF1Config extends Config (new GemmWithDispatchConfig(2, GP.unitParams) ++ new WithAWSMem(1) ++ new WithComposer())
 
 object GemmDispatchDriver extends App {
-  Composer.buildConfig(new GemmDispatchF1Config())
+  Composer.buildConfig(new FirstTryF1WithDispatcher)
 }
