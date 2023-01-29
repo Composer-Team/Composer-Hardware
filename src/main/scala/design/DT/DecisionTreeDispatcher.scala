@@ -4,7 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
 import chisel3._
 import composer.{ComposerConstructor, ComposerCore, ComposerFunc, ComposerSystemsKey, CoreIDLengthKey, CppGeneration}
-import composer.common.ComposerRoccCommand
+import composer.common.{CLog2Up, ComposerRoccCommand}
 import fpnewWrapper.fpnew.{FPFloatFormat, FPNewFType, FPOperation, FPRoundingMode, FPUNew}
 import freechips.rocketchip.subsystem.ExtMem
 
@@ -24,10 +24,11 @@ class DecisionTreeDispatcher(composerCoreParams: ComposerConstructor, params: DT
   io.req.ready := state === s_idle
   io.resp.valid := false.B
 
-  val addressBits = log2Up(p(ExtMem).get.master.size)
-  val exampleIdxBits = log2Up(params.maxNExamples)
-  val nTreeBits = log2Up(params.maxNTrees)
+  val addressBits = CLog2Up(p(ExtMem).get.master.size)
+  val exampleIdxBits = CLog2Up(params.maxNExamples)
+  val nTreeBits = CLog2Up(params.maxNTrees)
   val pageBoundary = 12
+  val treeIndexBits = DecisionTreeCore.getTotalIndexWidth(params)
 
   /**
     * Tree arrays are stored in memory on 4KB page aligned boundaries following each other
@@ -42,7 +43,7 @@ class DecisionTreeDispatcher(composerCoreParams: ComposerConstructor, params: DT
   val numTrees = Reg(UInt(nTreeBits.W))
   val numTreesSave = Reg(UInt(nTreeBits.W))
   val outputAddr = Reg(UInt(addressBits.W))
-  val nFeatureIdxBits = log2Up(params.maxNFeatures)
+  val nFeatureIdxBits = CLog2Up(params.maxNFeatures)
   val numFeatures = Reg(UInt(nFeatureIdxBits.W))
 
   val inferenceWriterLists = getWriterModules(name = "OutputWriter", useSoftwareAddressing = false, dataBytes = 4)
@@ -58,13 +59,12 @@ class DecisionTreeDispatcher(composerCoreParams: ComposerConstructor, params: DT
 
   val coreBusyBits = RegInit(VecInit(Seq.fill(DTCoreSystemParams.nCores)(false.B)))
   val hasCoreSeenFeature = Reg(Vec(DTCoreSystemParams.nCores, Bool()))
-  val allocatedCore = Reg(UInt(log2Up(DTCoreSystemParams.nCores).W))
+  val allocatedCore = Reg(UInt(CLog2Up(DTCoreSystemParams.nCores).W))
 
   val fpUnits = Module(new FPUNew(FPNewFType.FullPrecision, 1, 2))
   // recieve responses for those commands back through here
   val resp = composer_response_io.get
-  resp.ready := fpUnits.io.req.ready
-  resp.bits := DontCare
+  resp.ready := true.B
   fpUnits.io.req.valid := resp.valid
   val responsePayload = Cat(resp.bits.rd, resp.bits.data)
   val respondingCore = responsePayload(31 + p(CoreIDLengthKey), 32)
@@ -78,9 +78,9 @@ class DecisionTreeDispatcher(composerCoreParams: ComposerConstructor, params: DT
   fpUnits.io.req.bits.srcFormat := FPFloatFormat.Fp32
   fpUnits.io.req.bits.intFormat := DontCare
   fpUnits.io.req.bits.dstFormat := DontCare
-  fpUnits.io.req.bits.operands(0) := inferenceAccumulator
-  fpUnits.io.req.bits.operands(1) := resp.bits.data(31, 0)
-  fpUnits.io.req.bits.operands(2) := DontCare
+  fpUnits.io.req.bits.operands(1) := inferenceAccumulator
+  fpUnits.io.req.bits.operands(2) := resp.bits.data(31, 0)
+  fpUnits.io.req.bits.operands(0) := DontCare
   fpUnits.io.flush := false.B
 
   def loadPayloadIntoRocc(payload: UInt, rocc: ComposerRoccCommand): Unit = {
@@ -147,7 +147,7 @@ class DecisionTreeDispatcher(composerCoreParams: ComposerConstructor, params: DT
       val payload = Cat(treeThresholdAddr, featureAddr)
       loadPayloadIntoRocc(payload, comm.bits)
       comm.bits.inst.rs1 := Cat(0.U((comm.bits.inst.rs1.getWidth - 1).W), hasCoreSeenFeature(coreChoice))
-      comm.bits.inst.rs2 := Mux(numTrees >= (params.treeParallelism - 1).U, (params.treeParallelism - 1).U, numTrees(log2Up(params.treeParallelism - 1) - 1, 0))
+      comm.bits.inst.rs2 := Mux(numTrees >= (params.treeParallelism - 1).U, (params.treeParallelism - 1).U, numTrees(CLog2Up(params.treeParallelism - 1) - 1, 0))
       comm.bits.inst.system_id := getSystemID("DTCores")
       comm.bits.inst.xd := true.B
       comm.bits.inst.funct := ComposerFunc.START.U
@@ -159,9 +159,7 @@ class DecisionTreeDispatcher(composerCoreParams: ComposerConstructor, params: DT
         hasCoreSeenFeature(coreChoice) := true.B
         treeIndexAddr := treeIndexAddr + ((DecisionTreeCore.getTotalIndexWidth(params) / 8) * params.treeParallelism * (1 << params.maxTreeDepth)).U
         treeThresholdAddr := treeThresholdAddr + (4 * params.treeParallelism * (1 << params.maxTreeDepth)).U
-        numTrees := numTrees - params.treeParallelism.U
         state := s_first
-
       }
     }
     is(s_first) {
@@ -176,6 +174,7 @@ class DecisionTreeDispatcher(composerCoreParams: ComposerConstructor, params: DT
         }.otherwise {
           state := s_active
         }
+        numTrees := numTrees - params.treeParallelism.U
       }
     }
     is(s_wait) {
@@ -193,7 +192,9 @@ class DecisionTreeDispatcher(composerCoreParams: ComposerConstructor, params: DT
           state := s_active
           hasCoreSeenFeature.foreach(_ := false.B)
           // advance features
-          featureAddr := featureAddr + Cat(numFeatures, 0.U(log2Up(DecisionTreeCore.getTotalIndexWidth(params) / 8).W))
+          featureAddr := featureAddr +
+            (if (treeIndexBits / 8 == 1) numFeatures
+            else Cat(numFeatures, 0.U(CLog2Up(DecisionTreeCore.getTotalIndexWidth(params) / 8).W)))
           // start trees over
           treeThresholdAddr := treeThresholdAddrSave
           treeIndexAddr := Cat(treeThresholdAddrSave(addressBits - 1, pageBoundary) + 1.U, 0.U(pageBoundary.W))

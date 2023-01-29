@@ -25,7 +25,8 @@ object CppGeneration {
   }
 
   def exportChiselEnum(enum: ChiselEnum): Unit = {
-    user_enums = enum :: user_enums
+    if (!user_enums.contains(enum))
+      user_enums = enum :: user_enums
   }
 
   def genCPPHeader(cr: MCRFileMap, acc: ComposerAcc)(implicit p: Parameters): Unit = {

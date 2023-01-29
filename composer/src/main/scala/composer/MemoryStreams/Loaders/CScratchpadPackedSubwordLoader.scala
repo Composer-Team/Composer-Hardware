@@ -14,7 +14,7 @@ class CScratchpadPackedSubwordLoader(datOutWidth: Int, idxWidth: Int, wordSizeBi
 
   val beat = Reg(UInt((beatSize * 8).W))
   val idxBase = Reg(UInt(idxWidth.W))
-  val lenRemainingFromReq = Reg(UInt(idxWidth.W))
+  val lenRemainingFromReq = Reg(UInt((log2Up(beatSize)+1).W))
 
   val s_idle :: s_loading :: Nil = Enum(2)
   val state = RegInit(s_idle)
@@ -34,7 +34,7 @@ class CScratchpadPackedSubwordLoader(datOutWidth: Int, idxWidth: Int, wordSizeBi
         state := s_loading
         beat := io.cache_block_in.bits.dat
         idxBase := io.cache_block_in.bits.idxBase
-        lenRemainingFromReq := beatSize.U
+        lenRemainingFromReq := io.cache_block_in.bits.len
         datCounter.reset()
         subwordCounter.reset()
       }

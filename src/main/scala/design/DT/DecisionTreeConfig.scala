@@ -71,7 +71,14 @@ class WithDTAccelerator(nDTCores: Int, DTParams: DTParams) extends Config((site,
 })
 
 class DTConfig extends Config(
-  new WithDTAccelerator(1, DTParams(4, 1, 1, 1, 1, 16, 4, 16)) ++ new WithComposer() ++ new WithAWSMem(1)
+  new WithDTAccelerator(1, DTParams(maxTreeDepth = 4,
+    treeParallelism = 1,
+    indexCompression = 1,
+    thresholdCompression = 1,
+    featureCompression = 1,
+    maxNExamples = 16,
+    maxNTrees = 4,
+    maxNFeatures =  16)) ++ new WithComposer() ++ new WithAWSMem(1)
 )
 
 object DTDriver extends App {
