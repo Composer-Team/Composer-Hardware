@@ -19,7 +19,17 @@ object GP {
     rowColDim = 16,
     columnParallelism = 8,
     rowParallelism = 4, maxRCDim = 64)
+
+  val workingF1Params = GemmParam(dataWidthBytes = 4,
+    rowColDim = 256,
+    columnParallelism = 2,
+    rowParallelism = 8,
+    maxRCDim = 64) // with 5 Cores
 }
+
+class WorkingF1NoDispatcher extends Config(
+  new WithGemm(5, GP.workingF1Params) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
+)
 
 //noinspection ScalaUnusedSymbol
 class GemmTestF1 extends Config(
