@@ -8,6 +8,7 @@ abstract class CScratchpadLoader(datOutWidth: Int, idxWidth: Int, beatSize: Int)
   val io = IO(new Bundle() {
     val cache_block_in = Flipped(Decoupled(new Bundle() {
       val dat = UInt((beatSize * 8).W)
+      val len = UInt((log2Up(beatSize) + 1).W)
       val idxBase = UInt(idxWidth.W)
     }))
     val sp_write_out = Decoupled(new Bundle() {

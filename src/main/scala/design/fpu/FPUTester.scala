@@ -13,7 +13,7 @@ case class fpuParams(ftype: FPNewFType)
 
 class FPUTester(cp: ComposerConstructor, fparams: fpuParams)(implicit p: Parameters) extends ComposerCore(cp) {
   val numLanes = 1
-  val numStages = 1
+  val numStages = 2
 
   val fpu = Module(new FPUNew(fparams.ftype,
     lanes = numLanes,
@@ -33,6 +33,7 @@ class FPUTester(cp: ComposerConstructor, fparams: fpuParams)(implicit p: Paramet
   fpu.io.req.bits.operands(0) := operands(0)(0)
   fpu.io.req.bits.operands(1) := operands(1)(0)
   fpu.io.req.bits.operands(2) := operands(2)(0)
+  fpu.io.req.bits.tag := 0.U
   println(fwidth)
   val opTy = Reg(new FPOperation.Type)
   val opMod = Reg(Bool())

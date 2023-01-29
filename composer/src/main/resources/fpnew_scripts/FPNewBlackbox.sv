@@ -1,19 +1,19 @@
 module FPNewBlackbox #(
     // fpu features
-    parameter FLEN = __FLEN__,
+    parameter FLEN = 64,
     parameter ENABLE_VECTORS = 1,
     parameter ENABLE_NAN_BOX = 1,
-    parameter ENABLE_FP32 = __FP32__,
-    parameter ENABLE_FP64 = __FP64__,
-    parameter ENABLE_FP16 = __FP16__,
+    parameter ENABLE_FP32 = 1,
+    parameter ENABLE_FP64 = 0,
+    parameter ENABLE_FP16 = 0,
     parameter ENABLE_FP8 = 0,
-    parameter ENABLE_FP16ALT = __FP16ALT__,
+    parameter ENABLE_FP16ALT = 0,
     parameter ENABLE_INT8 = 0,
     parameter ENABLE_INT16 = 0,
     parameter ENABLE_INT32 = 0,
     parameter ENABLE_INT64 = 0,
     // fpu implementation
-    parameter PIPELINE_STAGES = __STAGES__,
+    parameter PIPELINE_STAGES = 1,
     // tag type: logic array
     parameter TAG_WIDTH = 2,
     // Do not change, follow fp-new definition
@@ -64,7 +64,7 @@ module FPNewBlackbox #(
                       '{default: PIPELINE_STAGES},
                       '{default: PIPELINE_STAGES},
                       '{default: PIPELINE_STAGES}},
-        UnitTypes:  '{'{default: fpnew_pkg::PARALLEL}, // ADDMUL
+        UnitTypes:  '{'{default: fpnew_pkg::MERGED}, // ADDMUL
                     '{default: fpnew_pkg::DISABLED},   // DIVSQRT
                     '{default: fpnew_pkg::DISABLED}, // NONCOMP
                     '{default: fpnew_pkg::DISABLED}},  // CONV
@@ -99,7 +99,7 @@ module FPNewBlackbox #(
 
         .out_valid_o(out_valid_o),
         .out_ready_i(out_ready_i),
-        
+
         .busy_o(busy_o)
     );
 

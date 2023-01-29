@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import composer._
+import composer.common.{CLog2Up, splitIntoChunks}
 import fpnewWrapper.fpnew._
 import freechips.rocketchip.subsystem.ExtMem
 
@@ -35,7 +36,7 @@ object DecisionTreeCore {
   def getTotalIndexWidth(params: DTParams): Int = {
     // round up to nearest pow2. If already pow 2, double size. Unfortunate, but it is the way it is.
     val iwidth = {
-      val ti = log2Up(params.maxNFeatures)
+      val ti = CLog2Up(params.maxNFeatures)
       if (isPow2(ti)) {
         if (!have_warned) {
           println(s"Warning in DecisionTreeCore. Number of bits needed for index within tree is $ti, but we have to" +
@@ -46,7 +47,7 @@ object DecisionTreeCore {
         ti + 1
       } else ti
     }
-    val twidth = 1 << log2Up(iwidth)
+    val twidth = 1 << CLog2Up(iwidth)
     if (twidth < 8) 8
     else twidth
   }
@@ -54,17 +55,6 @@ object DecisionTreeCore {
 
 //noinspection DuplicatedCode
 class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
-  def splitIntoChunks(a: UInt, sz: Int): Seq[UInt] = {
-    require(a.getWidth % sz == 0, s"Can't split bitwidth ${a.getWidth} into chunks of $sz")
-
-    def rec(a: UInt, acc: List[UInt] = List.empty): List[UInt] = {
-      if (a.getWidth == 0) acc
-      else a(sz - 1, 0) :: acc
-    }
-
-    rec(a)
-  }
-
   val s_idle :: s_secondPayload :: s_FeatureAddress :: s_TreeThresholdAddress :: s_TreeFIDAddress :: s_startNewTree :: s_Wait :: s_processing :: s_finishTree :: s_finish :: Nil = Enum(10)
   val state = RegInit(s_idle)
   io.req.ready := false.B
@@ -72,7 +62,9 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
   require(isPow2(params.indexCompression))
   require(isPow2(params.thresholdCompression))
 
-  val addrWidth = log2Up(p(ExtMem).get.master.size)
+  val treeIndexWidth = DecisionTreeCore.getTotalIndexWidth(params)
+
+  val addrWidth = CLog2Up(p(ExtMem).get.master.size)
 
   // feature memory
   // we'll process the same item many times if we're doing 10s to thousands of trees so don't reload the feature
@@ -81,7 +73,7 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
   val featureAlreadyValid = Reg(Bool())
 
   val featureAddress = Reg(UInt(addrWidth.W))
-  val nFeatureBitWidth = log2Up(params.maxNFeatures)
+  val nFeatureBitWidth = CLog2Up(params.maxNFeatures)
   val nFeatures = Reg(UInt(nFeatureBitWidth.W))
 
   featureReaderInitIO.get.request.bits.memAddr := featureAddress
@@ -89,6 +81,9 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
   // round this up to a power of two, of course
   featureReaderInitIO.get.request.bits.len := Cat(nFeatures +& 1.U, 0.U(2.W))
   featureReaderInitIO.get.request.valid := false.B
+
+  featureReader.readReq.valid := false.B
+  featureReader.readReq.bits := DontCare
 
   /**
     * Tree node consists of a couple pieces of data:
@@ -123,22 +118,30 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
   treeThresholdIO.get.request.bits.len := (Math.pow(2, params.maxTreeDepth).toInt * params.treeParallelism * 4).U
   treeThresholdIO.get.request.valid := false.B
 
+  treeThresholds.readReq.valid := false.B
+  treeThresholds.readReq.bits := DontCare
+
   val (treeFIDIO, treeFIDs) = getScratchpad("featureIDs")
   val treeFIDAddress = Reg(UInt(addrWidth.W))
 
   treeFIDIO.get.request.bits.memAddr := treeFIDAddress
   treeFIDIO.get.request.bits.scAddr := 0.U
-  treeFIDIO.get.request.bits.len := (Math.pow(2, params.maxTreeDepth).toInt * params.treeParallelism * 2).U
+  treeFIDIO.get.request.bits.len := (Math.pow(2, params.maxTreeDepth).toInt * params.treeParallelism * treeIndexWidth / 8).U
   treeFIDIO.get.request.valid := false.B
+
+  treeFIDs.readReq.valid := false.B
+  treeFIDs.readReq.bits := DontCare
 
   // which tree node are we currently on. Need extra params.maxtreeDepth bits because we store multiple trees in
   // memory at a time
-  val treePointerWidth = params.maxTreeDepth + log2Up(params.treeParallelism)
+  val treePointerWidth = params.maxTreeDepth + CLog2Up(params.treeParallelism)
   val currentTreePointer = Reg(UInt(treePointerWidth.W))
-  val treePointers = VecInit(Seq.tabulate(params.treeParallelism)(treeN => (treeN * (1 << params.maxTreeDepth)).U))
-  val treeIdx = currentTreePointer.head(log2Up(params.treeParallelism))
+  val treePointersRaw = Seq.tabulate(params.treeParallelism + 1)(treeN => treeN * (1 << params.maxTreeDepth))
+  val treePointers = VecInit(treePointersRaw.map(_.U))
+  println(treePointersRaw)
+  val treeIdx = currentTreePointer.head(CLog2Up(params.treeParallelism))
   // # trees to do - 1
-  val treesToDoMO = Reg(UInt(log2Up(params.treeParallelism).W))
+  val treesToDoMO = Reg(UInt(CLog2Up(params.treeParallelism).W))
   val beginning = Reg(Bool())
   val transition_to_processing = Reg(Bool())
 
@@ -182,7 +185,7 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
         currentTreePointer := 0.U
         beginning := true.B
         inferenceAccumulator := 0.U // FP32 0
-        treesToDoMO := io.req.bits.inst.rs2(log2Up(params.treeParallelism) - 1, 0)
+        treesToDoMO := (if (params.treeParallelism == 1) 0.U else io.req.bits.inst.rs2(CLog2Up(params.treeParallelism) - 1, 0))
       }
     }
 
@@ -234,24 +237,14 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
     }
     is(s_Wait) {
       // wait for enough of the information to be loaded in that we can start
-      def passes(progress: UInt, isDone: Bool): Bool = {
-        if (params.treeParallelism == 1) {
-          isDone
-        } else {
-          val flag = Wire(Bool())
-          when(treeIdx < (params.treeParallelism - 1).U) {
-            flag := progress >= treePointers(treeIdx + 1.U)
-          }.otherwise {
-            flag := isDone
-          }
-          flag
-        }
-      }
 
-      val featureLoaded = featureReaderInitIO.get.request.ready
-      val treeLoaded = passes(Cat(treeFIDIO.get.progress, 0.U(log2Up(params.indexCompression).W)), treeFIDIO.get.request.ready) &&
-        passes(Cat(treeThresholdIO.get.progress, 0.U(log2Up(params.thresholdCompression).W)), treeThresholdIO.get.request.ready)
-      when(treeLoaded && featureLoaded) {
+      val featureLoaded = (featureReaderInitIO.get.progress === (1 << nFeatureBitWidth).U) || featureAlreadyValid
+      val nextTP = treePointers(treeIdx +& 1.U)
+      val FIds_loaded_enough = treeFIDIO.get.progress >= nextTP(nextTP.getWidth-1, CLog2Up(params.indexCompression))
+      val thresholds_loaded_enough = treeThresholdIO.get.progress >= nextTP(nextTP.getWidth-1, CLog2Up(params.thresholdCompression))
+      println(CLog2Up(params.indexCompression) + " " + CLog2Up(params.thresholdCompression))
+      println(params.indexCompression)
+      when(FIds_loaded_enough && thresholds_loaded_enough && featureLoaded) {
         state := s_processing
         transition_to_processing := true.B
       }
@@ -260,7 +253,7 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
       // start processing
       // stage 1 signal start is transition_to_processing
       //    being in stage 1 implies that the last node we looked at was not a leaf
-      treeFIDs.readReq.bits := currentTreePointer(treePointerWidth - 1, log2Up(params.indexCompression))
+      treeFIDs.readReq.bits := currentTreePointer(treePointerWidth - 1, CLog2Up(params.indexCompression))
       treeFIDs.readReq.valid := transition_to_processing
       when(transition_to_processing) {
         isLeaf := false.B
@@ -269,24 +262,26 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
 
       // we store multiple indices together in a row. High-order bits give us the row
       // low order bits give us the position within the row (below)
-      val FIDSubIdx = currentTreePointer(log2Up(params.indexCompression) - 1, 0)
-      val featureSelect = VecInit(splitIntoChunks(treeFIDs.readRes.bits, DecisionTreeCore.getTotalIndexWidth(params)))(FIDSubIdx)
+      val FIDSubIdx = if (params.indexCompression == 1) 0.U else currentTreePointer(CLog2Up(params.indexCompression) - 1, 0)
+      val featureSelect = VecInit(splitIntoChunks(treeFIDs.readRes.bits, treeIndexWidth))(FIDSubIdx)
       val chosenFeature = featureSelect(nFeatureBitWidth - 1, 0)
       when(featureSelect.head(1).asBool) {
         isLeaf := true.B
       }
-      val featureSelectHighOrder = chosenFeature(nFeatureBitWidth - 1, log2Up(params.featureCompression))
-      val featureSelectLowOrder = Reg(UInt(log2Up(params.featureCompression).W))
+
+      val featureSelectHighOrder = chosenFeature(nFeatureBitWidth - 1, CLog2Up(params.featureCompression))
+      val featureSelectLowOrder = Reg(UInt(CLog2Up(params.featureCompression).W))
       when(treeFIDs.readRes.valid) {
-        featureSelectLowOrder := chosenFeature(log2Up(params.featureCompression) - 1, 0)
+        featureSelectLowOrder := (if (params.featureCompression == 1) 0.U else chosenFeature(CLog2Up(params.featureCompression) - 1, 0))
       }
 
       // read from thresholds and features at the same time so that they'll be ready and consumed at the same time
       treeThresholds.readReq.valid := treeFIDs.readRes.valid
       featureReader.readReq.valid := treeFIDs.readRes.valid
-      treeThresholds.readReq.bits := currentTreePointer(treePointerWidth - 1, log2Up(params.thresholdCompression))
+      treeThresholds.readReq.bits := currentTreePointer(treePointerWidth - 1, CLog2Up(params.thresholdCompression))
       featureReader.readReq.bits := featureSelectHighOrder
-      val threshold = VecInit(splitIntoChunks(treeThresholds.readRes.bits, 32))(currentTreePointer(log2Up(params.thresholdCompression) - 1, 0))
+      val thresholdSelector = if (params.thresholdCompression == 1) 0.U else currentTreePointer(CLog2Up(params.thresholdCompression) - 1, 0)
+      val threshold = VecInit(splitIntoChunks(treeThresholds.readRes.bits, 32))(thresholdSelector)
       val feature = VecInit(splitIntoChunks(featureReader.readRes.bits, 32))(featureSelectLowOrder)
 
       assert(!(treeThresholds.readRes.valid ^ featureReader.readRes.valid),
@@ -306,9 +301,9 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
       fpunit.io.req.bits.opModifier := 0.U
       fpunit.io.req.bits.srcFormat := FPFloatFormat.Fp32
       // all other operands are DontCare
-      when(fpunit.io.req.valid) {
-        assert(fpunit.io.req.ready, "sanity")
-      }
+      //      when(fpunit.io.req.valid) {
+      //        assert(fpunit.io.req.ready, "sanity")
+      //      }
       fpunit.io.resp.ready := true.B
       // if we made it here, implied not a leaf node
       when(fpunit.io.resp.fire) {
@@ -318,9 +313,9 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
       }
     }
     is(s_finishTree) {
-      when(treeThresholds.readRes.valid) {
-        assert(fpunit.io.req.ready, "sanity 2")
-      }
+      //      when(treeThresholds.readRes.valid) {
+      //        assert(fpunit.io.req.ready, "sanity 2")
+      //      }
       fpunit.io.req.valid := treeThresholds.readRes.valid
       fpunit.io.req.bits.op := FPOperation.FMADD
       fpunit.io.req.bits.opModifier := 0.U

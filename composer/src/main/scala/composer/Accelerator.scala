@@ -29,6 +29,8 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
     (LazyModule(new ComposerSystem(config, id)(pWithMap)), id, config)
   }.toSeq
 
+  system_tups.foreach(a => a._1.suggestName(a._3.name))
+
   // for each system that can issue commands, connect them to the other systems in the accelerator
   system_tups.filter(_._3.canIssueCoreCommands).foreach { sy_tup =>
     // self loops are violation of TL protocol
@@ -119,7 +121,7 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   } else {
     val respArbiter = Module(new RRArbiter[RoCCResponse](new RoCCResponse, systemSoftwareResps.size))
     respArbiter.io.in.zip(systemSoftwareResps).foreach { case (arbio, sysio) =>
-      arbio.bits.data := sysio.bits.pack
+      arbio.bits.data := sysio.bits.pack()
       arbio.bits.rd := sysio.bits.rd
       arbio.valid := sysio.valid
       sysio.ready := arbio.ready

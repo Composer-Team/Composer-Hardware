@@ -210,19 +210,26 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
 
 
   if (outer.systemParams.canReceiveSoftwareCommands && p(RequireInternalCommandRouting)) {
+    val swio = sw_io.get
+
     val readyDisp = Wire(Bool())
     respQ.ready := readyDisp
 
-    val reqCmdSourcedInternally = VecInit(Seq.fill(outer.nCores)(Reg(Bool())))
+    val reqCmdSourcedInternally = Reg(Vec(outer.nCores, Bool()))
 
     when(icmAsCmdSrc.get.fire && icmAsCmdSrc.get.bits.inst.xd) {
       reqCmdSourcedInternally(icmAsCmdSrc.get.bits.core_id) := true.B
     }
+    when(swio.cmd.fire && swio.cmd.bits.inst.xd) {
+      reqCmdSourcedInternally(swio.cmd.bits.core_id) := false.B
+    }
 
 
-    sw_io.get.resp.valid := false.B
+    swio.resp.valid := false.B
     internalRespDispatchModule.get.io.valid := false.B
-    sw_io.get.resp.bits <> respQ.bits
+
+    swio.resp.bits <> respQ.bits
+    // internal resp module bits already set
 
     when(reqCmdSourcedInternally(respQ.bits.core_id)) {
       // command was sourced internally
@@ -230,14 +237,14 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
       internalRespDispatchModule.get.io.valid := respQ.valid
     }.otherwise {
       readyDisp := sw_io.get.resp.ready
-      sw_io.get.resp.valid := respQ.valid
+      swio.resp.valid := respQ.valid
     }
   } else if (outer.systemParams.canReceiveSoftwareCommands) {
     // simple case!
     sw_io.get.resp <> respQ
   } else if (p(RequireInternalCommandRouting)) {
     respQ.ready := internalRespDispatchModule.get.io.ready
-    internalRespDispatchModule.get.io.valid := resp.valid
+    internalRespDispatchModule.get.io.valid := respQ.valid
     internalRespDispatchModule.get.io.bits.dat := respQ.bits.pack
     internalRespDispatchModule.get.io.bits.addr := ComposerConsts.getInternalCmdRoutingAddress(respQ.bits.system_id)
   } else {

@@ -31,10 +31,12 @@ class TLClientModule(tlclient: TLClientNode) extends Module {
   tl.d.ready := false.B
   when(state === s_canEmit) {
     io.ready := tl.a.ready
+    tl.a.valid := io.valid
     when(io.fire) {
       state := s_waitForAck
     }
   }.otherwise {
+    tl.a.valid := false.B
     tl.d.ready := true.B
     io.ready := false.B
   }

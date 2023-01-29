@@ -20,7 +20,7 @@ class CScratchpadAccessBundle(supportWriteback: Boolean,
 }
 
 class CScratchpadInitReqIO(mem_out: TLBundle, nDatas: Int, upperboundBytesPerData: Int) extends Bundle {
-  val progress = Output(Bool())
+  val progress = Output(UInt((log2Up(nDatas)+1).W))
   val request = Flipped(Decoupled(new Bundle() {
     val memAddr = UInt(mem_out.params.addressBits.W)
     val scAddr = UInt(log2Up(nDatas).W)
@@ -145,6 +145,11 @@ class CScratchpadImp(supportMemRead: Boolean,
     }
     loader.io.cache_block_in.valid := mem_out.d.valid
     loader.io.cache_block_in.bits.dat := mem_out.d.bits.data
+    when (req_cache.memoryLength >= beatSize.U) {
+      loader.io.cache_block_in.bits.len := beatSize.U
+    }.otherwise {
+      loader.io.cache_block_in.bits.len := req_cache.memoryLength
+    }
     loader.io.cache_block_in.bits.idxBase := req_cache.scratchpadAddress
     mem_out.d.ready := loader.io.cache_block_in.ready
     loader.io.sp_write_out.ready := true.B
@@ -159,6 +164,14 @@ class CScratchpadImp(supportMemRead: Boolean,
     }
     when(loader.io.sp_write_out.valid) {
       mem.write(loader.io.sp_write_out.bits.idx, loader.io.sp_write_out.bits.dat)
+    }
+    val progressReg = RegInit(0.U((loader.io.sp_write_out.bits.idx.getWidth + 1).W))
+    req.get.progress := progressReg
+    when (loader.io.sp_write_out.fire) {
+      progressReg := loader.io.sp_write_out.bits.idx +& 1.U
+    }
+    when (req.get.request.valid) {
+      progressReg := req.get.request.bits.scAddr
     }
   }
   if (supportWrite) {

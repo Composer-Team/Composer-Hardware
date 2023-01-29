@@ -129,10 +129,8 @@ class ComposerRoccResponse()(implicit p: Parameters) extends Bundle {
   val core_id = UInt(p(CoreIDLengthKey).W)
   val data = UInt((64 - p(SystemIDLengthKey) - p(CoreIDLengthKey)).W)
 
-  def pack: UInt = {
-    val q = Wire(UInt(64.W))
-    q := Cat(system_id, core_id, rd, data)
-    q
+  def pack(): UInt = {
+    Cat(this.system_id, this.core_id, this.data)
   }
 }
 
@@ -152,4 +150,25 @@ object ComposerRoccResponse {
   def getDataWidth(implicit p: Parameters): Int = 64 - p(SystemIDLengthKey) - p(CoreIDLengthKey)
   val getWidthBits: Int = 64
   val getWidthBytes: Int = getWidthBits / 8
+}
+
+object CLog2Up {
+  def apply(a: BigInt): Int = {
+    if (a == 1) 0
+    else log2Up(a)
+  }
+}
+
+object splitIntoChunks {
+  def apply(a: UInt, sz: Int): Seq[UInt] = {
+    require(a.getWidth % sz == 0, s"Can't split bitwidth ${a.getWidth} into chunks of $sz")
+
+    def rec(a: UInt, acc: List[UInt] = List.empty): List[UInt] = {
+      if (a.getWidth == 0) acc
+      else a(sz - 1, 0) :: acc
+    }
+
+    rec(a)
+  }
+
 }
