@@ -10,6 +10,12 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem.{CacheBlockBytes, ExtMem}
 import freechips.rocketchip.tilelink._
 
+class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2)(implicit p: Parameters) extends ParameterizedBundle()(p) {
+  val req = Flipped(DecoupledIO(bundleIn.cloneType))
+  val resp = DecoupledIO(bundleOut.cloneType)
+  val busy = Output(Bool())
+}
+
 class ComposerCoreIO(implicit p: Parameters) extends ParameterizedBundle()(p) {
   val req = Flipped(DecoupledIO(new ComposerRoccCommand))
   val resp = DecoupledIO(new ComposerRoccResponse)
@@ -180,6 +186,12 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     tl <> m.tl
     (m.io.channel, m.io.req)
   }
+
+  def exposeIOModule[T1 <: Bundle, T2 <: Bundle](bundIn: T1, bundOut: T2): CustomIO[T1, T2] = {
+    val m = Module(new ComposerBundleIO(io, bundIn, bundOut))
+    m.io
+  }
+
 
   def declareSequentialReader(usingReadChannelID: Int,
                               dataBytes: Int,
