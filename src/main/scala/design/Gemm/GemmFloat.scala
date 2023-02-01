@@ -8,7 +8,6 @@ import composer.MemoryStreams._
 import freechips.rocketchip.config.Parameters
 import composer._
 import composer.common.splitIntoChunks
-import firrtl.transforms.BlackBoxInlineAnno
 import fpnewWrapper.fpnew.{FPFloatFormat, FPNewFType, FPOperation, FPRoundingMode, FPUNew}
 import freechips.rocketchip.subsystem.ExtMem
 
@@ -48,7 +47,7 @@ class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(i
     dataBytes = dataWidthBytes * arithUnits)
   // these channels will read both the buffers and the A Matrix
   val (reqChannelRow, dataChannelRow) = getReaderModules(name = "ChannelA", useSoftwareAddressing = false,
-    dataBytes = dataWidthBytes, vlen=1, prefetchRows = 2)
+    dataBytes = dataWidthBytes, vlen=1)
 
   val BAddr = Reg(UInt(addrWidth.W))
   val BSave = Reg(UInt(addrWidth.W))
@@ -428,16 +427,4 @@ class WithGemmFloat(withNCores: Int,
         new GemmFloatCore(coreParams, gp)(parameters)
     }))
 })
-
-//noinspection DuplicatedCode
-//noinspection ScalaUnusedSymbol
-class GemmFloatConfig extends Config(
-  new WithGemmFloat(2, GemmParam(4, 16, 4, 4, 2048)) ++ new WithComposer() ++ new WithAWSMem(1)
-)
-
-//noinspection DuplicatedCode
-//noinspection ScalaUnusedSymbol
-class GemmFloatConfigBig extends Config(
-  new WithGemm(6, GemmParam(4, 256, 2, 8, 2048)) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
-)
 

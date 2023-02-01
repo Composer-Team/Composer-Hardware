@@ -49,12 +49,14 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
       (par.name, (cache, rnodes))
   }
   val unCachedReaders = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.ReadChannel).map { para =>
-    (para.name, List.tabulate(para.nChannels) { i =>
+    val param: CReadChannelParams = para.asInstanceOf[CReadChannelParams]
+    (param.name, List.tabulate(para.nChannels) { i =>
       TLClientNode(List(TLMasterPortParameters.v1(
         clients = List(TLMasterParameters.v1(
           name = s"ReadChannel_sys${system_id}_core${core_id}_${para.name}$i",
           supportsGet = TransferSizes(1, maxTxLength),
-          supportsProbe = TransferSizes(1, maxTxLength)
+          supportsProbe = TransferSizes(1, maxTxLength),
+          sourceId = IdRange(0, param.maxInFlightTxs)
         )))))
     })
   }
@@ -135,15 +137,13 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
                        useSoftwareAddressing: Boolean,
                        dataBytes: Int,
                        vlen: Int,
-                       prefetchRows: Int = 0,
                        idx: Option[Int] = None,
                        transactionEmitBehavior: txEmitBehavior = txEmitCacheBlock()): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
     val mod = idx match {
       case Some(id_unpack) =>
         val clients = getTLClients(name, outer.readerNodes)
-        List(Module(new CReader(dataBytes, vlen, prefetchRows, transactionEmitBehavior, clients(id_unpack))))
-      case None => getTLClients(name, outer.readerNodes).map(tab_id => Module(new CReader(dataBytes, vlen,
-        prefetchRows, transactionEmitBehavior, tab_id)))
+        List(Module(new CReader(dataBytes, vlen, transactionEmitBehavior, clients(id_unpack))))
+      case None => getTLClients(name, outer.readerNodes).map(tab_id => Module(new CReader(dataBytes, vlen, transactionEmitBehavior, tab_id)))
     }
     //noinspection DuplicatedCode
     mod.zipWithIndex foreach { case (m, m_idx) =>
