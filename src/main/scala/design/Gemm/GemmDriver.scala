@@ -35,6 +35,10 @@ class FirstTryF1WithDispatcher extends Config(
   new GemmWithDispatchConfig(5, GP.workingF1Params) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
 )
 
+class SmallDispatcher extends Config(
+  new GemmWithDispatchConfig(5, GP.unitParams) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
+)
+
 //noinspection ScalaUnusedSymbol
 class GemmTestF1 extends Config(
   new WithGemm(4, GP.unitParams) ++ new WithComposer() ++ new WithAWSMem(1)
@@ -49,6 +53,10 @@ object GemmFloatDriver extends App {
 }
 
 class GemmDispatchF1Config extends Config (new GemmWithDispatchConfig(2, GP.unitParams) ++ new WithAWSMem(1) ++ new WithComposer())
+
+object GemmSmallDriver extends App {
+  Composer.buildConfig(new SmallDispatcher)
+}
 
 object GemmDispatchDriver extends App {
   Composer.buildConfig(new FirstTryF1WithDispatcher)
