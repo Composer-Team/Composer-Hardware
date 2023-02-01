@@ -45,7 +45,7 @@ class CScratchpad(supportMemRead: Boolean,
                   nDatas: Int,
                   latency: Int,
                   specialization: CScratchpadSpecialization)(implicit p: Parameters) extends LazyModule {
-  require(latency == 1 || latency == 2)
+  require(1 <= latency && latency <= 3)
   require(supportMemRead || supportWrite)
   require(dataWidthBits > 0)
   require(nDatas > 0)
@@ -73,6 +73,11 @@ class CScratchpadImp(supportMemRead: Boolean,
   val beatSize = mem_edge.manager.beatBytes
   val scReqBits = log2Up(nDatas)
 
+  def nestPipeline[T <: Data](a: T, depth: Int): T = {
+    if (depth == 0) a
+    else RegNext(a)
+  }
+
   val access = IO(new CScratchpadAccessBundle(supportWrite, scReqBits, dataWidthBits))
   val req = if (supportMemRead) {
     Some(IO(new CScratchpadInitReqIO(mem_out, nDatas,
@@ -99,10 +104,9 @@ class CScratchpadImp(supportMemRead: Boolean,
 
     val read_idle :: read_send :: read_process :: Nil = Enum(3)
     val read_state = RegInit(read_idle)
-    access.readRes.valid := (if (latency == 1) RegNext(access.readReq.valid) else
-      RegNext(RegNext(access.readReq.valid)))
+    access.readRes.valid := nestPipeline(access.readReq.valid, latency)
     val rval = mem.read(access.readReq.bits, access.readReq.valid)
-    access.readRes.bits := (if (latency == 1) rval else RegNext(rval))
+    access.readRes.bits := nestPipeline(rval, latency-1)
     // in-flight read tx busy bits
 
     scratchpad_req_io.request.ready := read_state === read_idle
