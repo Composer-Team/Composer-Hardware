@@ -16,6 +16,7 @@ class ReadChannelIO(dataBytes: Int, vlen: Int)(implicit p: Parameters) extends B
 abstract class txEmitBehavior
 
 case class txEmitAsOneTx() extends txEmitBehavior
+
 case class txEmitCacheBlock() extends txEmitBehavior
 
 class CReader(dataBytes: Int,
@@ -63,13 +64,14 @@ class CReader(dataBytes: Int,
   val s_idle :: s_send_mem_request :: s_read_memory :: Nil = Enum(3)
   val state = RegInit(s_idle)
 
-  val buffer = Seq.fill(1 + prefetchRows, beatsPerBlock, channelsPerBeat)(Reg(UInt(channelWidthBits.W)))
-  val buffer_valid = Reg(Vec(
-    if (usesPrefetch) 1 + prefetchRows
-    else 0,
-    Bool()))
+  val prefetch_readIdx, prefetch_writeIdx = Counter(prefetchRows)
+  val prefetch_buffers = Seq.fill(beatsPerBlock)(SyncReadMem(prefetchRows, UInt((beatBytes * 8).W)))
+  val prefetch_buffers_valid = Reg(Vec(prefetchRows, Bool()))
+  val prefetch_head_buffer_valid = RegInit(false.B)
+
+  val buffer = Seq.fill(beatsPerBlock, channelsPerBeat)(Reg(UInt(channelWidthBits.W)))
   when(reset.asBool) {
-    buffer_valid.foreach(_ := false.B)
+    prefetch_buffers_valid.foreach(_ := false.B)
   }
   val channel_buffer = Reg(Vec(vlen, UInt((dataBytes * 8).W)))
   val channel_buffer_valid = RegInit(false.B)
@@ -96,39 +98,72 @@ class CReader(dataBytes: Int,
   // handle data input
 
   // load a cache block at a time. If it's underfilled then we accept more beats
-  tl_out.d.ready := buffer_fill_level < beatsPerBlock.U
+  tl_out.d.ready := (buffer_fill_level < beatsPerBlock.U) && !prefetch_buffers_valid(prefetch_writeIdx.value)
   // last buffer in FIFO gets D channel data
   when(tl_out.d.fire) {
-    (0 until beatsPerBlock) foreach { bufferBeatIdx =>
-      // whenever we get a beat on the data bus, split it into sections and put into buffer
-      when(bufferBeatIdx.U === buffer_fill_level) {
-        // get sub ranges of the beat
-        val splits = (0 until channelsPerBeat) map { ch_buffer_idx =>
-          val high = (ch_buffer_idx + 1) * channelWidthBits - 1
-          val low = channelWidthBits * ch_buffer_idx
-          tl_out.d.bits.data(high, low)
-        }
-        // assign them into buffer
-        buffer.last(bufferBeatIdx) zip splits foreach { case (buf, spl) => buf := spl }
-        // handle state machine for the case of prefetching
-      }
-    }
+    // IF we're using prefetch, then we store the entire block in BRAM before moving it to buffer
+    // IF we're NOT using prefetch, we can stream in and out of the buffer
     if (usesPrefetch) {
       when(buffer_fill_level === (beatsPerBlock - 1).U) {
-        buffer_valid.last := true.B
+        prefetch_buffers_valid(prefetch_writeIdx.value) := true.B
+        prefetch_writeIdx.inc()
+        buffer_fill_level := 0.U
+      }
+      if (beatsPerBlock > 1) {
+        (0 until beatsPerBlock) foreach { bufferBeatIdx =>
+          when(bufferBeatIdx.U === buffer_fill_level) {
+            prefetch_buffers(bufferBeatIdx).write(prefetch_writeIdx.value, tl_out.d.bits.data)
+          }
+        }
+      } else prefetch_buffers(0).write(prefetch_writeIdx.value, tl_out.d.bits.data)
+
+    } else {
+      (0 until beatsPerBlock) foreach { bufferBeatIdx =>
+        // whenever we get a beat on the data bus, split it into sections and put into buffer
+        when(bufferBeatIdx.U === buffer_fill_level) {
+          // get sub ranges of the beat
+          val splits = (0 until channelsPerBeat) map { ch_buffer_idx =>
+            val high = (ch_buffer_idx + 1) * channelWidthBits - 1
+            val low = channelWidthBits * ch_buffer_idx
+            tl_out.d.bits.data(high, low)
+          }
+          // assign them into buffer
+          buffer(bufferBeatIdx) zip splits foreach { case (buf, spl) => buf := spl }
+          // handle state machine for the case of prefetching
+        }
       }
     }
     buffer_fill_level := buffer_fill_level + 1.U
   }
 
-  // if no prefetch, then it's MEM -> buffer -> user
-  // if prefetch then the structure is MEM -> loading buffer -> FIFO queue -> unloading buffer -> user
-  // this implements the FIFO structure
-  (0 until prefetchRows) foreach { pf_row_idx =>
-    when(!buffer_valid(pf_row_idx) && buffer_valid(pf_row_idx + 1)) {
-      buffer(pf_row_idx).flatten.zip(buffer(pf_row_idx + 1).flatten).foreach { case (row_low, row_high) => row_low := row_high }
-      buffer_valid(pf_row_idx) := true.B
-      buffer_valid(pf_row_idx + 1) := false.B
+  if (usesPrefetch) {
+    val l_idle :: l_assign :: Nil = Enum(2)
+    val load_state = RegInit(l_idle)
+    val do_read = WireInit(false.B)
+    val loads = prefetch_buffers.map{ reader: chisel3.SyncReadMem[UInt] => reader.read(prefetch_readIdx.value, do_read) }
+
+
+    switch(load_state) {
+      is(l_idle) {
+        when(!prefetch_head_buffer_valid && prefetch_buffers_valid(prefetch_readIdx.value)) {
+          load_state := l_assign
+          do_read := true.B
+        }
+      }
+      is(l_assign) {
+        val splits = (0 until beatsPerBlock) flatMap { bufferBeatIdx =>
+          (0 until channelsPerBeat) map { ch_buffer_idx =>
+            val high = (ch_buffer_idx + 1) * channelWidthBits - 1
+            val low = channelWidthBits * ch_buffer_idx
+            loads(bufferBeatIdx)(high, low)
+          }
+        }
+        buffer.flatten.zip(splits).foreach { case (buff, load) => buff := load }
+        prefetch_head_buffer_valid := true.B
+        prefetch_buffers_valid(prefetch_readIdx.value) := false.B
+        prefetch_readIdx.inc()
+        load_state := l_idle
+      }
     }
   }
   // end handle data input
@@ -148,7 +183,7 @@ class CReader(dataBytes: Int,
     is(s_send_mem_request) {
       tl_out.a.valid := true.B
       when(tl_out.a.fire) {
-//        printf("tl_out a fire len(%d)", tl_out.a.bits.size)
+        //        printf("tl_out a fire len(%d)", tl_out.a.bits.size)
         buffer_fill_level := 0.U
         if (logBlockBytes > logChannelSize) {
           data_channel_read_idx := addr(logBlockBytes - 1, logChannelSize)
@@ -166,12 +201,12 @@ class CReader(dataBytes: Int,
         if (usesPrefetch) {
           // if prefetching then wait for the fetch buffer to be valid so that we can fill it in here
           // then it'll be loaded to the top at once
-          buffer_valid(0) := false.B
+          prefetch_head_buffer_valid := false.B
         } else {
           // if no prefetching then this is also the loading buffer and we need to start filling it from the bottom
           buffer_fill_level := 0.U
         }
-        when (len === 0.U) {
+        when(len === 0.U) {
           state := s_idle
         }.otherwise {
           if (fetchBehavior.isInstanceOf[txEmitCacheBlock]) {
@@ -186,7 +221,7 @@ class CReader(dataBytes: Int,
   val buffer_ch_idx = data_channel_read_idx(logChannelsPerBeat - 1, 0)
   val buffer_beat_idx = data_channel_read_idx(data_channel_read_idx.getWidth - 1, logChannelsPerBeat)
   when(
-    if (usesPrefetch) buffer_valid(0)
+    if (usesPrefetch) prefetch_head_buffer_valid
     else buffer_beat_idx < buffer_fill_level) {
     // Vec kinda sucks in its current form. Very hard to do multidimensional arrays so we just use Seqs
     //  and `when` instead. Accomplishes the same thing but semantically has multiple-dimensions and is reasonable
@@ -197,7 +232,7 @@ class CReader(dataBytes: Int,
           when(ch_idx.U === buffer_ch_idx && beat_idx.U === buffer_beat_idx) {
             val start = vidx * dataBytes * 8
             val end = (vidx + 1) * dataBytes * 8 - 1
-            channel_buffer(vidx) := buffer(0)(beat_idx)(ch_idx)(end, start)
+            channel_buffer(vidx) := buffer(beat_idx)(ch_idx)(end, start)
             channel_buffer_valid := true.B
           }
         }
