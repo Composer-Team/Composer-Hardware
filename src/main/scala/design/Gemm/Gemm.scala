@@ -64,7 +64,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
     dataBytes = dataWidthBytes * arithUnits)
   // these channels will read both the buffers and the A Matrix
   val (reqChannelRow, dataChannelRow) = getReaderModules(name = "ChannelA", useSoftwareAddressing = false,
-    dataBytes = dataWidthBytes, vlen=1, prefetchRows = 2)
+    dataBytes = dataWidthBytes, vlen=1, prefetchRows = 8)
 
   val BAddr = Reg(UInt(addrWidth.W))
   val BSave = Reg(UInt(addrWidth.W))
