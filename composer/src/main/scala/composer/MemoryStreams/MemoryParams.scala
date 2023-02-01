@@ -83,10 +83,10 @@ abstract case class CChannelParams(name: String, nChannels: Int, channelType: CC
   * @param nChannels number of memory access channels of this type
   * @param location  location of access
   */
-class CReadChannelParams(name: String, nChannels: Int, location: String = "Mem") extends CChannelParams(name, nChannels, CChannelType.ReadChannel, location)
+class CReadChannelParams(name: String, nChannels: Int, val maxInFlightTxs: Int = 1, location: String = "Mem") extends CChannelParams(name, nChannels, CChannelType.ReadChannel, location)
 object CReadChannelParams {
-  def apply(name: String, nChannels: Int, location: String = "Mem"): CReadChannelParams =
-    new CReadChannelParams(name, nChannels, location)
+  def apply(name: String, nChannels: Int, maxInFlightTxs: Int = 1, location: String = "Mem"): CReadChannelParams =
+    new CReadChannelParams(name, nChannels, maxInFlightTxs, location)
 }
 
 /**

@@ -20,7 +20,8 @@ case class GemmParam(dataWidthBytes: Int,
                      rowColDim: Int,
                      columnParallelism: Int,
                      rowParallelism: Int,
-                     maxRCDim: Int){
+                     maxRCDim: Int,
+                     prefetchAmt: Int = 1){
   require(columnParallelism > 1)
 }
 
@@ -64,7 +65,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
     dataBytes = dataWidthBytes * arithUnits)
   // these channels will read both the buffers and the A Matrix
   val (reqChannelRow, dataChannelRow) = getReaderModules(name = "ChannelA", useSoftwareAddressing = false,
-    dataBytes = dataWidthBytes, vlen=1, prefetchRows = 8)
+    dataBytes = dataWidthBytes, vlen=1)
 
   val BAddr = Reg(UInt(addrWidth.W))
   val BSave = Reg(UInt(addrWidth.W))
@@ -416,7 +417,8 @@ class WithGemm(withNCores: Int,
         specialization = CScratchpadSpecialization.flatPacked),
       CReadChannelParams(
         "ChannelA",
-        gp.rowParallelism),
+        gp.rowParallelism,
+        maxInFlightTxs = 4),
       CWriteChannelParams(
         "ChannelOut",
         gp.rowParallelism))),

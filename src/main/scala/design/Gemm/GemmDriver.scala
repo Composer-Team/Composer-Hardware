@@ -9,30 +9,22 @@ object GP {
     rowColDim = 16,
     columnParallelism = 4,
     rowParallelism = 1,
-    maxRCDim = 2048)
+    maxRCDim = 2048,
+    prefetchAmt = 2)
   val F1Params = GemmParam(dataWidthBytes = 4,
     rowColDim = 256,
     columnParallelism = 2,
     rowParallelism = 8,
-    maxRCDim = 2048)
-  val bigUnitParams = GemmParam(dataWidthBytes = 4,
-    rowColDim = 16,
-    columnParallelism = 8,
-    rowParallelism = 4, maxRCDim = 64)
-
-  val workingF1Params = GemmParam(dataWidthBytes = 4,
-    rowColDim = 256,
-    columnParallelism = 2,
-    rowParallelism = 8,
-    maxRCDim = 2048) // with 5 Cores
+    maxRCDim = 2048,
+    prefetchAmt = 8)
 }
 
 class WorkingF1NoDispatcher extends Config(
-  new WithGemm(5, GP.workingF1Params) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
+  new WithGemm(5, GP.F1Params) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
 )
 
 class FirstTryF1WithDispatcher extends Config(
-  new GemmWithDispatchConfig(5, GP.workingF1Params) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
+  new GemmWithDispatchConfig(5, GP.F1Params) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
 )
 
 class SmallDispatcher extends Config(
@@ -48,9 +40,9 @@ class GemmTestF1 extends Config(
 class GemmTestF1Big extends Config(
   new WithGemm(6, GP.F1Params) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
 )
-object GemmFloatDriver extends App {
-  Composer.buildConfig(new GemmFloatConfig())
-}
+//object GemmFloatDriver extends App {
+//  Composer.buildConfig(new GemmFloatConfig())
+//}
 
 class GemmDispatchF1Config extends Config (new GemmWithDispatchConfig(2, GP.unitParams) ++ new WithAWSMem(1) ++ new WithComposer())
 
