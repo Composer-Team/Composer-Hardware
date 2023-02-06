@@ -1,13 +1,11 @@
-package composer
+package composer.AXIHelpers
 
 import chisel3._
 import chisel3.util._
-
-import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.amba.axi4._
-import freechips.rocketchip.tile.{RoCCCommand, RoCCResponse}
-import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.tile.{RoCCCommand, RoCCResponse}
 
 class AXILHub(implicit p: Parameters) extends LazyModule {
   val axil_aggregator = LazyModule(new AXILAggregator())

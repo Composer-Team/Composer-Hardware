@@ -2,6 +2,7 @@ package composer
 
 import chisel3._
 import chisel3.util._
+import composer.AXIHelpers.{AXI4Compat, AXILHub}
 import composer.ComposerTop._
 import composer.CppGeneration.genCPPHeader
 import freechips.rocketchip.amba.axi4._
