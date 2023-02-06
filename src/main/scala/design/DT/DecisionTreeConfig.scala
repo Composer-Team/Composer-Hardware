@@ -73,7 +73,7 @@ class WithDTAccelerator(nDTCores: Int, DTParams: DTParams) extends Config((site,
 object DTConfig {
   val bigConfig = DTParams(
     maxTreeDepth = 13, // used in paper
-    treeParallelism = 8, // how many trees does the unit hold. URAM cell is 36kB / 32kB.
+    treeParallelism = 4, // how many trees does the unit hold. URAM cell is 36kB / 32kB.
     indexCompression = 8, // index is 32b
     thresholdCompression = 8,
     featureCompression = 8, //32B per cycle
