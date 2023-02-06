@@ -160,15 +160,32 @@ object CLog2Up {
 }
 
 object splitIntoChunks {
-  def apply(a: UInt, sz: Int): Seq[UInt] = {
+  def apply(a: UInt, sz: Int, withName: Option[String] = None): Vec[UInt] = {
     require(a.getWidth % sz == 0, s"Can't split bitwidth ${a.getWidth} into chunks of $sz")
-
-    def rec(a: UInt, acc: List[UInt] = List.empty): List[UInt] = {
-      if (a.getWidth == 0) acc
-      else a(sz - 1, 0) :: acc
+    val nDivs = a.getWidth / sz
+    val wrs = Seq.tabulate(nDivs){ idx =>
+      val start = idx * sz
+      val end = (idx+1) * sz - 1
+      a(end, start)
     }
-
-    rec(a)
+    val myVec = VecInit(wrs)
+    withName match {
+      case Some(a) => myVec.suggestName(a)
+      case None => ;
+    }
+    myVec
   }
+}
 
+// https://github.com/chipsalliance/chisel3/issues/1131
+object on_negEdge {
+  def apply(a: Bool)(block: => Any): Unit = {
+    withClock((!a).asClock)(block)
+  }
+}
+
+object on_posEdge {
+  def apply(a: Bool)(block: => Any): Unit = {
+    withClock(a.asClock)(block)
+  }
 }

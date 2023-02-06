@@ -6,10 +6,10 @@ import chisel3.experimental.ChiselEnum
 import chisel3.util._
 import composer._
 import design.Composer
-import fpnewWrapper.fpnew.FPNewFType.FPNewFType
-import fpnewWrapper.fpnew._
+import fpnewWrapper._
+import fpnewWrapper._
 
-case class fpuParams(ftype: FPNewFType)
+case class fpuParams(ftype: FPFloatFormat.Type)
 
 class FPUTester(cp: ComposerConstructor, fparams: fpuParams)(implicit p: Parameters) extends ComposerCore(cp) {
   val numLanes = 1
@@ -17,7 +17,8 @@ class FPUTester(cp: ComposerConstructor, fparams: fpuParams)(implicit p: Paramet
 
   val fpu = Module(new FPUNew(fparams.ftype,
     lanes = numLanes,
-    stages = numStages))
+    stages = numStages,
+    supportedOps = Seq(FPNewOpClass.ADDMUL), tagWidth = 1))
 
   val s_idle :: s_wait_for_input_fire :: s_wait_for_output_fire :: s_finishing :: Nil = Enum(4)
   val state = RegInit(s_idle)
@@ -28,7 +29,7 @@ class FPUTester(cp: ComposerConstructor, fparams: fpuParams)(implicit p: Paramet
   io.resp.bits := DontCare
 
   // a, b, and c operands
-  val fwidth = FPNewFType.toWidth(fparams.ftype)
+  val fwidth = FPFloatFormat.toWidth(fparams.ftype)
   val operands = Seq.fill(3)(Seq.fill(numLanes)(Reg(UInt(fwidth.W))))
   fpu.io.req.bits.operands(0) := operands(0)(0)
   fpu.io.req.bits.operands(1) := operands(1)(0)
@@ -146,7 +147,7 @@ class withFPU extends Config((site, _, up) => {
       name = "FPUNew",
       buildCore = {
         case (constructor, params) =>
-          new FPUTester(constructor, fpuParams(FPNewFType.FullPrecision))(params)
+          new FPUTester(constructor, fpuParams(FPFloatFormat.Fp32))(params)
       }))
 })
 

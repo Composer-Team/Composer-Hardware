@@ -12,7 +12,7 @@ class CScratchpadPackedSubwordLoader(datOutWidth: Int, idxWidth: Int, wordSizeBi
   val datCounter = Counter(datsPerSubword)
   override val spEntriesPerBeat: Int = (beatSize * 8) / wordSizeBits
 
-  val beat = Reg(UInt((beatSize * 8).W))
+  val beat = Reg(UInt(io.cache_block_in.bits.dat.getWidth.W))
   val idxBase = Reg(UInt(idxWidth.W))
   val lenRemainingFromReq = Reg(UInt((log2Up(beatSize)+1).W))
 
@@ -54,7 +54,6 @@ class CScratchpadPackedSubwordLoader(datOutWidth: Int, idxWidth: Int, wordSizeBi
             state := s_idle
           }
           beat := beat >> wordSizeBits
-
         }
       }
     }

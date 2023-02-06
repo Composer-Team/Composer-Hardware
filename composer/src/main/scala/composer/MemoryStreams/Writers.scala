@@ -57,7 +57,7 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
   val wordsPerBeat = beatBytes / nBytes
 
   val addr = Reg(UInt(addressBitsChop.W))
-  val req_tx_max_length_beats = p(MaxChannelTransactionLenKey) / nBytes
+  val req_tx_max_length_beats = p(MaximumTransactionLength) / nBytes
   val req_tx_mlb_bits = log2Up(req_tx_max_length_beats)
   val req_len = Reg(UInt(req_tx_mlb_bits.W))
 

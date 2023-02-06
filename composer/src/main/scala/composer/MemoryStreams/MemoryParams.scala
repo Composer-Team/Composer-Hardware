@@ -13,7 +13,7 @@ import freechips.rocketchip.subsystem.ExtMem
   */
 class ChannelTransactionBundle(implicit p: Parameters) extends Bundle {
   val addr = UInt(log2Up(p(ExtMem).get.nMemoryChannels * p(ExtMem).get.master.size).W)
-  val len = UInt(log2Up(p(MaxChannelTransactionLenKey)).W)
+  val len = UInt(log2Up(p(MaximumTransactionLength)).W)
 }
 
 /**
@@ -84,6 +84,7 @@ abstract case class CChannelParams(name: String, nChannels: Int, channelType: CC
   * @param location  location of access
   */
 class CReadChannelParams(name: String, nChannels: Int, val maxInFlightTxs: Int = 1, location: String = "Mem") extends CChannelParams(name, nChannels, CChannelType.ReadChannel, location)
+
 object CReadChannelParams {
   def apply(name: String, nChannels: Int, maxInFlightTxs: Int = 1, location: String = "Mem"): CReadChannelParams =
     new CReadChannelParams(name, nChannels, maxInFlightTxs, location)
@@ -98,6 +99,7 @@ object CReadChannelParams {
   * @param location       location of access
   */
 class CWriteChannelParams(name: String, nChannels: Int, val maxInFlightTxs: Int = 2, location: String = "Mem") extends CChannelParams(name, nChannels, CChannelType.WriteChannel, location)
+
 object CWriteChannelParams {
   def apply(name: String, nChannels: Int, maxInFlightTxs: Int = 2, location: String = "Mem"): CWriteChannelParams =
     new CWriteChannelParams(name, nChannels, maxInFlightTxs, location)
@@ -123,25 +125,25 @@ object CCachedReadChannelParams {
 }
 
 class CScratchpadChannelParams(name: String,
-                               val supportMemRead: Boolean,
                                val supportWriteback: Boolean,
                                val dataWidthBits: Int,
                                val nDatas: Int,
                                val latency: Int = 2,
+                               val supportReadLength: Int = 1 << 15,
                                val specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked)
   extends CChannelParams(name, nChannels = 1, channelType = CChannelType.Scratchpad) {
   private[composer] def make(implicit p: Parameters): CScratchpad = {
-    new CScratchpad(supportMemRead, supportWriteback, dataWidthBits, nDatas, latency, specialization)
+    new CScratchpad(supportWriteback, dataWidthBits, nDatas, latency, supportReadLength, specialization)
   }
 }
 
 object CScratchpadChannelParams {
   def apply(name: String,
-            supportMemRead: Boolean,
             supportWriteback: Boolean,
             dataWidthBits: Int,
             nDatas: Int,
             latency: Int = 2,
+            supportReadLength: Int = 1 << 15,
             specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked): CScratchpadChannelParams =
-    new CScratchpadChannelParams(name, supportMemRead, supportWriteback, dataWidthBits, nDatas, latency, specialization)
+    new CScratchpadChannelParams(name, supportWriteback, dataWidthBits, nDatas, latency, supportReadLength, specialization)
 }

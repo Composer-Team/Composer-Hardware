@@ -59,8 +59,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
 
   val state = RegInit(s_idle)
 
-  val (reqChannelB_opt, accessChannelB) = getScratchpad("ChannelB")
-  val reqChannelB = reqChannelB_opt.get
+  val (reqChannelB, accessChannelB) = getScratchpad("ChannelB")
   val (reqChannelOut, dataChannelOut) = getWriterModules(name = "ChannelOut", useSoftwareAddressing =  false,
     dataBytes = dataWidthBytes * arithUnits)
   // these channels will read both the buffers and the A Matrix
@@ -410,7 +409,6 @@ class WithGemm(withNCores: Int,
     coreParams = ComposerCoreParams(memoryChannelParams = List(
       CScratchpadChannelParams(
         "ChannelB",
-        supportMemRead = true,
         supportWriteback = false,
         dataWidthBits = gp.dataWidthBytes * 8 * gp.columnParallelism,
         nDatas = gp.rowColDim * gp.rowColDim / gp.columnParallelism,

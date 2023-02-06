@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config.Config
 import composer.MemoryStreams._
 import composer._
 import design.Composer
+import design.DT.DTConfig.{bigConfig, smallConfig}
 
 //noinspection RedundantDefaultArgument
 class WithDTAccelerator(nDTCores: Int, DTParams: DTParams) extends Config((site, _, up) => {
@@ -22,29 +23,29 @@ class WithDTAccelerator(nDTCores: Int, DTParams: DTParams) extends Config((site,
         memoryChannelParams = List(
           CScratchpadChannelParams(
             name = "feature",
-            supportMemRead = true,
             supportWriteback = false,
             dataWidthBits = DTParams.featureCompression * 32,
             nDatas = DTParams.maxNFeatures / DTParams.featureCompression,
             latency = 2,
+            supportReadLength = DTParams.getLongestTxBytes,
             specialization = new FlatPackScratchpadParams
           ),
           CScratchpadChannelParams(
             name = "treeThreshold",
-            supportMemRead = true,
             supportWriteback = false,
             dataWidthBits = DTParams.thresholdCompression * 32,
             nDatas = (1 << DTParams.maxTreeDepth) * DTParams.treeParallelism / DTParams.thresholdCompression,
             latency = 2,
+            supportReadLength = DTParams.getLongestTxBytes,
             specialization = new FlatPackScratchpadParams
           ),
           CScratchpadChannelParams(
             name = "featureIDs",
-            supportMemRead = true,
             supportWriteback = false,
-            dataWidthBits = DecisionTreeCore.getTotalIndexWidth(DTParams) * DTParams.indexCompression,
+            dataWidthBits = DTParams.getTotalIndexWidth * DTParams.indexCompression,
             nDatas = (1 << DTParams.maxTreeDepth) * DTParams.treeParallelism / DTParams.indexCompression,
             latency = 2,
+            supportReadLength = DTParams.getLongestTxBytes,
             specialization = new FlatPackScratchpadParams
           )
         )
@@ -69,16 +70,32 @@ class WithDTAccelerator(nDTCores: Int, DTParams: DTParams) extends Config((site,
       )
     )
 })
+object DTConfig {
+  val bigConfig = DTParams(
+    maxTreeDepth = 13, // used in paper
+    treeParallelism = 4, // how many trees does the unit hold. URAM cell is 36kB / 32kB.
+    indexCompression = 8, // index is 32b
+    thresholdCompression = 8,
+    featureCompression = 8, //32B per cycle
+    maxNExamples = 64,
+    maxNTrees = 2,
+    maxNFeatures = 4096)
 
-class DTConfig extends Config(
-  new WithDTAccelerator(1, DTParams(maxTreeDepth = 4,
-    treeParallelism = 1,
-    indexCompression = 1,
+  val smallConfig = DTParams(
+    maxTreeDepth = 6, // used in paper
+    treeParallelism = 1, // how many trees does the unit hold. URAM cell is 36kB / 32kB.
+    indexCompression = 1, // index is 32b
     thresholdCompression = 1,
-    featureCompression = 1,
-    maxNExamples = 16,
+    featureCompression = 1, //32B per cycle
+    maxNExamples = 4,
     maxNTrees = 4,
-    maxNFeatures =  16)) ++ new WithComposer() ++ new WithAWSMem(1)
+    maxNFeatures = 16)
+
+}
+class DTConfig extends Config(
+  new WithDTAccelerator(32, bigConfig) ++ new WithComposer(
+    maximumTxLengthBytes = 1 << 14
+  ) ++ new WithAWSMem(1)
 )
 
 object DTDriver extends App {

@@ -183,7 +183,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       mod.map(_.io.channel))
   }
 
-  def getScratchpad(name: String): (Option[CScratchpadInitReqIO], CScratchpadAccessBundle) = {
+  def getScratchpad(name: String): (CScratchpadInitReqIO, CScratchpadAccessBundle) = {
     val outer = composerConstructor.composerCoreWrapper
     val lm = outer.scratch_mod.filter(_._1 == name)(0)._2
     lm.suggestName(name)
