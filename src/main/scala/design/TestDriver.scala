@@ -54,10 +54,10 @@ object Composer {
 object GemmDriver extends App {
   Composer.buildConfig(new GemmTestF1)
 }
-
-object GemmBigger extends App {
-  Composer.buildConfig(new GemmTestF1Bigger)
-}
+//
+//object GemmBigger extends App {
+//  Composer.buildConfig(new GemmTestF1Bigger)
+//}
 object GemmBig extends App {
   Composer.buildConfig(new GemmTestF1Big)
 }
