@@ -11,9 +11,9 @@ import freechips.rocketchip.subsystem.{CacheBlockBytes, ExtMem}
 import freechips.rocketchip.tilelink._
 
 class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2)(implicit p: Parameters) extends ParameterizedBundle()(p) {
-  val req = Flipped(DecoupledIO(bundleIn.cloneType))
-  val resp = DecoupledIO(bundleOut.cloneType)
-  val busy = Output(Bool())
+  val req = DecoupledIO(bundleIn.cloneType)
+  val resp = Flipped(DecoupledIO(bundleOut.cloneType))
+  val busy = Input(Bool())
 }
 
 class ComposerCoreIO(implicit p: Parameters) extends ParameterizedBundle()(p) {
