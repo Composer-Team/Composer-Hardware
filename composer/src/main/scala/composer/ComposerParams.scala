@@ -14,7 +14,7 @@ case object HasDiscreteMemory extends Field[Boolean]
 case object ComposerSystemsKey extends Field[List[ComposerSystemParams]]
 case object SystemIDLengthKey extends Field[Int]
 case object CoreIDLengthKey extends Field[Int]
-case object MaxChannelTransactionLenKey extends Field[Int]
+//case object MaxChannelTransactionLenKey extends Field[Int]
 case object TLInterconnectWidthBytes extends Field[Int]
 // if we support a dedicated DMA port, provide the number of ID bits
 case object HasDMA extends Field[Option[Int]]
@@ -88,19 +88,21 @@ class WithNoMem extends WithAWSMem(1)
 // TODO work DMA into Trait
 // TODO work Kria Memory (4GB) into Trait
 
-class WithComposer(maximumTxLengthBytes: Int = 64, systemIDbits: Int = 4, coreIdBits: Int = 8) extends Config((site, _, _) => {
+class WithComposer(maximumTxLengthBytes: Int = 1 << 10, systemIDbits: Int = 4, coreIdBits: Int = 8) extends Config((site, _, _) => {
   case ComposerSystemsKey => Seq()
   case SystemIDLengthKey => systemIDbits
   case CoreIDLengthKey => coreIdBits
   case TLInterconnectWidthBytes => 16
-  case MaxChannelTransactionLenKey => 1 << 30
+//  case MaxChannelTransactionLenKey => 1 << 30
   // Tile parameters
   // Page table levels. We set it higher than rocket chip default because we need to support large virtual addresses
   // spaces for some targets (e.g. Kria). Increasing the # of page table levels supports this, but makes no difference
   // in elaboration
   case PgLevels => 5
   case XLen => 64 // Applies to all cores
-  case MaximumTransactionLength => maximumTxLengthBytes
+  case MaximumTransactionLength =>
+    require(maximumTxLengthBytes <= (1 << 14), "Maximum transaction length supported by AXI is 2^14 B. ")
+    maximumTxLengthBytes
   case MaxHartIdBits => 1 // log2Up(site(TilesLocated(InSubsystem)).map(_.tileParams.hartId).max+1)
   // Interconnect parameters
   case SystemBusKey => SystemBusParams(

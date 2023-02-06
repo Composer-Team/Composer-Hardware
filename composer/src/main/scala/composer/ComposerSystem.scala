@@ -265,7 +265,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
 
     responseManager.io.ready := VecInit(cores.map(_.composer_response_io.get.ready))(response.core_id)
   }
-  val lenBits = log2Up(p(MaxChannelTransactionLenKey))
+  val lenBits = log2Up(p(MaximumTransactionLength))
 
   val channelSelect = Cat(cmd.bits.inst.rs2(2, 0), cmd.bits.inst.rs1)
 
@@ -296,7 +296,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
                                        io_map: List[CChannelIdentifier] = List()): List[CChannelIdentifier] = {
     channelList match {
       case (channel_identifier, txio) :: rst =>
-        val tx_len = Reg(UInt(log2Up(p(MaxChannelTransactionLenKey)).W))
+        val tx_len = Reg(UInt(log2Up(p(MaximumTransactionLength)).W))
         val tx_addr_start = Reg(UInt(addressBits.W))
         when(addr_func_live && coreSelect === coreId.U && channelSelect === assignment.U) {
           tx_len := txLenFromCmd
