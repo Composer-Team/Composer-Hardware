@@ -50,14 +50,14 @@ class SimpleCore()(implicit p: Parameters, composerCoreParams: ComposerConstruct
   val result = RegInit(0.U(cio.resp.bits.data.getWidth.W))
 
 
-  io.req.ready := false.B
-  io.resp.valid := false.B
-  io.resp.bits.data := 0.U
-  io.busy := true.B
+  cio.req.ready := false.B
+  cio.resp.valid := false.B
+  cio.resp.bits.data := 0.U
+  cio.busy := true.B
 
   when(state === s_idle) {
-    io.busy := false.B
-    io.req.ready := true.B
+    cio.busy := false.B
+    cio.req.ready := true.B
     when(cio.req.fire) {
       state := s_working
       op := cio.req.bits.op
@@ -78,8 +78,8 @@ class SimpleCore()(implicit p: Parameters, composerCoreParams: ComposerConstruct
     }
     state := s_finish
   }.elsewhen(state === s_finish) {
-    io.resp.bits.data := result
-    io.resp.valid := true.B
+    cio.resp.bits.data := result
+    cio.resp.valid := true.B
     when(io.resp.fire) {
       state := s_idle
     }
