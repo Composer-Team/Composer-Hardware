@@ -28,8 +28,8 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
     }
 
     def recursivelyReduceXBar(grp: Seq[TLIdentityNode]): Seq[TLIdentityNode] = {
-      if (grp.length <= p(CChannelXBarWidth)) grp
-      else (grp.grouped(p(CChannelXBarWidth)) map { subgroup =>
+      if (grp.length <= p(CXbarMaxDegree)) grp
+      else (grp.grouped(p(CXbarMaxDegree)) map { subgroup =>
         val sub_xbar = TLXbar()
         subgroup foreach (sub_xbar := _)
         val out_node = TLIdentityNode()

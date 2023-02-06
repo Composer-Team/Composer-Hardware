@@ -19,7 +19,7 @@ case object TLInterconnectWidthBytes extends Field[Int]
 // if we support a dedicated DMA port, provide the number of ID bits
 case object HasDMA extends Field[Option[Int]]
 case object HasAXILExternalMMIO extends Field[Boolean]
-case object CChannelXBarWidth extends Field[Int]
+case object CXbarMaxDegree extends Field[Int]
 case object MaximumTransactionLength extends Field[Int]
 case object SystemName2IdMapKey extends Field[Map[String, Int]]
 case object RequireInternalCommandRouting extends Field[Boolean]
@@ -62,7 +62,7 @@ class WithAWSMem(nMemoryChannels: Int) extends Config((_, _, _) => {
   case HasAXILExternalMMIO => true
   case MMIOBaseAddress => 0x0L // MMIO is not real, it's just a PCIE bus transaction that pretends to be MMIO
   // TODO this can be tuned
-  case CChannelXBarWidth => 16
+  case CXbarMaxDegree => 16
   case HasDiscreteMemory => true
 })
 
@@ -77,7 +77,7 @@ class WithKriaMem extends Config((_, _, _) => {
   case MMIOBaseAddress => (1 << 12).toLong // put on the 2nd page. Skip first 4KB page to preserve behavior of *(nullptr)
   case HasDMA => None
   // TODO this can be tuned
-  case CChannelXBarWidth => 8
+  case CXbarMaxDegree => 8
   case HasAXILExternalMMIO => false // use full AXI4
   case HasDiscreteMemory => false
 })

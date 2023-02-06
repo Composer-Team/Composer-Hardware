@@ -93,7 +93,7 @@ object DTConfig {
 
 }
 class DTConfig extends Config(
-  new WithDTAccelerator(32, bigConfig) ++ new WithComposer(
+  new WithDTAccelerator(2, bigConfig) ++ new WithComposer(
     maximumTxLengthBytes = 1 << 14
   ) ++ new WithAWSMem(1)
 )
