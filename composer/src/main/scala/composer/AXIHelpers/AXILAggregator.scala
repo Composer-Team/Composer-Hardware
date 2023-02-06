@@ -1,8 +1,8 @@
-package composer
+package composer.AXIHelpers
 
 import chipsalliance.rocketchip.config.Parameters
-import chisel3.util._
 import chisel3._
+import chisel3.util._
 import freechips.rocketchip.amba.axi4.{AXI4MasterNode, AXI4MasterParameters, AXI4MasterPortParameters}
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.subsystem.CacheBlockBytes

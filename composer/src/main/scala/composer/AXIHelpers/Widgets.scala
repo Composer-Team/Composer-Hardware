@@ -1,13 +1,13 @@
-package composer
+package composer.AXIHelpers
 
 import chisel3._
 import chisel3.util._
+import composer._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 
 import java.io.FileWriter
-import scala.collection.mutable
 
 /*
  * This file seems to handle memory-mapped IO
@@ -37,7 +37,7 @@ abstract class WidgetModule(outer: Widget) extends LazyModuleImp(outer) {
 
   protected var wName: Option[String] = None
 
-  def setWidgetName(n: String) {
+  def setWidgetName(n: String): Unit = {
     wName = Some(n)
   }
 
@@ -56,23 +56,20 @@ abstract class WidgetModule(outer: Widget) extends LazyModuleImp(outer) {
     // this might not work....
     import Chisel._
     def innerAttachIO(node: Data, name: String): Unit = node match {
-      case (b: Bits) => {
+      case b: Bits =>
         if (b.dir == OUTPUT) {
-          attach(b, s"${name}", ReadOnly)
+          attach(b, s"$name", ReadOnly)
         } else {
           genWOReg(b, name)
         }
-      }
-      case (v: Vec[_]) => {
-        (v.zipWithIndex).foreach({ case (elm, idx) => innerAttachIO(elm, s"${name}_$idx") })
-      }
-      case (r: Record) => {
-        r.elements.foreach({ case (subName, elm) => innerAttachIO(elm, s"${name}_${subName}") })
-      }
+      case v: Vec[_] =>
+        v.zipWithIndex.foreach({ case (elm, idx) => innerAttachIO(elm, s"${name}_$idx") })
+      case r: Record =>
+        r.elements.foreach({ case (subName, elm) => innerAttachIO(elm, s"${name}_$subName") })
       case _ => new RuntimeException("Cannot bind to this sort of node...")
     }
 
-    io.elements.foreach({ case (name, elm) => innerAttachIO(elm, s"${prefix}${name}") })
+    io.elements.foreach({ case (name, elm) => innerAttachIO(elm, s"$prefix$name") })
   }
 
   def attachDecoupledSink(channel: DecoupledIO[UInt], name: String): Int = {
@@ -124,7 +121,7 @@ abstract class WidgetModule(outer: Widget) extends LazyModuleImp(outer) {
   def getCRAddr(name: String): Int = {
     require(_finalized, "Must build Widgets with their companion object")
     crRegistry.lookupAddress(name).getOrElse(
-      throw new RuntimeException(s"Could not find CR:${name} in widget: $wName"))
+      throw new RuntimeException(s"Could not find CR:$name in widget: $wName"))
   }
 
   def printCRs(ostream: Option[FileWriter] = None): Unit = crRegistry.printCRs(ostream)

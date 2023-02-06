@@ -1,4 +1,4 @@
-package composer
+package composer.AXIHelpers
 
 import chisel3._
 import freechips.rocketchip.amba.axi4.{AXI4Bundle, AXI4BundleParameters}

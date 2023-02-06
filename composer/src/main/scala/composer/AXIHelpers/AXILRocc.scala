@@ -1,13 +1,12 @@
-package composer
+package composer.AXIHelpers
 
 import Chisel._
 //import chisel3._
 //import chisel3.util._
 
-import freechips.rocketchip.tile.{RoCCCommand, RoCCResponse, RoCCInstruction}
-import freechips.rocketchip.tile.XLen
-import freechips.rocketchip.rocket.MStatus
 import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.rocket.MStatus
+import freechips.rocketchip.tile.{RoCCCommand, RoCCInstruction, RoCCResponse, XLen}
 
 //Takes nasti bits and converts to rocc
 
