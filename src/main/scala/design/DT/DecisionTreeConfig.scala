@@ -4,7 +4,7 @@ import chipsalliance.rocketchip.config.Config
 import composer.MemoryStreams._
 import composer._
 import design.Composer
-import design.DT.DTConfig.{bigConfig, smallConfig}
+import design.DT.DTConfig._
 
 //noinspection RedundantDefaultArgument
 class WithDTAccelerator(nDTCores: Int, DTParams: DTParams) extends Config((site, _, up) => {
@@ -73,12 +73,12 @@ class WithDTAccelerator(nDTCores: Int, DTParams: DTParams) extends Config((site,
 object DTConfig {
   val bigConfig = DTParams(
     maxTreeDepth = 13, // used in paper
-    treeParallelism = 4, // how many trees does the unit hold. URAM cell is 36kB / 32kB.
+    treeParallelism = 8, // how many trees does the unit hold. URAM cell is 36kB / 32kB.
     indexCompression = 8, // index is 32b
     thresholdCompression = 8,
     featureCompression = 8, //32B per cycle
     maxNExamples = 64,
-    maxNTrees = 2,
+    maxNTrees = 512,
     maxNFeatures = 4096)
 
   val smallConfig = DTParams(
@@ -92,12 +92,12 @@ object DTConfig {
     maxNFeatures = 16)
 
 }
-class DTConfig extends Config(
-  new WithDTAccelerator(2, bigConfig) ++ new WithComposer(
+class BigDTConfig extends Config(
+  new WithDTAccelerator(64, bigConfig) ++ new WithComposer(
     maximumTxLengthBytes = 1 << 14
   ) ++ new WithAWSMem(1)
 )
 
 object DTDriver extends App {
-  Composer.buildConfig(new DTConfig)
+  Composer.buildConfig(new BigDTConfig)
 }
