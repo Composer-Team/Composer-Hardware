@@ -5,6 +5,7 @@ import composer._
 import chisel3._
 import chisel3.experimental.ChiselEnum
 import chisel3.util._
+import composer.RoccHelpers.{ComposerFunc, ComposerOpcode}
 import freechips.rocketchip.subsystem.ExtMem
 
 class GemmTarget(val rcBits: Int) extends Bundle {

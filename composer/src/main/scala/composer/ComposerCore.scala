@@ -3,6 +3,7 @@ package composer
 import chisel3._
 import chisel3.util._
 import composer.MemoryStreams._
+import composer.RoccHelpers.{ComposerConsts, ComposerFunc, ComposerOpcode}
 import composer.TLManagement.TLClientModule
 import freechips.rocketchip.util._
 import freechips.rocketchip.config._

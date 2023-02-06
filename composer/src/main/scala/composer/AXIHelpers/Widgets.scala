@@ -2,6 +2,7 @@ package composer.AXIHelpers
 
 import chisel3._
 import chisel3.util._
+import composer.RoccHelpers.{DecoupledSinkEntry, DecoupledSourceEntry, MCRFile, MCRFileMap, Permissions, ReadOnly, ReadWrite, RegisterEntry}
 import composer._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters

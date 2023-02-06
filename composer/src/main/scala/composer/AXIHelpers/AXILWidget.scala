@@ -3,7 +3,7 @@ package composer.AXIHelpers
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import composer.MCRFile
+import composer.RoccHelpers.MCRFile
 import freechips.rocketchip.diplomacy.LazyModule
 
 class AXILWidget(implicit p: Parameters) extends Widget()(p) {

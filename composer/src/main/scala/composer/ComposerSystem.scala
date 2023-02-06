@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config._
 import chisel3.util._
 import chisel3._
 import composer.MemoryStreams._
+import composer.RoccHelpers.{ComposerConsts, ComposerFunc}
 import composer.TLManagement.{TLClientModule, TLManagerModule}
 import composer.common._
 import freechips.rocketchip.diplomacy._
@@ -105,7 +106,7 @@ case class CChannelIdentifier(system_name: String, core_idx: Int, channel_name: 
 
 class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) {
   val sw_io = if (outer.systemParams.canReceiveSoftwareCommands) Some(IO(new ComposerSystemIO())) else None
-  val respArbiter = Module(new RRArbiter(new ComposerRoccUserResponse(), outer.systemParams.nCores))
+  val respArbiter = Module(new MultiLevelArbiter(new ComposerRoccUserResponse(), outer.systemParams.nCores))
   val cores = outer.cores.map(_.module)
   val busy = IO(Output(Bool()))
   busy := cores.map(_.io.busy).reduce(_ || _)

@@ -40,14 +40,6 @@ object Composer {
 //        "--repl-seq-mem", s"-c:ComposerTop:-o:$hw_idr/ComposerTop.conf"
         ),
       annotations = Seq(PrintFullStackTraceAnnotation))
-
-    val fWriter = new FileWriter("firrtlAnnos.txt")
-    firrtlAnnos.foreach(a => fWriter.write(a.toString))
-    val dest = new File(hw_idr + "/composer.sv")
-    val src = new File(hw_idr + "/composer.v")
-    new FileOutputStream(dest).getChannel.transferFrom(
-      new FileInputStream(src).getChannel, 0, Long.MaxValue)
-
   }
 }
 

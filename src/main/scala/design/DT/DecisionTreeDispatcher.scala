@@ -3,7 +3,8 @@ package design.DT
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
 import chisel3._
-import composer.{ComposerConstructor, ComposerCore, ComposerFunc, ComposerSystemsKey, CoreIDLengthKey, CppGeneration}
+import composer.RoccHelpers.ComposerFunc
+import composer.{ComposerConstructor, ComposerCore, ComposerSystemsKey, CoreIDLengthKey, CppGeneration}
 import composer.common.{CLog2Up, ComposerRoccCommand}
 import fpnewWrapper.{FPFloatFormat, FPNewOpClass, FPOperation, FPRoundingMode, FPUNew}
 import freechips.rocketchip.subsystem.ExtMem

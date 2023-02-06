@@ -3,6 +3,7 @@ package composer
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.experimental.{ChiselEnum, EnumFactory}
 import chisel3.util.log2Up
+import composer.RoccHelpers.MCRFileMap
 import freechips.rocketchip.subsystem.ExtMem
 
 import java.io.FileWriter

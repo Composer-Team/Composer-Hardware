@@ -5,6 +5,7 @@ import chisel3.util._
 import composer.AXIHelpers.{AXI4Compat, AXILHub}
 import composer.ComposerTop._
 import composer.CppGeneration.genCPPHeader
+import composer.RoccHelpers.RDReserves
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
