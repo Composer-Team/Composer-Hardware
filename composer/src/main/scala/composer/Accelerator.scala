@@ -2,12 +2,14 @@ package composer
 
 import chisel3._
 import chisel3.util._
+import composer.TLManagement.makeTLMultilayerXbar
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.config.Parameters
 import composer.common._
 import freechips.rocketchip.subsystem.ExtMem
+
 import scala.language.postfixOps
 
 class ComposerAcc(implicit p: Parameters) extends LazyModule {
@@ -18,10 +20,11 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
     println(s"$id => $c")
   }
   println(configs.length)
+  val requireInternalCmdRouting = configs.map(_.canIssueCoreCommands).foldLeft(false)(_ || _)
+
   val system_tups = name2Id.keys.map { name =>
     val id = name2Id(name)
     val config = configs(id)
-    val requireInternalCmdRouting = configs.filter(_.name != name).map(_.canIssueCoreCommands).foldLeft(false)(_ || _)
     val pWithMap = p.alterPartial({
       case SystemName2IdMapKey => name2Id
       case RequireInternalCommandRouting => requireInternalCmdRouting
@@ -31,13 +34,15 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
 
   system_tups.foreach(a => a._1.suggestName(a._3.name))
 
-  // for each system that can issue commands, connect them to the other systems in the accelerator
-  system_tups.filter(_._3.canIssueCoreCommands).foreach { sy_tup =>
-    // self loops are violation of TL protocol
-    system_tups.filter(_._3.name != sy_tup._3.name).foreach { recieve_tup =>
-      recieve_tup._1.incomingInternalCommandXbar.get := TLBuffer() := sy_tup._1.outgoingCommandXbar.get
-      sy_tup._1.incomingInternalResponseXBar.get := TLBuffer() := recieve_tup._1.outgoingInternalResponseXbar.get
-    }
+  if (requireInternalCmdRouting) {
+    // for each system that can issue commands, connect them to the other systems in the accelerator
+    val cmdSourceSystems = system_tups.filter(_._3.canIssueCoreCommands).map(_._1.outgoingCommandXbar.get)
+    val cmdManagerSystems = system_tups.map(_._1.incomingInternalCommandXbar.get)
+    makeTLMultilayerXbar(cmdSourceSystems, cmdManagerSystems)
+
+    val respSources = system_tups.map(_._1.outgoingInternalResponseXbar.get)
+    val respManagers = system_tups.filter(_._3.canIssueCoreCommands).map(_._1.incomingInternalResponseXBar.get)
+    makeTLMultilayerXbar(respSources, respManagers)
   }
 
   val systems = system_tups.map(_._1)
