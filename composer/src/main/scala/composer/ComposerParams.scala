@@ -88,7 +88,7 @@ class WithNoMem extends WithAWSMem(1)
 // TODO work DMA into Trait
 // TODO work Kria Memory (4GB) into Trait
 
-class WithComposer(maximumTxLengthBytes: Int = 1 << 10, systemIDbits: Int = 4, coreIdBits: Int = 8) extends Config((site, _, _) => {
+class WithComposer(maximumTxLengthBytes: Int = 1 << 14, systemIDbits: Int = 4, coreIdBits: Int = 8) extends Config((site, _, _) => {
   case ComposerSystemsKey => Seq()
   case SystemIDLengthKey => systemIDbits
   case CoreIDLengthKey => coreIdBits
