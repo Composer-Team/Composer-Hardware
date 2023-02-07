@@ -22,12 +22,12 @@ class CScratchpadAccessBundle(supportWriteback: Boolean,
   }))) else None
 }
 
-class CScratchpadInitReqIO(mem_out: TLBundle, nDatas: Int, upperboundBytesPerData: Int) extends Bundle {
+class CScratchpadInitReqIO(mem_out: TLBundle, nDatas: Int, maxTxLen: Int) extends Bundle {
   val progress = Output(UInt((log2Up(nDatas) + 1).W))
   val request = Flipped(Decoupled(new Bundle() {
     val memAddr = UInt(mem_out.params.addressBits.W)
     val scAddr = UInt(log2Up(nDatas).W)
-    val len = UInt((log2Up(nDatas * upperboundBytesPerData) + 1).W)
+    val len = UInt((log2Up(maxTxLen)+1).W)
   }))
 }
 
@@ -51,20 +51,19 @@ class CScratchpad(supportWrite: Boolean,
   require(1 <= latency && latency <= 3)
   require(dataWidthBits > 0)
   require(nDatas > 0)
-  require(supportReadLength >= maxTxSize)
+  val rSize = Seq(supportReadLength, maxTxSize).max
   require(isPow2(supportReadLength))
-  println("aaa: " + supportReadLength + " " + maxTxSize)
 
   val mem = TLClientNode(Seq(TLMasterPortParameters.v2(
     masters = Seq(TLMasterParameters.v1(
       name = "ScratchpadToMemory",
-      sourceId = IdRange(0, supportReadLength >> log2Up(maxTxSize)),
+      sourceId = IdRange(0, rSize >> log2Up(maxTxSize)),
       supportsProbe = TransferSizes(1, maxTxSize),
       supportsGet = TransferSizes(1, maxTxSize),
       supportsPutFull = TransferSizes(1, maxTxSize)
     )),
     channelBytes = TLChannelBeatBytes(maxTxSize))))
-  lazy val module = new CScratchpadImp(supportWrite, dataWidthBits, nDatas, latency, specialization, supportReadLength, this)
+  lazy val module = new CScratchpadImp(supportWrite, dataWidthBits, nDatas, latency, specialization, rSize, this)
 }
 
 class CScratchpadImp(supportWrite: Boolean,
@@ -86,14 +85,7 @@ class CScratchpadImp(supportWrite: Boolean,
   }
 
   val access = IO(new CScratchpadAccessBundle(supportWrite, scReqBits, dataWidthBits))
-  val req = IO(new CScratchpadInitReqIO(mem_out, nDatas,
-      specialization match {
-        case psw: PackedSubwordScratchpadParams =>
-          val c = Math.ceil(psw.wordSizeBits.toFloat / psw.datsPerSubword).toInt
-          (c + c % 8) / 8
-        case _: FlatPackScratchpadParams =>
-          (dataWidthBits + (dataWidthBits % 8)) / 8
-      }))
+  val req = IO(new CScratchpadInitReqIO(mem_out, nDatas, supportReadLength))
 
 
   val mem = SyncReadMem(nDatas, UInt(dataWidthBits.W))

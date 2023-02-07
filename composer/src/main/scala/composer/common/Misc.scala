@@ -104,8 +104,8 @@ object ComposerRoccCommand {
     b.payload1 := a(127 - coreId_len, 64)
     b.core_id := a(127, 128 - coreId_len)
     b.inst.funct := a(134 - sysId_len, 128)
-    b.inst.system_id := a(134, 135- sysId_len)
-    b.inst.opcode := a (141, 135)
+    b.inst.system_id := a(134, 135 - sysId_len)
+    b.inst.opcode := a(141, 135)
     b.inst.xs2 := a(142)
     b.inst.xs1 := a(143)
     b.inst.xd := a(144)
@@ -127,10 +127,10 @@ class ComposerRoccResponse()(implicit p: Parameters) extends Bundle {
   val rd = UInt(5.W)
   val system_id = UInt(p(SystemIDLengthKey).W)
   val core_id = UInt(p(CoreIDLengthKey).W)
-  val data = UInt((64 - p(SystemIDLengthKey) - p(CoreIDLengthKey)).W)
+  val data = UInt((59 - p(SystemIDLengthKey) - p(CoreIDLengthKey)).W)
 
   def pack(): UInt = {
-    Cat(this.system_id, this.core_id, this.data)
+    Cat(system_id, core_id, rd, data)
   }
 }
 
@@ -140,14 +140,15 @@ object ComposerRoccResponse {
     val wire = Wire(new ComposerRoccResponse())
     val syswid = p(SystemIDLengthKey)
     val corewid = p(CoreIDLengthKey)
-    wire.data := a(58-syswid - corewid, 0)
-    wire.rd := a(63-syswid - corewid, 59-syswid-corewid)
-    wire.core_id := a(63-syswid, 64-syswid - corewid)
-    wire.system_id := a(63, 64-syswid)
+    wire.data := a(58 - syswid - corewid, 0)
+    wire.rd := a(63 - syswid - corewid, 59 - syswid - corewid)
+    wire.core_id := a(63 - syswid, 64 - syswid - corewid)
+    wire.system_id := a(63, 64 - syswid)
     wire
   }
 
-  def getDataWidth(implicit p: Parameters): Int = 64 - p(SystemIDLengthKey) - p(CoreIDLengthKey)
+  def getDataWidth(implicit p: Parameters): Int = 59 - p(SystemIDLengthKey) - p(CoreIDLengthKey)
+
   val getWidthBits: Int = 64
   val getWidthBytes: Int = getWidthBits / 8
 }
@@ -163,9 +164,9 @@ object splitIntoChunks {
   def apply(a: UInt, sz: Int, withName: Option[String] = None): Vec[UInt] = {
     require(a.getWidth % sz == 0, s"Can't split bitwidth ${a.getWidth} into chunks of $sz")
     val nDivs = a.getWidth / sz
-    val wrs = Seq.tabulate(nDivs){ idx =>
+    val wrs = Seq.tabulate(nDivs) { idx =>
       val start = idx * sz
-      val end = (idx+1) * sz - 1
+      val end = (idx + 1) * sz - 1
       a(end, start)
     }
     val myVec = VecInit(wrs)

@@ -194,12 +194,11 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   val respQ = Queue(resp)
 
   val internalRespDispatchModule = if (p(RequireInternalCommandRouting)) {
-    val dests = internalReturnDestinations.get
     val wire = Wire(new ComposerRoccResponse())
     wire.data := respQ.bits.data
     wire.rd := respQ.bits.rd
-    wire.system_id := dests(respQ.bits.core_id).sys
-    wire.core_id := dests(respQ.bits.core_id).core
+    wire.system_id := internalReturnDestinations.get(respQ.bits.core_id).sys
+    wire.core_id := internalReturnDestinations.get(respQ.bits.core_id).core
 
     val respClient = outer.outgoingInternalResponseClient.get
     val internalRespDispatcher = Module(new TLClientModule(respClient))
@@ -246,8 +245,6 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   } else if (p(RequireInternalCommandRouting)) {
     respQ.ready := internalRespDispatchModule.get.io.ready
     internalRespDispatchModule.get.io.valid := respQ.valid
-    internalRespDispatchModule.get.io.bits.dat := respQ.bits.pack
-    internalRespDispatchModule.get.io.bits.addr := ComposerConsts.getInternalCmdRoutingAddress(respQ.bits.system_id)
   } else {
     throw new Exception("System unreachable!")
   }
@@ -260,11 +257,11 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     val response = ComposerRoccResponse(responseManager.io.bits)
 
     cores.zipWithIndex.foreach { case (core, core_idx) =>
-      core.composer_response_io.get.valid := responseManager.io.valid && response.core_id === core_idx.U
-      core.composer_response_io.get.bits := response
+      core.composer_response_io.valid := responseManager.io.valid && response.core_id === core_idx.U
+      core.composer_response_io.bits := response
     }
 
-    responseManager.io.ready := VecInit(cores.map(_.composer_response_io.get.ready))(response.core_id)
+    responseManager.io.ready := VecInit(cores.map(_.composer_response_io.ready))(response.core_id)
   }
   val lenBits = log2Up(p(MaximumTransactionLength))
 

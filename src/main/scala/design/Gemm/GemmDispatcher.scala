@@ -134,9 +134,6 @@ class GemmDispatcher(composerConstructor: ComposerConstructor, gp: GemmParam)(im
   io.resp.bits := DontCare
   io.resp.valid := false.B
 
-  val coreResp = composer_response_io.get
-
-
   switch(state) {
     is(s_idle) {
       when(io.req.fire) {
@@ -187,7 +184,7 @@ class GemmDispatcher(composerConstructor: ComposerConstructor, gp: GemmParam)(im
 
       coreBuffers(chosenCore).C := CBase + row_off + col_off
 
-      when(!coreResp.valid) {
+      when(!composer_response_io.valid) {
         state := s_allocate
         dispatchWire.bits := chosenCore
         dispatchWire.valid := true.B
@@ -209,7 +206,7 @@ class GemmDispatcher(composerConstructor: ComposerConstructor, gp: GemmParam)(im
   val dispatch_idle :: dispatch_A :: dispatch_B :: dispatch_C :: dispatch_sizeAndGo :: Nil = Enum(5)
   val dState = RegInit(dispatch_idle)
   val to_dispatch = dispatchQueue.bits
-  val cmd = composer_command_io.get
+  val cmd = composer_command_io
   cmd.valid := false.B
   cmd.bits.inst.system_id := getSystemID("GemmCore")
   cmd.bits.inst.funct := ComposerFunc.START.U
@@ -266,9 +263,9 @@ class GemmDispatcher(composerConstructor: ComposerConstructor, gp: GemmParam)(im
     }
   }
 
-  coreResp.ready := true.B
-  when(coreResp.valid) {
-    val respCore = coreResp.bits.data(log2Up(nCores) - 1, 0)
+  composer_response_io.ready := true.B
+  when(composer_response_io.valid) {
+    val respCore = composer_response_io.bits.data(log2Up(nCores) - 1, 0)
     when(coreBuffers(respCore).progress === progressStoppage) {
       coreIdleBits(respCore) := true.B // otherwise this C is done and the core can be used for other C subsets
     }.otherwise {

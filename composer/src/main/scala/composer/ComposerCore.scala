@@ -110,6 +110,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
 
   val cache_invalidate_ios = composerConstructor.composerCoreWrapper.CacheNodes.map(_._2._1.module.io_invalidate)
 
+  def getCoreID(): Int = composerConstructor.composerCoreWrapper.core_id
   private def getTLClients(name: String, listList: List[(String, List[TLClientNode])]): List[TLClientNode] = {
     listList.filter(_._1 == name) match {
       case first :: rst =>
@@ -193,11 +194,12 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     (mod.req, mod.access)
   }
 
-  val composer_response_io = if (outer.composerSystemParams.canIssueCoreCommands) {
+  private val composer_response_io_ = if (outer.composerSystemParams.canIssueCoreCommands) {
     Some(IO(Flipped(Decoupled(new ComposerRoccResponse()))))
   } else None
+  def composer_response_io: DecoupledIO[ComposerRoccResponse] = composer_response_io_.getOrElse { throw new Exception("Attempted to get internal response IO but core was declared as not being able to issue core commands") }
 
-  val composer_command_io = if (outer.composerSystemParams.canIssueCoreCommands) {
+  private val composer_command_io_ = if (outer.composerSystemParams.canIssueCoreCommands) {
     val node = outer.externalCoreCommNodes.get
     val mod = Module(new TLClientModule(node))
     node.out(0)._1 <> mod.tl
@@ -208,6 +210,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     mod.io.bits.addr := ComposerConsts.getInternalCmdRoutingAddress(wire.bits.inst.system_id)
     Some(wire)
   } else None
+  def composer_command_io: DecoupledIO[ComposerRoccCommand] = composer_command_io_.get
 
   def getSystemID(name: String): UInt = p(SystemName2IdMapKey)(name).U
 

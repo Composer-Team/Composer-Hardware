@@ -84,6 +84,8 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
 
   val addrWidth = CLog2Up(p(ExtMem).get.master.size)
 
+  val treesToDoMO = Reg(UInt(CLog2Up(params.treeParallelism).W))
+
   // feature memory
   // we'll process the same item many times if we're doing 10s to thousands of trees so don't reload the feature
   // memory if we don't have to
@@ -91,7 +93,7 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
   val featureAlreadyValid = Reg(Bool())
 
   val featureAddress = Reg(UInt(addrWidth.W))
-  val nFeatureBitWidth = treeIndexWidth-1
+  val nFeatureBitWidth = treeIndexWidth - 1
   val nFeatures = Reg(UInt(nFeatureBitWidth.W))
 
   featureReaderInitIO.request.bits.memAddr := featureAddress
@@ -132,7 +134,7 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
 
   treeThresholdIO.request.bits.memAddr := treeThresholdAddress
   treeThresholdIO.request.bits.scAddr := 0.U
-  // 4 bytes for each threshold
+  treeThresholdIO.request.bits.len := ((1 << params.maxTreeDepth) * 4).U * (treesToDoMO +& 1.U)
   treeThresholdIO.request.valid := false.B
 
   treeThresholds.readReq.valid := false.B
@@ -146,9 +148,12 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
   val fid_length = (1 << params.maxTreeDepth) * treeIndexWidth / 8
   println("fid_length: " + fid_length + " " + treeIndexWidth / 8)
   treeFIDIO.request.valid := false.B
+  treeFIDIO.request.bits.len := fid_length.U * (treesToDoMO +& 1.U)
+
 
   treeFIDs.readReq.valid := false.B
   treeFIDs.readReq.bits := DontCare
+
 
   // which tree node are we currently on. Need extra params.maxtreeDepth bits because we store multiple trees in
   // memory at a time
@@ -156,15 +161,12 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
   val currentTreePointer = Reg(UInt(treePointerWidth.W))
   val treeIdx = Reg(UInt(log2Up(params.treeParallelism).W))
   // # trees to do - 1
-  val treesToDoMO = Reg(UInt(CLog2Up(params.treeParallelism).W))
   val transition_to_processing = Reg(Bool())
 
   // inference value from current tree
   val treeInference = Reg(UInt(32.W))
   // weighted sum total of the inferences of all processed trees in this command
   val inferenceAccumulator = Reg(UInt(32.W))
-  treeThresholdIO.request.bits.len := ((1 << params.maxTreeDepth) * 4).U * (treesToDoMO + 1.U)
-  treeFIDIO.request.bits.len := fid_length.U * (treesToDoMO + 1.U)
 
   // FPNew floating point unit
   // # stages is absolutely arbitrary and can be changed to pass timing
@@ -199,8 +201,8 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
         */
       when(io.req.fire) {
         val combinedPayloads = Cat(io.req.bits.payload1, io.req.bits.payload2)
-        featureAddress := combinedPayloads(addrWidth - 1, 0)
-        treeThresholdAddress := combinedPayloads(addrWidth * 2 - 1, addrWidth)
+        featureAddress := io.req.bits.payload2(addrWidth - 1, 0)
+        treeThresholdAddress := io.req.bits.payload1(addrWidth - 1, 0)
         // RS1 stores flag for signaling if this core is working with a feature it's seen before
         //    when in doubt (might be sharing cores with other users), keep low
         featureAlreadyValid := io.req.bits.inst.rs1(0)
@@ -226,7 +228,6 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
       featureReaderInitIO.request.valid := !featureAlreadyValid
       when(featureReaderInitIO.request.fire || featureAlreadyValid) {
         state := s_TreeThresholdAddress
-        featureAlreadyValid := true.B
       }
     }
     is(s_TreeThresholdAddress) {
@@ -250,13 +251,14 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
     }
     is(s_Wait) {
       // wait for enough of the information to be loaded in that we can start
-      val featureLoaded = (shiftOutDistance(featureReaderInitIO.progress, CLog2Up(params.featureCompression)) === (1 << nFeatureBitWidth).U) || featureAlreadyValid
+      val featureLoaded = (shiftOutDistance(featureReaderInitIO.progress, CLog2Up(params.featureCompression)) === params.maxNFeatures.U) || featureAlreadyValid
       val nextTreePtr = Cat(treeIdx +& 1.U, 0.U(params.maxTreeDepth.W))
       val FIds_loaded_enough = shiftOutDistance(treeFIDIO.progress, CLog2Up(params.indexCompression)) >= nextTreePtr
       val thresholds_loaded_enough = shiftOutDistance(treeThresholdIO.progress, CLog2Up(params.thresholdCompression)) >= nextTreePtr
       when(FIds_loaded_enough && thresholds_loaded_enough && featureLoaded) {
         state := s_processing
         transition_to_processing := true.B
+        featureAlreadyValid := true.B
       }
     }
     is(s_processing) {
@@ -274,7 +276,6 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
       // low order bits give us the position within the row (below)
       val FIDSubIdx = if (params.indexCompression == 1) 0.U else currentTreePointer(CLog2Up(params.indexCompression) - 1, 0)
       val featureSelect = splitIntoChunks(treeFIDs.readRes.bits, treeIndexWidth)(FIDSubIdx)
-      println("tiw: " + treeIndexWidth)
       val chosenFeature = featureSelect(nFeatureBitWidth - 1, 0)
       val featureSelectHighOrder = chosenFeature(nFeatureBitWidth - 1, CLog2Up(params.featureCompression))
       val featureSelectLowOrder = Reg(UInt(CLog2Up(params.featureCompression).W))
@@ -346,25 +347,8 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
     }
     is(s_finish) {
       require(io.resp.bits.data.getWidth >= 32)
-      val rdBits = io.resp.bits.rd.getWidth
-      val cIdBits = p(CoreIDLengthKey)
-      val coreID = composerCoreParams.composerCoreParams.core_id
-      val returnPayload = Cat(coreID.U, inferenceAccumulator)
-      if (returnPayload.getWidth <= io.resp.bits.data.getWidth) {
-        io.resp.bits.data := returnPayload
-      } else {
-        require(returnPayload.getWidth <= io.resp.bits.data.getWidth + io.resp.bits.rd.getWidth)
-        io.resp.bits.data := returnPayload(io.resp.bits.data.getWidth - 1, 0)
-        io.resp.bits.rd := returnPayload(returnPayload.getWidth - 1, io.resp.bits.data.getWidth)
-      }
-      if (cIdBits <= rdBits) {
-        io.resp.bits.rd := coreID.U
-        io.resp.bits.data := inferenceAccumulator
-      } else {
-        io.resp.bits.rd := coreID.U(rdBits - 1, 0)
-        io.resp.bits.data := Cat(coreID.U(cIdBits - 1, rdBits), inferenceAccumulator)
-        require(io.resp.bits.data.getWidth >= inferenceAccumulator.getWidth + cIdBits - rdBits)
-      }
+      io.resp.bits.data := Cat(getCoreID().U(p(CoreIDLengthKey).W), inferenceAccumulator)
+      require(io.resp.bits.data.getWidth >= 32 + p(CoreIDLengthKey))
       io.resp.valid := true.B
       when(io.resp.fire) {
         state := s_idle

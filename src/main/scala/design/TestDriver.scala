@@ -18,19 +18,14 @@ object Composer {
     val full_name = config.getClass.getCanonicalName
     val short_name = full_name.split('.').last
     println(full_name + " " + short_name)
-    val outputAnnos = new RocketChipStage().execute(
+    new RocketChipStage().execute(
       args = Array("-td", hw_idr,
         "-T", "composer.ComposerTop",
         "-C", full_name,
         "--emission-options=disableMemRandomization,disableRegisterRandomization"),
       annotations = Seq())
-    val writer = new FileWriter("outputAnnos.txt")
-    outputAnnos.foreach(a =>
-      if (!a.isInstanceOf[DeletedAnnotation])
-        writer.write(a.toString))
-    writer.close()
 
-    val firrtlAnnos = FirrtlMain.stage.execute(
+    FirrtlMain.stage.execute(
       args = Array("-i", hw_idr + "/composer." + short_name + ".fir",
         "-o", hw_idr + "composer.v",
         "-X", "verilog",

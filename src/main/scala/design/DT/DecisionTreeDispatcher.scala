@@ -15,9 +15,8 @@ class DecisionTreeDispatcher(composerCoreParams: ComposerConstructor, params: DT
   val DTCoreSystemParams = p(ComposerSystemsKey).filter(_.name == "DTCores")(0)
 
   // send commands to other systems through here
-  val comm = composer_command_io.get
-  comm.valid := false.B
-  comm.bits := DontCare
+  composer_command_io.valid := false.B
+  composer_command_io.bits := DontCare
 
   val s_idle :: s_addr :: s_active :: s_first :: s_wait :: s_commit :: s_finishing :: Nil = Enum(7)
   val state = RegInit(s_idle)
@@ -63,12 +62,10 @@ class DecisionTreeDispatcher(composerCoreParams: ComposerConstructor, params: DT
 
   val fpUnits = Module(new FPUNew(FPFloatFormat.Fp32, 1, 2, Seq(FPNewOpClass.ADDMUL), tagWidth = 1))
   // recieve responses for those commands back through here
-  val resp = composer_response_io.get
-  resp.ready := true.B
-  fpUnits.io.req.valid := resp.valid
-  val responsePayload = Cat(resp.bits.rd, resp.bits.data)
-  val respondingCore = responsePayload(31 + p(CoreIDLengthKey), 32)
-  when(resp.fire) {
+  composer_response_io.ready := true.B
+  fpUnits.io.req.valid := composer_response_io.valid
+  val respondingCore = composer_response_io.bits.data(31 + p(CoreIDLengthKey), 32)
+  when(composer_response_io.fire) {
     coreBusyBits(respondingCore) := false.B
   }
   fpUnits.io.resp.ready := true.B
@@ -79,7 +76,7 @@ class DecisionTreeDispatcher(composerCoreParams: ComposerConstructor, params: DT
   fpUnits.io.req.bits.intFormat := DontCare
   fpUnits.io.req.bits.dstFormat := DontCare
   fpUnits.io.req.bits.operands(1) := inferenceAccumulator
-  fpUnits.io.req.bits.operands(2) := resp.bits.data(31, 0)
+  fpUnits.io.req.bits.operands(2) := composer_response_io.bits.data(31, 0)
   fpUnits.io.req.bits.operands(0) := DontCare
   fpUnits.io.flush := false.B
   fpUnits.io.req.bits.tag := DontCare
@@ -89,8 +86,8 @@ class DecisionTreeDispatcher(composerCoreParams: ComposerConstructor, params: DT
 
   def loadPayloadIntoRocc(payload: UInt, rocc: ComposerRoccCommand): Unit = {
     val plen = payload.getWidth
-    val p1len = comm.bits.payload1.getWidth
-    val p2len = comm.bits.payload2.getWidth
+    val p1len = composer_command_io.bits.payload1.getWidth
+    val p2len = composer_command_io.bits.payload2.getWidth
     rocc.payload2 := (if (plen < p2len) Cat(0.U((p2len - plen).W), payload) else payload(p2len - 1, 0))
     val plenLeft = plen - p2len
     rocc.payload1 := {
@@ -153,25 +150,27 @@ class DecisionTreeDispatcher(composerCoreParams: ComposerConstructor, params: DT
       when(canIssue) {
         allocatedCore := coreChoice
       }
-      comm.bits.core_id := coreChoice
-      val payload = Cat(treeThresholdAddr, featureAddr)
-      loadPayloadIntoRocc(payload, comm.bits)
-      comm.bits.inst.rs1 := Cat(0.U((comm.bits.inst.rs1.getWidth - 1).W), hasCoreSeenFeature(coreChoice))
+      composer_command_io.bits.core_id := coreChoice
+      composer_command_io.bits.payload2 := featureAddr
+      composer_command_io.bits.payload1 := treeThresholdAddr
+//      val payload = Cat(treeThresholdAddr, featureAddr)
+//      loadPayloadIntoRocc(payload, composer_command_io.bits)
+      composer_command_io.bits.inst.rs1 := Cat(0.U((composer_command_io.bits.inst.rs1.getWidth - 1).W), hasCoreSeenFeature(coreChoice))
       if (params.treeParallelism > 1) {
         if (params.treeParallelism > params.maxNTrees) {
-          comm.bits.inst.rs2 := (params.maxNTrees-1).U
+          composer_command_io.bits.inst.rs2 := (params.maxNTrees-1).U
         } else
-          comm.bits.inst.rs2 := Mux(numTrees >= (params.treeParallelism - 1).U, (params.treeParallelism - 1).U, numTrees(CLog2Up(params.treeParallelism) - 1, 0))
+          composer_command_io.bits.inst.rs2 := Mux(numTrees >= (params.treeParallelism - 1).U, (params.treeParallelism - 1).U, numTrees(CLog2Up(params.treeParallelism) - 1, 0))
       } else {
-        comm.bits.inst.rs2 := 0.U
+        composer_command_io.bits.inst.rs2 := 0.U
       }
-      comm.bits.inst.system_id := getSystemID("DTCores")
-      comm.bits.inst.xd := true.B
-      comm.bits.inst.funct := ComposerFunc.START.U
-      comm.bits.inst.xs1 := DontCare
-      comm.bits.inst.xs2 := DontCare
-      comm.valid := canIssue
-      when(comm.fire) {
+      composer_command_io.bits.inst.system_id := getSystemID("DTCores")
+      composer_command_io.bits.inst.xd := true.B
+      composer_command_io.bits.inst.funct := ComposerFunc.START.U
+      composer_command_io.bits.inst.xs1 := DontCare
+      composer_command_io.bits.inst.xs2 := DontCare
+      composer_command_io.valid := canIssue
+      when(composer_command_io.fire) {
         coreBusyBits(coreChoice) := true.B
         hasCoreSeenFeature(coreChoice) := true.B
         treeThresholdAddr := treeThresholdAddr + (4 * params.treeParallelism * (1 << params.maxTreeDepth)).U
@@ -179,12 +178,12 @@ class DecisionTreeDispatcher(composerCoreParams: ComposerConstructor, params: DT
       }
     }
     is(s_first) {
-      comm.valid := true.B
-      comm.bits.inst.system_id := getSystemID("DTCores")
-      comm.bits.core_id := allocatedCore
-      comm.bits.inst.xd := false.B
-      loadPayloadIntoRocc(Cat(treeIndexAddr, numFeatures), comm.bits)
-      when(comm.fire) {
+      composer_command_io.valid := true.B
+      composer_command_io.bits.inst.system_id := getSystemID("DTCores")
+      composer_command_io.bits.core_id := allocatedCore
+      composer_command_io.bits.inst.xd := false.B
+      loadPayloadIntoRocc(Cat(treeIndexAddr, numFeatures), composer_command_io.bits)
+      when(composer_command_io.fire) {
         val tisize = (params.getTotalIndexWidth / 8) * params.treeParallelism * (1 << params.maxTreeDepth)
         treeIndexAddr := treeIndexAddr + tisize.U
 
