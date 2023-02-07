@@ -73,7 +73,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, core_i
 class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Parameters) extends
   LazyModuleImp(composerConstructor.composerCoreWrapper) {
 
-  private val composerCoreParams = composerConstructor.composerCoreParams
+//  private val composerCoreParams = composerConstructor.composerCoreParams
   val io = IO(new ComposerCoreIO())
 
   var read_ios: Seq[(Int, DecoupledIO[ChannelTransactionBundle])] = Seq()
@@ -82,8 +82,8 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   // (id, is_reader)
   private var activeChannelIds: Seq[(Int, Bool)] = Seq()
 
-  io.resp.bits.system_id := composerCoreParams.system_id.U
-  io.resp.bits.core_id := composerCoreParams.core_id.U
+//  io.resp.bits.system_id := composerCoreParams.system_id.U
+//  io.resp.bits.core_id := composerCoreParams.core_id.U
 
   private var unnamedId = 0
   private var readChannelCheckIn = 0
@@ -188,7 +188,8 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   }
 
   def exposeIOModule[T1 <: Bundle, T2 <: Bundle](bundIn: T1, bundOut: T2): CustomIO[T1, T2] = {
-    val m = Module(new ComposerBundleIO(io, bundIn, bundOut))
+    val m = Module(new ComposerBundleIO(bundIn, bundOut, composerConstructor.composerCoreParams))
+    m.cio <> io
     m.io
   }
 

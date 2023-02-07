@@ -12,33 +12,16 @@ import composer.ComposerCoreIO
 // * * * * * * * * * * * * * * * * * * * * * * * * * * Simple ALU Implementation * * * * * * * * * * * * * * * * * * *
 
 class SimpleInput extends Bundle {
-  val op = UInt(3.W)
-  val a = UInt(56.W)
-  val b = UInt(64.W)
+  val op = UInt(2.W)
+  val a = UInt(8.W)
+  val b = UInt(8.W)
 }
 class SimpleOutput extends Bundle {
-  val data = UInt(64.W) // TODO: Check size
-}
-
-object bundleInterpreter{
-  def interpretBundleIn (io: ComposerCoreIO): SimpleInput = {
-    val bund = Wire(new SimpleInput())
-    bund.op := io.req.bits.inst.rs1
-    bund.a := io.req.bits.rs1
-    bund.b := io.req.bits.rs2
-    bund
-  }
-  def interpretBundleOut (io: ComposerCoreIO): SimpleOutput = {
-    val bund = Wire(new SimpleOutput())
-    bund.data := io.resp.bits.data
-    bund
-  }
+  val data = UInt(52.W) // TODO: Check size
 }
 
 class SimpleCore()(implicit p: Parameters, composerCoreParams: ComposerConstructor) extends ComposerCore(composerCoreParams) {
 
-  val inputs = bundleInterpreter.interpretBundleIn(io)
-  val outputs = bundleInterpreter.interpretBundleOut(io)
   val cio = exposeIOModule(new SimpleInput, new SimpleOutput)
 
   val s_idle :: s_working :: s_finish :: Nil = Enum(3)
@@ -46,9 +29,7 @@ class SimpleCore()(implicit p: Parameters, composerCoreParams: ComposerConstruct
   val op = RegInit(0.U(cio.req.bits.op.getWidth.W))
   val a = RegInit(0.U(cio.req.bits.a.getWidth.W))
   val b = RegInit(0.U(cio.req.bits.b.getWidth.W))
-  //TODO: Figiure resp out
   val result = RegInit(0.U(cio.resp.bits.data.getWidth.W))
-
 
   cio.req.ready := false.B
   cio.resp.valid := false.B
@@ -80,7 +61,7 @@ class SimpleCore()(implicit p: Parameters, composerCoreParams: ComposerConstruct
   }.elsewhen(state === s_finish) {
     cio.resp.bits.data := result
     cio.resp.valid := true.B
-    when(io.resp.fire) {
+    when(cio.resp.fire) {
       state := s_idle
     }
   }
