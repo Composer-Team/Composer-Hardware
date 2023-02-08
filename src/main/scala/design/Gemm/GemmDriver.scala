@@ -17,6 +17,12 @@ object GP {
     rowParallelism = 8,
     maxRCDim = 2048,
     prefetchAmt = 8)
+  val F1Small = GemmParam(dataWidthBytes = 4,
+    rowColDim = 256,
+    columnParallelism = 2,
+    rowParallelism = 4,
+    maxRCDim = 2048,
+    prefetchAmt = 8)
 }
 
 class WorkingF1NoDispatcher extends Config(
@@ -32,7 +38,7 @@ class SmallDispatcher extends Config(
 )
 
 class SecondTryF1Dispatch extends Config(
-  new GemmWithDispatchConfig(6, GP.F1Params) ++ new WithComposer() ++ new WithAWSMem(1)
+  new GemmWithDispatchConfig(6, GP.F1Small) ++ new WithComposer() ++ new WithAWSMem(1)
 )
 
 //noinspection ScalaUnusedSymbol
