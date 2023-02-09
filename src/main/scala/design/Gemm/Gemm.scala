@@ -29,8 +29,10 @@ object GemmCoreCommands extends ChiselEnum {
   val A, B, C, rowAndGo = Value
 }
 
+//noinspection DuplicatedCode
 class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implicit p: Parameters)
   extends ComposerCore(composerCoreParams)(p) {
+  CppGeneration.addUserCppDefinition("int", "FPGA_RC_DIM", coreP.rowColDim)
   val dataWidthBytes = coreP.dataWidthBytes
   val submatrixRowSizeBytes = coreP.rowColDim * dataWidthBytes
   val dataWidthBits = dataWidthBytes * 8
@@ -187,7 +189,6 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
     (reqChannelOut map { io => io.ready } reduce (_ && _))
 
   val buffer_valid = Seq.fill(coreP.rowParallelism)(RegInit(false.B))
-  val prefetch_B_valid_sig = RegInit(false.B)
 
   CppGeneration.exportChiselEnum(GemmCoreCommands)
 
@@ -237,8 +238,8 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
         when(haveCachedB) {
           state := s_load_C_addr
         }.otherwise {
+          haveCachedB := true.B
           state := s_prefetch_B_matrix
-          prefetch_B_valid_sig := true.B
         }
         reqChannelOut foreach (_.valid := true.B)
       }
@@ -248,25 +249,18 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       }
     }
     is(s_prefetch_B_matrix) {
-      when(prefetch_B_valid_sig) {
-        prefetch_B_valid_sig := false.B
-      }
-      reqChannelB.request.valid := prefetch_B_valid_sig
+      reqChannelB.request.valid := true.B
       // since column parallelism increases # items read / cycle, they need to all live in the same SRAM/URAM cell,
       //    reducing the number of separable items in a row to rowColDim/columnParallelism
       reqChannelB.request.bits.scAddr := Cat(currentBRow, 0.U(log2Up(coreP.rowColDim / coreP.columnParallelism).W))
       reqChannelB.request.bits.memAddr := BAddr
       reqChannelB.request.bits.len := submatrixRowSizeBytes.U
-      when(reqChannelB.request.ready && !prefetch_B_valid_sig) {
+      when(reqChannelB.request.fire) {
+        BAddr := BAddr + realRowBytes
+        currentBRow := currentBRow + 1.U
         when(currentBRow === maxRowColDim.U) {
-          currentBRow := 0.U
           state := s_load_C_addr
-          BAddr := BSave
-          haveCachedB := true.B
-        }.otherwise {
-          currentBRow := currentBRow + 1.U
-          BAddr := BAddr + realRowBytes
-          prefetch_B_valid_sig := true.B
+          currentBRow := 0.U
         }
       }
     }
@@ -333,6 +327,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       when(all_rows_loaded) {
         state := s_acc
         bread := 0.U
+        currentBRow := 0.U
       }
     }
     is(s_acc) {

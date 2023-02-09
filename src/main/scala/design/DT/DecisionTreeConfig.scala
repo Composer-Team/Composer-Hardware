@@ -88,16 +88,18 @@ object DTConfig {
     thresholdCompression = 1,
     featureCompression = 1, //32B per cycle
     maxNExamples = 4,
-    maxNTrees = 4,
+    maxNTrees = 128,
     maxNFeatures = 16)
 
 }
 class BigDTConfig extends Config(
-  new WithDTAccelerator(64, bigConfig) ++ new WithComposer(
-    maximumTxLengthBytes = 1 << 14
-  ) ++ new WithAWSMem(1)
+  new WithDTAccelerator(64, bigConfig) ++ new WithComposer() ++ new WithAWSMem(1)
+)
+
+class SmallDTConfig extends Config(
+  new WithDTAccelerator(4, smallConfig) ++ new WithComposer() ++ new WithAWSMem(1)
 )
 
 object DTDriver extends App {
-  Composer.buildConfig(new BigDTConfig)
+  Composer.buildConfig(new SmallDTConfig)
 }

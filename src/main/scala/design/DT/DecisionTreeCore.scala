@@ -346,7 +346,6 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
       }
     }
     is(s_finish) {
-      require(io.resp.bits.data.getWidth >= 32)
       io.resp.bits.data := Cat(getCoreID().U(p(CoreIDLengthKey).W), inferenceAccumulator)
       require(io.resp.bits.data.getWidth >= 32 + p(CoreIDLengthKey))
       io.resp.valid := true.B
