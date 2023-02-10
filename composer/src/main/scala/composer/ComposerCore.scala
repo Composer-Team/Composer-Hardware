@@ -110,7 +110,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
 
   val cache_invalidate_ios = composerConstructor.composerCoreWrapper.CacheNodes.map(_._2._1.module.io_invalidate)
 
-  def getCoreID(): Int = composerConstructor.composerCoreWrapper.core_id
+  def getCoreID: Int = composerConstructor.composerCoreWrapper.core_id
   private def getTLClients(name: String, listList: List[(String, List[TLClientNode])]): List[TLClientNode] = {
     listList.filter(_._1 == name) match {
       case first :: rst =>

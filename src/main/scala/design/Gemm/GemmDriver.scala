@@ -38,7 +38,7 @@ class SmallDispatcher extends Config(
 )
 
 class SecondTryF1Dispatch extends Config(
-  new GemmWithDispatchConfig(6, GP.F1Small) ++ new WithComposer() ++ new WithAWSMem(1)
+  new GemmWithDispatchConfig(16, GP.F1Small) ++ new WithComposer() ++ new WithAWSMem(1)
 )
 
 //noinspection ScalaUnusedSymbol
