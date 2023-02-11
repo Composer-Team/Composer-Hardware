@@ -327,7 +327,6 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       when(all_rows_loaded) {
         state := s_acc
         bread := 0.U
-        currentBRow := 0.U
       }
     }
     is(s_acc) {

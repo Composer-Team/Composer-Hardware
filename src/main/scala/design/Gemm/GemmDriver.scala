@@ -8,7 +8,7 @@ object GP {
   val unitParams = GemmParam(dataWidthBytes = 4,
     rowColDim = 16,
     columnParallelism = 4,
-    rowParallelism = 1,
+    rowParallelism = 2,
     maxRCDim = 2048,
     prefetchAmt = 2)
   val F1Params = GemmParam(dataWidthBytes = 4,
@@ -50,9 +50,10 @@ class GemmTestF1 extends Config(
 class GemmTestF1Big extends Config(
   new WithGemm(6, GP.F1Params) ++ new WithComposer(256 * 4 * 2) ++ new WithAWSMem(1)
 )
-//object GemmFloatDriver extends App {
-//  Composer.buildConfig(new GemmFloatConfig())
-//}
+
+class GemmFloatDispatchUnit extends Config(
+  new GemmWithFloatDispatchConfig(1, GP.unitParams) ++ new WithComposer() ++ new WithAWSMem(1)
+)
 
 class GemmDispatchF1Config extends Config (new GemmWithDispatchConfig(2, GP.unitParams) ++ new WithAWSMem(1) ++ new WithComposer())
 
@@ -62,4 +63,8 @@ object GemmSmallDriver extends App {
 
 object GemmDispatchDriver extends App {
   Composer.buildConfig(new SecondTryF1Dispatch)
+}
+
+object GemmFloatDriver extends App {
+  Composer.buildConfig(new GemmFloatDispatchUnit)
 }

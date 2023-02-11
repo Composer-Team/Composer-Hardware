@@ -14,6 +14,7 @@ import freechips.rocketchip.subsystem.ExtMem
 //noinspection DuplicatedCode
 class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implicit p: Parameters)
   extends ComposerCore(composerCoreParams)(p) {
+  CppGeneration.addUserCppDefinition("int", "FPGA_RC_DIM", coreP.rowColDim)
   val dataWidthBytes = coreP.dataWidthBytes
   val submatrixRowSizeBytes = coreP.rowColDim * dataWidthBytes
   val dataWidthBits = dataWidthBytes * 8
@@ -41,6 +42,7 @@ class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(i
   val realRowBytes = Cat(realRowLength, 0.U(log2Up(dataWidthBytes).W))
 
   val state = RegInit(s_idle)
+
   val (reqChannelB, accessChannelB) = getScratchpad("ChannelB")
   val (reqChannelOut, dataChannelOut) = getWriterModules(name = "ChannelOut", useSoftwareAddressing =  false,
     dataBytes = dataWidthBytes * arithUnits)
@@ -140,11 +142,11 @@ class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(i
 
   println(s"Elaborating fpu with ${fma_tuples.length} lanes")
   val fpu_latency = 3
-  val fpu = Module(new FPUNew(FPFloatFormat.Fp32, fma_tuples.length, fpu_latency, Seq(FPNewOpClass.ADDMUL), tagWidth = 0))
-  fpu.io.req.valid := state === s_acc
-  fpu.io.req.bits.operands(0) := Cat(fma_tuples.map(_._1._1))
-  fpu.io.req.bits.operands(1) := Cat(fma_tuples.map(_._1._2))
-  fpu.io.req.bits.operands(2) := Cat(fma_tuples.map(_._2))
+  val fpu = Module(new FPUNew(FPFloatFormat.Fp32, fma_tuples.length, fpu_latency, Seq(FPNewOpClass.ADDMUL), tagWidth = log2Up(elemsPerArithUnit)))
+  fpu.io.req.valid := RegNext(RegNext(state === s_acc))
+  fpu.io.req.bits.operands(0) zip fma_tuples.map(_._1._1) foreach (a => a._1 := a._2)
+  fpu.io.req.bits.operands(1) zip fma_tuples.map(_._1._2) foreach (a => a._1 := a._2)
+  fpu.io.req.bits.operands(2) zip fma_tuples.map(_._2) foreach (a => a._1 := a._2)
   fpu.io.req.bits.tag := bread_stage2
   fpu.io.req.bits.op := FPOperation.FMADD
   fpu.io.req.bits.opModifier := 0.U
@@ -159,7 +161,7 @@ class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(i
 
   //
   OCache zip OAccs foreach { case (oc_per_row, oa_per_row) =>
-    val bread_per_row_stage2 = bread_stage
+    val bread_per_row_stage2 = bread_stage2
     oc_per_row zip oa_per_row foreach { case (oc_per_arith, acc_per_arith) =>
       acc_per_arith := oc_per_arith(bread_per_row_stage2)
     }
@@ -167,7 +169,7 @@ class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(i
 
   // write back accumulator register to row
   when(fpu.io.resp.valid) {
-    splitIntoChunks(fpu.io.resp.bits.result, 32) zip OCache.flatten foreach { case (o_mac_result, ocache) =>
+    fpu.io.resp.bits.result zip OCache.flatten foreach { case (o_mac_result, ocache) =>
       ocache(fpu.io.resp.bits.tag) := o_mac_result
     }
   }
@@ -178,7 +180,7 @@ class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(i
    * END DATA PIPELINE
    */
 
-  io.resp.bits.data := 0.U
+  io.resp.bits.data := composerConstructor.composerCoreWrapper.core_id.U
   io.resp.valid := false.B
   io.req.ready := state === s_idle &&
     (reqChannelRow map { ioa => ioa.ready } reduce (_ && _)) &&
@@ -186,7 +188,8 @@ class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(i
     (reqChannelOut map { io => io.ready } reduce (_ && _))
 
   val buffer_valid = Seq.fill(coreP.rowParallelism)(RegInit(false.B))
-  val prefetch_B_valid_sig = RegInit(false.B)
+
+  CppGeneration.exportChiselEnum(GemmCoreCommands)
 
   switch(state) {
     is(s_idle) {
@@ -194,24 +197,24 @@ class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(i
       when(io.req.fire) {
         // get ready to load in row of matrix B
         val inst = io.req.bits.inst
-        switch(inst.rs1) {
-          is(0.U) {
+        switch(GemmCoreCommands(inst.rs1(GemmCoreCommands.getWidth-1, 0))) {
+          is(GemmCoreCommands.rowAndGo) {
             // BEGIN COMPUTATION
             currentBRow := 1.U
             realRowLength := io.req.bits.payload2(realRowBits - 1, 0)
             ACounter := 0.U
             state := s_addr_comp
           }
-          is(1.U) {
+          is(GemmCoreCommands.A) {
             // STORE A_BASE
             AAddrs(0) := io.req.bits.payload2(addrWidth - 1, 0)
           }
-          is(2.U) {
+          is(GemmCoreCommands.B) {
             // STORE B_BASE
             BAddr := io.req.bits.payload2(addrWidth - 1, 0)
             BSave := io.req.bits.payload2(addrWidth - 1, 0)
           }
-          is(3.U) {
+          is(GemmCoreCommands.C) {
             // STORE OUTPUT_BASE
             OutputAddr(0) := io.req.bits.payload2(addrWidth - 1, 0)
           }
@@ -234,8 +237,8 @@ class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(i
         when(haveCachedB) {
           state := s_load_C_addr
         }.otherwise {
+          haveCachedB := true.B
           state := s_prefetch_B_matrix
-          prefetch_B_valid_sig := true.B
         }
         reqChannelOut foreach (_.valid := true.B)
       }
@@ -245,25 +248,18 @@ class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(i
       }
     }
     is(s_prefetch_B_matrix) {
-      when(prefetch_B_valid_sig) {
-        prefetch_B_valid_sig := false.B
-      }
-      reqChannelB.request.valid := prefetch_B_valid_sig
+      reqChannelB.request.valid := true.B
       // since column parallelism increases # items read / cycle, they need to all live in the same SRAM/URAM cell,
       //    reducing the number of separable items in a row to rowColDim/columnParallelism
       reqChannelB.request.bits.scAddr := Cat(currentBRow, 0.U(log2Up(coreP.rowColDim / coreP.columnParallelism).W))
       reqChannelB.request.bits.memAddr := BAddr
       reqChannelB.request.bits.len := submatrixRowSizeBytes.U
-      when(reqChannelB.request.ready && !prefetch_B_valid_sig) {
+      when(reqChannelB.request.fire) {
+        BAddr := BAddr + realRowBytes
+        currentBRow := currentBRow + 1.U
         when(currentBRow === maxRowColDim.U) {
-          currentBRow := 0.U
           state := s_load_C_addr
-          BAddr := BSave
-          haveCachedB := true.B
-        }.otherwise {
-          currentBRow := currentBRow + 1.U
-          BAddr := BAddr + realRowBytes
-          prefetch_B_valid_sig := true.B
+          currentBRow := 0.U
         }
       }
     }
@@ -383,7 +379,6 @@ class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(i
       when((reqChannelOut.map(_.ready) ++ dataChannelOut.map(_.channelIdle)).reduce(_ && _)) {
         when(ACounter === lastA.U) {
           io.resp.valid := true.B
-          io.resp.bits.data := 1.U
           when(io.resp.fire) {
             state := s_idle
             ACounter := 0.U
@@ -414,10 +409,12 @@ class WithGemmFloat(withNCores: Int,
         specialization = CScratchpadSpecialization.flatPacked),
       CReadChannelParams(
         "ChannelA",
-        gp.rowParallelism),
+        gp.rowParallelism,
+        maxInFlightTxs = gp.prefetchAmt),
       CWriteChannelParams(
         "ChannelOut",
-        gp.rowParallelism))),
+        gp.rowParallelism,
+        maxInFlightTxs = gp.prefetchAmt))),
     nCores = withNCores,
     name = "GemmCore",
     buildCore = {

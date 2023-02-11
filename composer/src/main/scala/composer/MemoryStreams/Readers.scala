@@ -23,7 +23,7 @@ class CReader(dataBytes: Int,
               vlen: Int = 1,
               fetchBehavior: txEmitBehavior,
               tlclient: TLClientNode)(implicit p: Parameters) extends Module {
-  val prefetchRows = tlclient.portParams(0).endSourceId - 1
+  val prefetchRows = tlclient.portParams(0).endSourceId
   require(prefetchRows > 0)
   val usesPrefetch = prefetchRows > 1
   val blockBytes = p(CacheBlockBytes)
@@ -237,6 +237,7 @@ class CReader(dataBytes: Int,
   } else { // else no prefetch
     val buffer_fill_level = RegInit(0.U((log2Up(beatsPerBlock) + 1).W))
     // else if no prefetch
+    tl_out.d.ready := buffer_fill_level < beatsPerBlock.U
     when(tl_out.d.fire) {
       (0 until beatsPerBlock) foreach { bufferBeatIdx =>
         // whenever we get a beat on the data bus, split it into sections and put into buffer

@@ -291,3 +291,7 @@ class withGemmDispatchSystem(gemmParam: GemmParam) extends Config((site, _, up) 
 class GemmWithDispatchConfig(nCores: Int, gp: GemmParam) extends Config(
   new WithGemm(nCores, gp) ++ new withGemmDispatchSystem(gp)
 )
+
+class GemmWithFloatDispatchConfig(nCores: Int, gp: GemmParam) extends Config(
+  new WithGemmFloat(nCores, gp) ++ new withGemmDispatchSystem(gp)
+)

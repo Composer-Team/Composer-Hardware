@@ -126,7 +126,7 @@ class FPUTester(cp: ComposerConstructor, fparams: fpuParams)(implicit p: Paramet
       fpu.io.resp.ready := true.B
       when(fpu.io.resp.fire) {
         results.zipWithIndex.foreach { case (res, idx) =>
-          res := fpu.io.resp.bits.result((idx + 1) * fwidth - 1, idx * fwidth)
+          res := fpu.io.resp.bits.result(idx)
         }
         state := s_finishing
       }
