@@ -37,8 +37,12 @@ class SmallDispatcher extends Config(
   new GemmWithDispatchConfig(5, GP.unitParams) ++ new WithComposer() ++ new WithAWSMem(1)
 )
 
-class SecondTryF1Dispatch extends Config(
-  new GemmWithDispatchConfig(16, GP.F1Small) ++ new WithComposer() ++ new WithAWSMem(1)
+class GemmF1Int12 extends Config(
+  new GemmWithDispatchConfig(12, GP.F1Small) ++ new WithComposer() ++ new WithAWSMem(1)
+)
+
+class GemmF1Float4Big extends Config(
+  new GemmWithFloatDispatchConfig(4, GP.F1Params) ++ new WithComposer() ++ new WithAWSMem(1)
 )
 
 //noinspection ScalaUnusedSymbol
@@ -61,9 +65,14 @@ object GemmSmallDriver extends App {
   Composer.buildConfig(new SmallDispatcher)
 }
 
-object GemmDispatchDriver extends App {
-  Composer.buildConfig(new SecondTryF1Dispatch)
+object GemmDispatchDriverF1Int extends App {
+  Composer.buildConfig(new GemmF1Int12)
 }
+
+object GemmDispatchDriverF1Float extends App {
+  Composer.buildConfig(new GemmF1Float4Big)
+}
+
 
 object GemmFloatDriver extends App {
   Composer.buildConfig(new GemmFloatDispatchUnit)
