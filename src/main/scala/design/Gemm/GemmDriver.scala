@@ -23,6 +23,13 @@ object GP {
     rowParallelism = 4,
     maxRCDim = 2048,
     prefetchAmt = 8)
+  val F1ParamsTest = GemmParam(
+    dataWidthBytes = 4,
+    rowColDim = 256,
+    columnParallelism = 4,
+    rowParallelism = 4,
+    maxRCDim = 2048,
+    prefetchAmt = 8)
 }
 
 class WorkingF1NoDispatcher extends Config(
@@ -42,7 +49,7 @@ class GemmF1Int12 extends Config(
 )
 
 class GemmF1Float4Big extends Config(
-  new GemmWithFloatDispatchConfig(4, GP.F1Params) ++ new WithComposer() ++ new WithAWSMem(1)
+  new GemmWithFloatDispatchConfig(4, GP.F1ParamsTest) ++ new WithComposer() ++ new WithAWSMem(1)
 )
 
 //noinspection ScalaUnusedSymbol
