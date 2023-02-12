@@ -141,7 +141,7 @@ class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(i
   val bread_stage2 = RegNext(bread_stage)
 
   println(s"Elaborating fpu with ${fma_tuples.length} lanes")
-  val fpu_latency = 3
+  val fpu_latency = 4
   val fpu = Module(new FPUNew(FPFloatFormat.Fp32, fma_tuples.length, fpu_latency, Seq(FPNewOpClass.ADDMUL), tagWidth = log2Up(elemsPerArithUnit)))
   fpu.io.req.valid := RegNext(RegNext(state === s_acc))
   fpu.io.req.bits.operands(0) zip fma_tuples.map(_._1._1) foreach (a => a._1 := a._2)
@@ -348,7 +348,9 @@ class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(i
     }
     is(s_writeback_1) {
       // split this into two stages for read from banks and then handing to memory
-      state := s_writeback_2
+      when (!fpu.io.busy) {
+        state := s_writeback_2
+      }
       // reading from accumulator
     }
     is(s_writeback_2) {
