@@ -62,7 +62,7 @@ class WithAWSMem(nMemoryChannels: Int) extends Config((_, _, _) => {
   case HasAXILExternalMMIO => true
   case MMIOBaseAddress => 0x0L // MMIO is not real, it's just a PCIE bus transaction that pretends to be MMIO
   // TODO this can be tuned
-  case CXbarMaxDegree => 1 << 10
+  case CXbarMaxDegree => 32
   case HasDiscreteMemory => true
 })
 

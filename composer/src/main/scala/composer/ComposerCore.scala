@@ -35,7 +35,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
       val cache = TLCache(param.sizeBytes,
         nClients = par.nChannels,
         associativity = param.associativity).suggestName("TLCache")
-      val req_xbar = TLXbar()
+      val req_xbar = LazyModule(new TLXbar())
       val rnodes = List.tabulate(par.nChannels)(i => TLClientNode(List(TLMasterPortParameters.v1(
         clients = List(TLMasterParameters.v1(
           name = s"CachedReadChannel_sys${system_id}_core${core_id}_${par.name}$i",
@@ -43,10 +43,10 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
           supportsProbe = TransferSizes(1, maxTxLength)
         ))))))
 
-      rnodes foreach (req_xbar := _)
+      rnodes foreach (req_xbar.node := _)
       cache.mem_reqs :=
         //        TLBuffer() := TLWidthWidget(blockBytes) :=
-        TLBuffer() := req_xbar
+        TLBuffer() := req_xbar.node
       (par.name, (cache, rnodes))
   }
   val unCachedReaders = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.ReadChannel).map { para =>

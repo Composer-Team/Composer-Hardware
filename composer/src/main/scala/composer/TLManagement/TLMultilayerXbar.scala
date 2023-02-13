@@ -2,6 +2,7 @@ package composer.TLManagement
 
 import chipsalliance.rocketchip.config.Parameters
 import composer.CXbarMaxDegree
+import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.tilelink._
 
 
@@ -14,14 +15,15 @@ object makeTLMultilayerXbar {
       else {
         val subGroup = group.grouped(xbarLim)
         val subX = subGroup.map {g =>
-          val xb = TLXbar()
+          val xb = LazyModule(new TLXbar())
+
           // put buffer AFTER xbar
           if (isClient) {
-            g foreach (xb := TLBuffer() := _)
+            g foreach (xb.node := TLBuffer() := _)
           } else {
-            g foreach (_ := TLBuffer() := xb)
+            g foreach (_ := TLBuffer() := xb.node)
           }
-          xb
+          xb.node
         }
         subX.toSeq
       }

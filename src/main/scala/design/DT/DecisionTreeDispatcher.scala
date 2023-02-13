@@ -75,13 +75,13 @@ class DecisionTreeDispatcher(composerCoreParams: ComposerConstructor, params: DT
   fpUnits.io.req.bits.srcFormat := FPFloatFormat.Fp32
   fpUnits.io.req.bits.intFormat := DontCare
   fpUnits.io.req.bits.dstFormat := DontCare
-  fpUnits.io.req.bits.operands(1) := inferenceAccumulator
-  fpUnits.io.req.bits.operands(2) := composer_response_io.bits.data(31, 0)
-  fpUnits.io.req.bits.operands(0) := DontCare
+  fpUnits.io.req.bits.operands(1)(0) := inferenceAccumulator
+  fpUnits.io.req.bits.operands(2)(0) := composer_response_io.bits.data(31, 0)
+  fpUnits.io.req.bits.operands(0)(0) := DontCare
   fpUnits.io.flush := false.B
   fpUnits.io.req.bits.tag := DontCare
   when (fpUnits.io.resp.valid) {
-    inferenceAccumulator := fpUnits.io.resp.bits.result
+    inferenceAccumulator := fpUnits.io.resp.bits.result(0)
   }
 
   def loadPayloadIntoRocc(payload: UInt, rocc: ComposerRoccCommand): Unit = {

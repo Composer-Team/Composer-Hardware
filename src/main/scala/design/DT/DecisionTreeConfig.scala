@@ -78,7 +78,7 @@ object DTConfig {
     thresholdCompression = 8,
     featureCompression = 8, //32B per cycle
     maxNExamples = 64,
-    maxNTrees = 512,
+    maxNTrees = 2,
     maxNFeatures = 4096)
 
   val smallConfig = DTParams(

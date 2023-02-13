@@ -28,15 +28,31 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
       tli
     }
 
-    def recursivelyReduceXBar(grp: Seq[TLIdentityNode]): Seq[TLIdentityNode] = {
-      if (grp.length <= p(CXbarMaxDegree)) grp
-      else (grp.grouped(p(CXbarMaxDegree)) map { subgroup =>
-        val sub_xbar = TLXbar()
-        subgroup foreach (sub_xbar := _)
-        val out_node = TLIdentityNode()
-        out_node := TLBuffer() := sub_xbar
-        out_node
-      }).toSeq
+    println("Core Mems size: " + core_mems.size)
+
+    def recursivelyReduceXBar(grp: Seq[TLNode]): Seq[TLIdentityNode] = {
+      def help(a: Seq[Seq[TLNode]]): Seq[TLNode] = {
+        a.map { r =>
+          val memory_xbar = LazyModule(new TLXbar())
+
+          r.foreach(memory_xbar.node := _)
+          val memory_xbar_buffer = TLBuffer()
+          memory_xbar_buffer := memory_xbar.node
+          memory_xbar_buffer
+        }
+      }
+
+      def mapToEndpoint(x: TLNode): TLIdentityNode = {
+        val memory_endpoint_identity = TLIdentityNode()
+        memory_endpoint_identity := x
+        memory_endpoint_identity
+      }
+
+      if (grp.length <= p(CXbarMaxDegree)) grp.map(mapToEndpoint)
+      else {
+        val groups = grp.grouped(p(CXbarMaxDegree))
+        recursivelyReduceXBar(help(groups.toSeq)).map(mapToEndpoint)
+      }
     }
 
     recursivelyReduceXBar(core_mems)
@@ -46,9 +62,9 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
 
   // ROUTE OUTGOING COMMANDS THROUGH HERE
   val outgoingCommandXbar = if (systemParams.canIssueCoreCommands) {
-    val xbar = TLXbar()
-    cores.foreach(xbar := TLBuffer() := _.externalCoreCommNodes.get)
-    Some(xbar)
+    val xbar = LazyModule(new TLXbar())
+    cores.foreach(xbar.node := TLBuffer() := _.externalCoreCommNodes.get)
+    Some(xbar.node)
   } else None
   // cores have their own independent command client nodes
 
@@ -62,9 +78,9 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
         supportsProbe = TransferSizes(1 << log2Up(ComposerRoccResponse.getWidthBytes)),
         supportsPutFull = TransferSizes(1 << log2Up(ComposerRoccResponse.getWidthBytes))
       )))))
-    val xbar = TLXbar()
-    xbar := client
-    (Some(client), Some(xbar))
+    val xbar = LazyModule(new TLXbar())
+    xbar.node := client
+    (Some(client), Some(xbar.node))
   } else (None, None)
 
   /* RECIEVE STUFF */
@@ -80,10 +96,10 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
           putFull = TransferSizes(l2u_crc)
         ))),
       beatBytes = l2u_crc)))
-    val xbar = TLXbar()
-    manager := TLBuffer() := xbar
+    val xbar = LazyModule(new TLXbar())
+    manager := TLBuffer() := xbar.node
 
-    (Some(manager), Some(xbar))
+    (Some(manager), Some(xbar.node))
   } else (None, None)
 
   val (incomingInternalResponseManager, incomingInternalResponseXBar) = if (systemParams.canIssueCoreCommands) {
@@ -94,9 +110,9 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
           supportsPutFull = TransferSizes(ComposerRoccResponse.getWidthBytes)
         )), beatBytes = ComposerRoccResponse.getWidthBytes
       )))
-    val xbar = TLXbar()
-    manager := xbar
-    (Some(manager), Some(xbar))
+    val xbar = LazyModule(new TLXbar())
+    manager := xbar.node
+    (Some(manager), Some(xbar.node))
   } else (None, None)
 
   lazy val module = new ComposerSystemImp(this)

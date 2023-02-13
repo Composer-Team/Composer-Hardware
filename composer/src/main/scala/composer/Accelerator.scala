@@ -144,7 +144,9 @@ class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
   val dummyTL = p.alterPartial({ case TileVisibilityNodeKey => mem.head})
   val acc = LazyModule(new ComposerAcc()(dummyTL))
 
-  val crossbar = TLXbar()
+  val crossbarModule = LazyModule(new TLXbar())
+
+  val crossbar = crossbarModule.node
 
   acc.mems foreach (crossbar := _)
   mem.foreach ( _ := crossbar)

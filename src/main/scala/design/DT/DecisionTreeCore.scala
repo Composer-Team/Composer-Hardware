@@ -146,7 +146,6 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
   treeFIDIO.request.bits.memAddr := treeFIDAddress
   treeFIDIO.request.bits.scAddr := 0.U
   val fid_length = (1 << params.maxTreeDepth) * treeIndexWidth / 8
-  println("fid_length: " + fid_length + " " + treeIndexWidth / 8)
   treeFIDIO.request.valid := false.B
   treeFIDIO.request.bits.len := fid_length.U * (treesToDoMO +& 1.U)
 
@@ -304,8 +303,8 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
         treeThresholds.readReq.bits := Cat(treeIdx, 0.U((params.maxTreeDepth - CLog2Up(params.thresholdCompression)).W))
       }
       fp_in_valid := treeThresholds.readRes.valid && !isLeaf
-      fpunit.io.req.bits.operands(0) := feature
-      fpunit.io.req.bits.operands(1) := threshold
+      fpunit.io.req.bits.operands(0)(0) := feature
+      fpunit.io.req.bits.operands(1)(0) := threshold
       fpunit.io.req.bits.op := FPOperation.CMP
       fpunit.io.req.bits.roundingMode := FPRoundingMode.RTZ // op[0] < op[1] - README.md:109
       fpunit.io.req.bits.opModifier := 0.U
@@ -313,16 +312,16 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
       fpunit.io.resp.ready := true.B
       // if we made it here, implied not a leaf node
       when(fpunit.io.resp.fire) {
-        val nextPointer = Cat(currentTreePointer.tail(1), fpunit.io.resp.bits.result(0))
+        val nextPointer = Cat(currentTreePointer.tail(1), fpunit.io.resp.bits.result(0)(0))
         transition_to_processing := true.B
         currentTreePointer := nextPointer
       }
     }
     is(s_finishTree) {
       fpunit.io.req.valid := treeThresholds.readRes.valid
-      fpunit.io.req.bits.operands(0) := splitIntoChunks(treeThresholds.readRes.bits, 32)(0)
-      fpunit.io.req.bits.operands(1) := treeInference
-      fpunit.io.req.bits.operands(2) := inferenceAccumulator
+      fpunit.io.req.bits.operands(0)(0) := splitIntoChunks(treeThresholds.readRes.bits, 32)(0)
+      fpunit.io.req.bits.operands(1)(0) := treeInference
+      fpunit.io.req.bits.operands(2)(0) := inferenceAccumulator
       fpunit.io.req.bits.op := FPOperation.FMADD
       fpunit.io.req.bits.opModifier := 0.U
       fpunit.io.req.bits.srcFormat := FPFloatFormat.Fp32
@@ -332,7 +331,7 @@ class DecisionTreeCore(composerCoreParams: ComposerConstructor, params: DTParams
       fpunit.io.req.bits.roundingMode := FPRoundingMode.RNE
       fpunit.io.resp.ready := true.B
       when(fpunit.io.resp.fire) {
-        inferenceAccumulator := fpunit.io.resp.bits.result
+        inferenceAccumulator := fpunit.io.resp.bits.result(0)
         if (params.treeParallelism == 1) {
           state := s_finish
         } else {
