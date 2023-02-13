@@ -162,6 +162,16 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       mod.map(_.io.channel))
   }
 
+  def getReaderModule(name: String,
+                      useSoftwareAddressing: Boolean,
+                      dataBytes: Int,
+                      vlen: Int,
+                      idx: Int,
+                      transactionEmitBehavior: txEmitBehavior = txEmitCacheBlock()): (DecoupledIO[ChannelTransactionBundle], DataChannelIO) = {
+    val a = getReaderModules(name, useSoftwareAddressing, dataBytes, vlen, Some(idx), transactionEmitBehavior)
+    (a._1(0), a._2(0))
+  }
+
   def getWriterModules(name: String,
                        useSoftwareAddressing: Boolean,
                        dataBytes: Int,
@@ -184,6 +194,15 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     (if (useSoftwareAddressing) List() else mod.map(_.io.req),
       mod.map(_.io.channel))
   }
+
+  def getWriterModule(name: String,
+                      useSoftwareAddressing: Boolean,
+                      dataBytes: Int,
+                      idx: Int): (DecoupledIO[ChannelTransactionBundle], WriterDataChannelIO) = {
+    val a = getWriterModules(name, useSoftwareAddressing, dataBytes, Some(idx))
+    (a._1(0), a._2(0))
+  }
+
 
   def getScratchpad(name: String): (CScratchpadInitReqIO, CScratchpadAccessBundle) = {
     val outer = composerConstructor.composerCoreWrapper
@@ -216,7 +235,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
 
   def genCoreCommand(name: String, expectResponse: Bool, rs1: UInt = 0.U, rs2: UInt = 0.U, rd: UInt = 0.U,
                      xs2: UInt = 0.U, coreId: UInt = 0.U, payload1: UInt = 0.U, payload2: UInt = 0.U,
-                     funct: ComposerFunc.Value): UInt = {
+                     funct: ComposerFunc.ComposerFunc): UInt = {
     val wire = Wire(new ComposerRoccCommand())
     wire.inst.rs1 := rs1
     wire.inst.rs2 := rs2
@@ -226,7 +245,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     wire.inst.xs2 := xs2
     wire.inst.xd := expectResponse
     wire.inst.system_id := p(SystemName2IdMapKey)(name).U
-    wire.inst.funct := funct.id.U
+    wire.inst.funct := funct.U
     wire.inst.opcode := ComposerOpcode.ACCEL
     wire.core_id := coreId
     wire.payload1 := payload1

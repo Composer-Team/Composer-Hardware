@@ -13,7 +13,7 @@ import freechips.rocketchip.subsystem.ExtMem
   */
 class ChannelTransactionBundle(implicit p: Parameters) extends Bundle {
   val addr = UInt(log2Up(p(ExtMem).get.nMemoryChannels * p(ExtMem).get.master.size).W)
-  val len = UInt(log2Up(p(MaximumTransactionLength)).W)
+  val len = UInt((log2Up(p(MaximumTransactionLength))+1).W)
 }
 
 /**

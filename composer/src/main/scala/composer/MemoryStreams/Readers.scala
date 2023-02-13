@@ -26,6 +26,8 @@ class CReader(dataBytes: Int,
   val prefetchRows = tlclient.portParams(0).endSourceId
   require(prefetchRows > 0)
   val usesPrefetch = prefetchRows > 1
+  require(!usesPrefetch && fetchBehavior.isInstanceOf[txEmitAsOneTx], "Cannot prefetch and emit transactions larger than cache block." +
+    " Prefetching behavior is meant specifically to cache multiple blocks at a time")
   val blockBytes = p(CacheBlockBytes)
   val (tl_outer, tledge) = tlclient.out(0)
   val addressBits = log2Up(tledge.manager.maxAddress)
@@ -119,7 +121,6 @@ class CReader(dataBytes: Int,
         log2Up(blockBytes).U
     }
   )._2
-
   if (usesPrefetch) {
     val l_idle :: l_assign :: Nil = Enum(2)
     val load_state = RegInit(l_idle)
@@ -189,15 +190,22 @@ class CReader(dataBytes: Int,
         when(tl_out.a.fire) {
           if (logBlockBytes > logChannelSize) {
             data_channel_read_idx := addr(logBlockBytes - 1, logChannelSize)
-          } else
+          } else {
             data_channel_read_idx := 0.U
-          addr := addr + blockBytes.U
+          }
+          fetchBehavior match {
+            case _: txEmitCacheBlock =>
+              addr := addr + blockBytes.U
+              len := len - blockBytes.U
+            case _: txEmitAsOneTx =>
+              ;
+          }
+
           state := s_read_memory
           prefetchRowProgress(prefetch_writeIdx.value) := 0.U
           sourceToIdx(chosenSource) := prefetch_writeIdx.value
           sourceIdleBits(chosenSource) := false.B
           prefetch_writeIdx.inc()
-          len := len - blockBytes.U
         }
       }
       // wait for responses from s_send_mem_request
@@ -239,6 +247,9 @@ class CReader(dataBytes: Int,
     // else if no prefetch
     tl_out.d.ready := buffer_fill_level < beatsPerBlock.U
     when(tl_out.d.fire) {
+      if (fetchBehavior.isInstanceOf[txEmitAsOneTx]) {
+        len := len - beatBytes.U
+      }
       (0 until beatsPerBlock) foreach { bufferBeatIdx =>
         // whenever we get a beat on the data bus, split it into sections and put into buffer
         when(bufferBeatIdx.U === buffer_fill_level) {
@@ -269,7 +280,7 @@ class CReader(dataBytes: Int,
         }
       }
       is(s_send_mem_request) {
-        tl_out.a.valid := sourceAvailable
+        tl_out.a.valid := true.B
         when(tl_out.a.fire) {
           if (logBlockBytes > logChannelSize) {
             data_channel_read_idx := addr(logBlockBytes - 1, logChannelSize)
@@ -278,7 +289,6 @@ class CReader(dataBytes: Int,
           addr := addr + blockBytes.U
           state := s_read_memory
           buffer_fill_level := 0.U
-          sourceIdleBits(chosenSource) := false.B
         }
       }
       // wait for responses from s_send_mem_request
