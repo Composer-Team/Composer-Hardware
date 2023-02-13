@@ -47,7 +47,8 @@ class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(i
   val (reqChannelOut, dataChannelOut) = getWriterModules(name = "ChannelOut", useSoftwareAddressing =  false,
     dataBytes = dataWidthBytes * arithUnits)
   // these channels will read both the buffers and the A Matrix
-  val (reqChannelRow, dataChannelRow) = getReaderModules(name = "ChannelA", useSoftwareAddressing = false,
+  val (reqChannelRow, dataChannelRow) = getReaderModules(name = "ChannelA",
+    useSoftwareAddressing = false,
     dataBytes = dataWidthBytes, vlen=1)
 
   val BAddr = Reg(UInt(addrWidth.W))

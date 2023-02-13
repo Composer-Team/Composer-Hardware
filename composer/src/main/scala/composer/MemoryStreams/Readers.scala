@@ -26,7 +26,7 @@ class CReader(dataBytes: Int,
   val prefetchRows = tlclient.portParams(0).endSourceId
   require(prefetchRows > 0)
   val usesPrefetch = prefetchRows > 1
-  require(!usesPrefetch && fetchBehavior.isInstanceOf[txEmitAsOneTx], "Cannot prefetch and emit transactions larger than cache block." +
+  require(!(usesPrefetch && fetchBehavior.isInstanceOf[txEmitAsOneTx]), "Cannot prefetch and emit transactions larger than cache block." +
     " Prefetching behavior is meant specifically to cache multiple blocks at a time")
   val blockBytes = p(CacheBlockBytes)
   val (tl_outer, tledge) = tlclient.out(0)
