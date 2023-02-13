@@ -96,10 +96,14 @@ class BigDTConfig extends Config(
   new WithDTAccelerator(64, bigConfig) ++ new WithComposer() ++ new WithAWSMem(1)
 )
 
+class BiggerDTConfig extends Config(
+  new WithDTAccelerator(96, bigConfig) ++ new WithComposer() ++ new WithAWSMem(1)
+)
+
 class SmallDTConfig extends Config(
   new WithDTAccelerator(4, smallConfig) ++ new WithComposer() ++ new WithAWSMem(1)
 )
 
 object DTDriver extends App {
-  Composer.buildConfig(new SmallDTConfig)
+  Composer.buildConfig(new BiggerDTConfig)
 }
