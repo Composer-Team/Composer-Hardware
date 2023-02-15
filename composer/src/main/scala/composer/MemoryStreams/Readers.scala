@@ -294,12 +294,20 @@ class CReader(dataBytes: Int,
       // wait for responses from s_send_mem_request
       is(s_read_memory) {
         // when we get a message back store it into a buffer
-        when(len === 0.U) {
-          state := s_idle
-        }.otherwise {
-          if (fetchBehavior.isInstanceOf[txEmitCacheBlock]) {
-            state := s_send_mem_request
-          } // if one transaction mode then the beats just keep coming
+        when(data_channel_read_idx === channelsPerBlock.U) {
+          fetchBehavior match {
+            case _: txEmitAsOneTx =>
+              when (len === 0.U) {
+                state := s_idle
+              }
+            case _: txEmitCacheBlock =>
+              when (len === blockBytes.U) {
+                state := s_idle
+              }.otherwise {
+                state := s_send_mem_request
+                len := len - blockBytes.U
+              }
+          }
         }
       }
     }
