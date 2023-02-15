@@ -303,6 +303,7 @@ class CReader(dataBytes: Int,
             case _: txEmitCacheBlock =>
               when (len === blockBytes.U) {
                 state := s_idle
+                len := 0.U
               }.otherwise {
                 state := s_send_mem_request
                 len := len - blockBytes.U
