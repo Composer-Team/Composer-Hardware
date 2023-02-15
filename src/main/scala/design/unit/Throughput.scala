@@ -181,7 +181,7 @@ class withThroughputTesters(n: Int) extends Config((site, here, up) => {
 })
 
 class ThroughputTest extends Config(
-  new withThroughputTesters(8) ++ new WithComposer() ++ new WithAWSMem(4)
+  new withThroughputTesters(20) ++ new WithComposer() ++ new WithAWSMem(4)
 )
 
 object TDriver extends App {
