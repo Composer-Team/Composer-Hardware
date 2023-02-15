@@ -74,7 +74,7 @@ class ThroughputDispatch(constructor: ComposerConstructor)(implicit p: Parameter
 
   val addrWidth = log2Up(p(ExtMem).get.master.size)
   val addr = Reg(UInt(addrWidth.W))
-  val len_remaining = Reg(UInt(32.W))
+  val len_remaining = Reg(UInt((addrWidth+1).W))
 
   val cycleCount = Reg(UInt(io.resp.bits.data.getWidth.W))
   println("Cycle counter bits: " + io.resp.bits.data.getWidth + "b")
@@ -112,7 +112,7 @@ class ThroughputDispatch(constructor: ComposerConstructor)(implicit p: Parameter
         addr := io.req.bits.payload2(addrWidth - 1, 0)
         cycleCount := 0.U
         state := s_active
-        len_remaining := (1L << 31).U
+        len_remaining := io.req.bits.payload1(addrWidth, 0)
       }
     }
     is(s_active) {
