@@ -186,13 +186,13 @@ class CReader(dataBytes: Int,
         }
       }
       is(s_send_mem_request) {
-        tl_out.a.valid := sourceAvailable
+        tl_out.a.valid := sourceAvailable && !prefetch_buffers_valid(prefetch_writeIdx.value)
         when(tl_out.a.fire) {
-          if (logBlockBytes > logChannelSize) {
-            data_channel_read_idx := addr(logBlockBytes - 1, logChannelSize)
-          } else {
-            data_channel_read_idx := 0.U
-          }
+//          if (logBlockBytes > logChannelSize) {
+//            data_channel_read_idx := addr(logBlockBytes - 1, logChannelSize)
+//          } else {
+//            data_channel_read_idx := 0.U
+//          }
           fetchBehavior match {
             case _: txEmitCacheBlock =>
               addr := addr + blockBytes.U
