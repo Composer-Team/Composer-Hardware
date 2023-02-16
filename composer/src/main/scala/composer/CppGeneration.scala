@@ -16,8 +16,8 @@ object CppGeneration {
   private var user_defs: List[CppDefinition] = List()
 
   def addUserCppDefinition[t](ty: String, name: String, value: t): Unit = {
-    val ty_f = ty.strip()
-    val name_f = name.strip()
+    val ty_f = ty.trim
+    val name_f = name.trim
     val existingDefs = user_defs.filter(_.name == name_f)
     existingDefs.foreach(a => require(a.ty == ty_f && a.value == value.toString, s"Redefining ${a.name} from (${a.ty}, ${a.value}) to ($ty, $value)"))
     if (existingDefs.isEmpty) user_defs = CppDefinition(ty_f, name_f, value.toString) :: user_defs
