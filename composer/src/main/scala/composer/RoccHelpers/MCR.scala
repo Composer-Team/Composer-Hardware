@@ -2,7 +2,7 @@ package composer.RoccHelpers
 
 import chisel3._
 import chisel3.util._
-import composer.{AXILSlaveAddressMask, MMIOBaseAddress}
+import composer._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._

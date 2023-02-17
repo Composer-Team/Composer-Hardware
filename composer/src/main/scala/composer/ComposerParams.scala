@@ -77,7 +77,7 @@ class WithKriaMem extends Config((_, _, _) => {
     idBits = 6
   ), 1))
   // using S_AXI_HP0_FPD - 16M segment starting at below address. See pg 211 in Ultrascale MPSoC User guide
-  case MMIOBaseAddress => 0xFF000000L
+  case MMIOBaseAddress => 0xB0000000L
   case AXILSlaveAddressMask => 0xFFFFFFFFFFL
   case HasDMA => None
   // TODO this can be tuned
