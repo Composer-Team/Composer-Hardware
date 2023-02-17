@@ -70,7 +70,7 @@ class WithKriaMem extends Config((_, _, _) => {
   case ExtMem => Some(MemoryPortParams(MasterPortParams(
     base = 0,
     size = 1L << 49,
-    beatBytes = 4,
+    beatBytes = 16,
     idBits = 6
   ), 1))
   // MMIO is real - part of the address space is reserved for MMIO communications

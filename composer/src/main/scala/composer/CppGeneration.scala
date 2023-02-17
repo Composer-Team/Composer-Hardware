@@ -43,11 +43,11 @@ object CppGeneration {
       "#ifndef COMPOSER_ALLOCATOR_GEN\n" +
       "#define COMPOSER_ALLOCATOR_GEN\n")
 
-    if (p(HasDiscreteMemory)) {
-      f.write("#define COMPOSER_USE_CUSTOM_ALLOC\n" +
-        "#define NUM_DDR_CHANNELS " + mem.nMemoryChannels + "\n" +
-        "using composer_allocator=composer::device_allocator<" + mem.master.size + ">;\n")
-    }
+    if (!p(HasDiscreteMemory)) f.write("#ifdef SIM\n")
+    f.write("#define COMPOSER_USE_CUSTOM_ALLOC\n" +
+      "#define NUM_DDR_CHANNELS " + mem.nMemoryChannels + "\n" +
+      "using composer_allocator=composer::device_allocator<" + mem.master.size + ">;\n")
+    if (!p(HasDiscreteMemory)) f.write("#endif\n")
 
     f.write(s"const uint8_t composerNumAddrBits = ${log2Up(mem.master.size)};\n")
 
