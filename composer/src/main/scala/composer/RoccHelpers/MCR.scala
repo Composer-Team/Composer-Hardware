@@ -140,14 +140,14 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
   val sReadIdle :: sGetReadData :: sPublishRead :: sReadError :: Nil = Enum(4)
 
   val writeState = RegInit(sWriteIdle)
-  val writeAddr = Reg(UInt(12.W))
+  val writeAddr = Reg(UInt(8.W))
   val writeLen = Reg(UInt(in.aw.bits.len.getWidth.W))
   val writeId = Reg(UInt(in.aw.bits.id.getWidth.W))
   val wStrb = Reg(UInt(io.mcr.wstrb.getWidth.W))
   val wData = Reg(UInt(in.w.bits.data.getWidth.W))
 
   val readState = RegInit(sReadIdle)
-  val readAddr = Reg(UInt(12.W))
+  val readAddr = Reg(UInt(8.W))
   val readLen = Reg(UInt(in.aw.bits.len.getWidth.W))
   val readID = Reg(UInt(in.ar.bits.id.getWidth.W))
   val readData = Reg(UInt(in.r.bits.data.getWidth.W))
