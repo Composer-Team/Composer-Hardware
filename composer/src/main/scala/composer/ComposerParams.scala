@@ -24,6 +24,8 @@ case object MaximumTransactionLength extends Field[Int]
 case object SystemName2IdMapKey extends Field[Map[String, Int]]
 case object RequireInternalCommandRouting extends Field[Boolean]
 
+case object AXILSlaveAddressMask extends Field[Long]
+
 case class ComposerCoreParams(memoryChannelParams: List[CChannelParams] = List(),
                               core_id: Int = 0, // for internal use
                               system_id: Int = 0, // for internal use
@@ -60,10 +62,11 @@ class WithAWSMem(nMemoryChannels: Int) extends Config((_, _, _) => {
     q
   case HasDMA => Some(6)
   case HasAXILExternalMMIO => true
-  case MMIOBaseAddress => 0x0L // MMIO is not real, it's just a PCIE bus transaction that pretends to be MMIO
   // TODO this can be tuned
   case CXbarMaxDegree => 32
   case HasDiscreteMemory => true
+  case AXILSlaveAddressMask => 0xFFFF
+  case MMIOBaseAddress => 0L
 })
 
 class WithKriaMem extends Config((_, _, _) => {
@@ -73,8 +76,9 @@ class WithKriaMem extends Config((_, _, _) => {
     beatBytes = 16,
     idBits = 6
   ), 1))
-  // MMIO is real - part of the address space is reserved for MMIO communications
-  case MMIOBaseAddress => (1 << 12).toLong // put on the 2nd page. Skip first 4KB page to preserve behavior of *(nullptr)
+  // using S_AXI_HP0_FPD - 16M segment starting at below address. See pg 211 in Ultrascale MPSoC User guide
+  case MMIOBaseAddress => 0xFF000000L
+  case AXILSlaveAddressMask => 0xFFFFFFFFFFL
   case HasDMA => None
   // TODO this can be tuned
   case CXbarMaxDegree => 8

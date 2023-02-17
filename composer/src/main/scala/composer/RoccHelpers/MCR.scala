@@ -2,7 +2,7 @@ package composer.RoccHelpers
 
 import chisel3._
 import chisel3.util._
-import composer.MMIOBaseAddress
+import composer.{AXILSlaveAddressMask, MMIOBaseAddress}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
@@ -63,7 +63,7 @@ class MCRFileMap() {
 
   def printCRs(outStream: Option[FileWriter] = None)(implicit p: Parameters): Unit = {
     regList.zipWithIndex foreach { case (entry, i) =>
-      val addr = p(MMIOBaseAddress) | (i << 2)
+      val addr = i << 2
       require(i < 1024)
       outStream match {
         case a: Some[FileWriter] => a.get.write(s"#define ${entry.name.toUpperCase()} ($addr)\n")
@@ -113,7 +113,8 @@ class MCRFile(numRegs: Int)(implicit p: Parameters) extends LazyModule {
   require((p(MMIOBaseAddress) & 0x3FFL) == 0)
   val node = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
     slaves = Seq(AXI4SlaveParameters(
-      address = List(AddressSet(p(MMIOBaseAddress), (1 << (log2Up(numRegs)+2)) - 1)),
+      // 40b address
+      address = List(AddressSet(0, p(AXILSlaveAddressMask))),
       regionType = RegionType.UNCACHED,
       supportsWrite = TransferSizes(1, 4),
       supportsRead = TransferSizes(1, 4)
