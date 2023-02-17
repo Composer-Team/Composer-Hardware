@@ -88,10 +88,8 @@ class WithNoMem extends WithAWSMem(1)
 // TODO work DMA into Trait
 // TODO work Kria Memory (4GB) into Trait
 
-class WithComposer(maximumTxLengthBytes: Int = 1 << 14, systemIDbits: Int = 4, coreIdBits: Int = 8) extends Config((site, _, _) => {
+class WithComposer(maximumTxLengthBytes: Int = 1 << 14) extends Config((site, _, _) => {
   case ComposerSystemsKey => Seq()
-  case SystemIDLengthKey => systemIDbits
-  case CoreIDLengthKey => coreIdBits
   case TLInterconnectWidthBytes => 16
 //  case MaxChannelTransactionLenKey => 1 << 30
   // Tile parameters
@@ -100,6 +98,8 @@ class WithComposer(maximumTxLengthBytes: Int = 1 << 14, systemIDbits: Int = 4, c
   // in elaboration
   case PgLevels => 5
   case XLen => 64 // Applies to all cores
+  case SystemIDLengthKey => 4
+  case CoreIDLengthKey => 8
   case MaximumTransactionLength =>
     require(maximumTxLengthBytes <= (1 << 14), "Maximum transaction length supported by AXI is 2^14 B. ")
     maximumTxLengthBytes

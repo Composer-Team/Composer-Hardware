@@ -13,23 +13,30 @@ case class LFSRConfig(length: Int, taps: Seq[Int])
 // galois lfsr
 // note to self: look at dramsim2
 class LFSRCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
+  // simple state machine - not composer specific, but useful anyways
   val s_idle :: s_working :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
+
+  // you can use configs to access implementation details for your core (optional)
   val conf = p(LFSRConfigKey)
   val taps = conf.taps map (_ - 1)
   val rand_gen = new Random()
 
+  // bog-standard LFSR
   val lfsr = Seq.fill(conf.length)(RegInit(rand_gen.nextBoolean().B))
   val outputbit = lfsr(0)
   val outputCache = Seq.fill(conf.length)(RegInit(false.B))
   val count = RegInit(0.U(log2Up(conf.length).W))
 
+  // REQUIRED: you MUST tie-off the cmd/response interface
+  // here we're using the Chisel last-connect semantics to define the default values for each of the wires
   io.req.ready := false.B
   io.resp.valid := false.B
   io.resp.bits.data := 0.U
   io.resp.bits.rd := 0.U
   io.busy := true.B
 
+  // when we're idle we accept commands
   when(state === s_idle) {
     io.busy := false.B
     io.req.ready := true.B
@@ -38,6 +45,7 @@ class LFSRCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters) 
       count := (conf.length - 1).U
     }
   }.elsewhen(state === s_working) {
+    // when we're working we tick the LFSR
     (0 until conf.length - 1).foreach { i =>
       lfsr(i) := lfsr(i + 1)
       outputCache(i) := outputCache(i + 1)
@@ -55,6 +63,7 @@ class LFSRCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters) 
       state := s_finish
     }
   }.elsewhen(state === s_finish) {
+    // when we're done we signal response what we want to send back to the CPU
     io.resp.bits.data := VecInit(outputCache).asUInt
     io.resp.valid := true.B
     when(io.resp.fire) {
@@ -65,21 +74,20 @@ class LFSRCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters) 
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * Simple ALU Implementation * * * * * * * * * * * * * * * * * * *
 
-class ALUInput extends Bundle {
-  val inputA = Wire(UInt(3.W))
-  val inputB = Wire(UInt(3.W))
-  val op = Wire(Bool())
-}
-
 class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
+  // again, we define some sort of state machine
   val s_idle :: s_working :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
 
-  val op = RegInit(0.U(io.req.bits.inst.funct.getWidth.W))
-  val a = RegInit(0.U(io.req.bits.payload1.getWidth.W))
-  val b = RegInit(0.U(io.req.bits.payload2.getWidth.W))
-  val result = RegInit(0.U(io.resp.bits.data.getWidth.W))
+  // a request will carry our operation, two operands, and we will return a result
+  val op = RegInit(0.U(io.req.bits.inst.rs1.getWidth.W))
+  val a = RegInit(0.U(32.W))
+  val b = RegInit(0.U(32.W))
+  val result = RegInit(0.U(32.W))
 
+  // tie-off the required cmd/response signals. We assign them to false by default because we're going to use
+  // Chisel last-connect semantics to set them to high under certain conditions (for instance: if we're in the finishing
+  // state then io.resp.valid will be true
   io.req.ready := false.B
   io.resp.valid := false.B
   io.resp.bits.data := 0.U
@@ -89,13 +97,16 @@ class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters)
   when(state === s_idle) {
     io.busy := false.B
     io.req.ready := true.B
+    // .fire means (.ready && .valid)
     when(io.req.fire) {
+      // store our request in registers - if we don't handshake by signaling ready then the machine will stall!
       state := s_working
       op := io.req.bits.inst.rs1
       a := io.req.bits.payload1
       b := io.req.bits.payload2
     }
   }.elsewhen(state === s_working) {
+    // perform our operation
     switch(op) {
       is(0.U) {
         result := a +& b
@@ -109,9 +120,11 @@ class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters)
     }
     state := s_finish
   }.elsewhen(state === s_finish) {
-    io.resp.bits.data := result
+    // resp is valid and we set it to our result value
+    io.resp.bits.data := result(31, 0)
     io.resp.valid := true.B
     when(io.resp.fire) {
+      // make sure you return to your idle state and reset anything you need to
       state := s_idle
     }
   }
@@ -125,38 +138,70 @@ case class VectorConfig(dWidth: Int, // what is the datatype width?
                        )
 
 class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
+  // state machine is a little more complicated this time
   val s_idle :: s_load :: s_add :: s_store :: s_commit :: s_finish :: Nil = Enum(6)
   val vConfig = p(VectorAdderKey)
   require(isPow2(vConfig.dWidth), "The vector data width must be a power of two!")
   require(vConfig.dWidth % 8 == 0)
   val vDivs = 8
-//  val myReader = declareSequentialReader(usingReadChannelID = 0, vConfig.dWidth / 8, vDivs)
-  val myReader = getReaderModules("ReadChannel", useSoftwareAddressing = true, vConfig.dWidth/8 , vDivs)._2(0) //= 0, vConfig.dWidth / 8, vDivs, Some(0))
-  val myWriter = getWriterModules("WriteChannel", useSoftwareAddressing = true, vConfig.dWidth/8 * vDivs)._2(0)
+
+  // We get a group of reader/writer channels using this interface. The size of the group is defined in the config
+  // dataBytes is the width of a datum
+  // vlen is the number of datums to read on a single handshake
+  // this functionality is mostly useful so that you can read multiple inputs in parallel without having to do so much
+  // manual packing/unpacking
+  val (_, myReaders) = getReaderModules(
+    name = "ReadChannel",
+    useSoftwareAddressing = true,
+    dataBytes = vConfig.dWidth / 8,
+    vlen = vDivs)
+  val (_, myWriters) = getWriterModules(
+    name ="WriteChannel",
+    useSoftwareAddressing = true,
+    dataBytes = vConfig.dWidth / 8 * vDivs)
+  // For this module the groups are just size 1
+  // These modules are going to use software addressing which means that we supply the addresses and lengths for the
+  // reads via the interface in software (see composer::rocc::addr_cmd).
+  // addr_cmd takes two parameters: a `ComposerAddrInfo` struct, and the pointer (with implicit length information) that
+  // you will supply to the reader
+  //
+  // How do you make a `ComposerAddrInfo` struct? With the `getChannelSubIdx` function (generated in the
+  // #include <composer_allocator_declaration.h> header. This function takes the following arguments.
+  //
+  // - system ID - which system are we (in this case we'll supply VectorSystem_ID to this parameter because that's us)
+  // - core ID - which core are we?
+  // - channel name - the name of the group of channels are generated into an Enum that you can reference via the header
+  //                    #include <composer_allocator_declaration.h> in the enum ComposerChannels.
+  //                    so for this case, we would supply either ComposerChannels::ReadChannel or ComposerChannels::WriteChannel
+  // - id - index of the channel within the group
+  //
+  // Generally, I would actually recommend using hardware addressing (passing in your addresses and lengths manually
+  // through start commands becuase I think it's easier to debug, but this is a legacy functionality from Composer that
+  // has made it into its current implementation
+
+  val myReader = myReaders(0)
+  val myWriter = myWriters(0)
   val state = RegInit(s_idle)
   val toAdd = Reg(UInt(vConfig.dWidth.W))
   val vLen = Reg(UInt(io.req.bits.payload1.getWidth.W))
   val rfinish = RegInit(false.B)
 
-
-  cache_invalidate_ios foreach (_ := reset.asBool)
-
+  // like previous examples, make sure you tie off your req/resp interfaces as well as `busy`
   io.req.ready := state === s_idle
   io.busy := state =/= s_idle
   io.resp.valid := false.B // set again later under s_finish
   io.resp.bits.data := 0.U
-  val rdreg = Reg(UInt(io.resp.bits.rd.getWidth.W))
-  io.resp.bits.rd := rdreg
-
-    cache_invalidate_ios foreach { _ := false.B }
-
+  io.resp.bits.rd := 0.U
 
   val dArray = Seq.fill(vDivs)(Reg(UInt(vConfig.dWidth.W)))
 
   // user reverse to maintain order
   myWriter.data.bits := Cat(dArray.reverse)
+  // the writer module will cache lines until a line has been completely written
+  // set finishEarly when you want to flush the current transaction
   myWriter.finishEarly := state === s_idle
   myWriter.data.valid := false.B
+  // stop a reader if you want to finish the transaction prematurely
   myReader.stop := false.B
   myReader.data.ready := false.B
 
@@ -168,7 +213,6 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
       toAdd := io.req.bits.payload2(vConfig.dWidth - 1, 0)
       vLen := io.req.bits.payload1
       rfinish := false.B
-      rdreg := io.req.bits.inst.rd
     }
   }.elsewhen(state === s_load) {
     myReader.data.ready := true.B
@@ -195,8 +239,8 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
         state := s_load
       }
     }
-  }.elsewhen(state === s_commit){
-    when (myWriter.channelIdle) {
+  }.elsewhen(state === s_commit) {
+    when(myWriter.channelIdle) {
       state := s_finish
     }
   }.elsewhen(state === s_finish) {
