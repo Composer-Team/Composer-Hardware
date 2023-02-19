@@ -1,4 +1,4 @@
-package design.Gemm
+package design.machsuite.Gemm
 
 import chipsalliance.rocketchip.config.Config
 import composer.{WithAWSMem, WithComposer}

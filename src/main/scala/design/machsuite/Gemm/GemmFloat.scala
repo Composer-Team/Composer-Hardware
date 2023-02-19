@@ -1,36 +1,19 @@
-package design.Gemm
+package design.machsuite.Gemm
+
 // 32 fused mulAdd - integer version - reading 32 elements at each time - writing 8 elems each cycle
 
 import chipsalliance.rocketchip.config.Config
-import chisel3.experimental.ChiselEnum
 import chisel3.{UInt, _}
 import chisel3.util._
 import composer.MemoryStreams._
 import freechips.rocketchip.config.Parameters
 import composer._
+import composer.common.splitIntoChunks
+import fpnewWrapper._
 import freechips.rocketchip.subsystem.ExtMem
 
-/**
-  * @param dataWidthBytes    width of signed integer data type
-  * @param rowColDim         size of the square matrix
-  * @param columnParallelism Given row of matrix B, split the row to this many arithmetic units to process in parallel
-  * @param rowParallelism    How many independent rows of matrix A to handle simultaneously
-  */
-case class GemmParam(dataWidthBytes: Int,
-                     rowColDim: Int,
-                     columnParallelism: Int,
-                     rowParallelism: Int,
-                     maxRCDim: Int,
-                     prefetchAmt: Int = 1){
-  require(columnParallelism > 1)
-}
-
-object GemmCoreCommands extends ChiselEnum {
-  val A, B, C, rowAndGo = Value
-}
-
 //noinspection DuplicatedCode
-class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implicit p: Parameters)
+class GemmFloatCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implicit p: Parameters)
   extends ComposerCore(composerCoreParams)(p) {
   CppGeneration.addUserCppDefinition("int", "FPGA_RC_DIM", coreP.rowColDim)
   val dataWidthBytes = coreP.dataWidthBytes
@@ -65,7 +48,8 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   val (reqChannelOut, dataChannelOut) = getWriterModules(name = "ChannelOut", useSoftwareAddressing =  false,
     dataBytes = dataWidthBytes * arithUnits)
   // these channels will read both the buffers and the A Matrix
-  val (reqChannelRow, dataChannelRow) = getReaderModules(name = "ChannelA", useSoftwareAddressing = false,
+  val (reqChannelRow, dataChannelRow) = getReaderModules(name = "ChannelA",
+    useSoftwareAddressing = false,
     dataBytes = dataWidthBytes, vlen=1)
 
   val BAddr = Reg(UInt(addrWidth.W))
@@ -100,7 +84,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   // iterate through matrix B 1 row at a time
   val currentBRow = Reg(UInt((rowBits + 1).W))
   // Matrix A state for each duplicated accumulator system
-  val current_a = Seq.fill(coreP.rowParallelism)(Reg(SInt(dataWidthBits.W)))
+  val current_a = Seq.fill(coreP.rowParallelism)(Reg(UInt(dataWidthBits.W)))
   val row_loaded = Seq.fill(coreP.rowParallelism)(Reg(Bool()))
   val ACounter = Reg(UInt(rowBits.W))
   val lastA = (coreP.rowColDim / coreP.rowParallelism) - 1
@@ -112,8 +96,8 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
 
   // accumulated values cache
   // these get co-opted for storing the output values while they're being written
-  val OCache = Seq.fill(coreP.rowParallelism, arithUnits)(Reg(Vec(elemsPerArithUnit, SInt(dataWidthBits.W))))
-  val OAccs = Seq.fill(coreP.rowParallelism, arithUnits)(Wire(SInt(dataWidthBits.W)))
+  val OCache = Seq.fill(coreP.rowParallelism, arithUnits)(Reg(Vec(elemsPerArithUnit, UInt(dataWidthBits.W))))
+  val OAccs = Seq.fill(coreP.rowParallelism, arithUnits)(Wire(UInt(dataWidthBits.W)))
   // 🍞🥖
   val bread = Reg(UInt(log2Up(elemsPerArithUnit).W))
 
@@ -140,42 +124,59 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   val bread_val = (0 until arithUnits) map { idx =>
     val start = idx * dataWidthBits
     val end = (idx + 1) * dataWidthBits - 1
-    accessChannelB.readRes.bits(end, start).asSInt
+    accessChannelB.readRes.bits(end, start).asUInt
   }
-  val o_mul = current_a flatMap { row_a: SInt =>
+
+  val o_mul = current_a flatMap { row_a: UInt =>
     val a_pipe = RegNext(RegNext(row_a))
-    bread_val map { subB: SInt =>
-      subB * a_pipe
+    bread_val map { subB: UInt =>
+      (subB,  a_pipe)
     }
   }
 
   // after 2cy, on 3rd cycle
-  val mac_result = o_mul zip OAccs.flatten map { case (o_mul_dat: SInt, o_acc_old_dat: SInt) =>
-    RegNext(o_mul_dat + o_acc_old_dat)
+  val fma_tuples = o_mul zip OAccs.flatten map { case (mul_pair, add_item: UInt) =>
+    (mul_pair, add_item)
   }
 
   val bread_stage = RegNext(bread)
   val bread_stage2 = RegNext(bread_stage)
-  val bread_stage3 = RegNext(bread_stage2)
-  val addr = bread_stage3
-  val do_write = RegNext(RegNext(RegNext(state === s_acc)))
+
+  println(s"Elaborating fpu with ${fma_tuples.length} lanes")
+  val fpu_latency = 4
+  val fpu = Module(new FPUNew(FPFloatFormat.Fp32, fma_tuples.length, fpu_latency, Seq(FPNewOpClass.ADDMUL), tagWidth = log2Up(elemsPerArithUnit)))
+  fpu.io.req.valid := RegNext(RegNext(state === s_acc))
+  fpu.io.req.bits.operands(0) zip fma_tuples.map(_._1._1) foreach (a => a._1 := a._2)
+  fpu.io.req.bits.operands(1) zip fma_tuples.map(_._1._2) foreach (a => a._1 := a._2)
+  fpu.io.req.bits.operands(2) zip fma_tuples.map(_._2) foreach (a => a._1 := a._2)
+  fpu.io.req.bits.tag := bread_stage2
+  fpu.io.req.bits.op := FPOperation.FMADD
+  fpu.io.req.bits.opModifier := 0.U
+  fpu.io.req.bits.intFormat := DontCare
+  fpu.io.req.bits.dstFormat := DontCare
+  fpu.io.req.bits.srcFormat := FPFloatFormat.Fp32
+  fpu.io.req.bits.roundingMode := FPRoundingMode.RNE
+
+  fpu.io.flush := false.B
+  fpu.io.resp.ready := true.B
+
 
   //
   OCache zip OAccs foreach { case (oc_per_row, oa_per_row) =>
-    val bread_per_row_stage2 = RegNext(bread_stage)
+    val bread_per_row_stage2 = bread_stage2
     oc_per_row zip oa_per_row foreach { case (oc_per_arith, acc_per_arith) =>
       acc_per_arith := oc_per_arith(bread_per_row_stage2)
     }
   }
 
   // write back accumulator register to row
-  when(do_write) {
-    mac_result zip OCache.flatten foreach { case (o_mac_result, ocache) =>
-      ocache(addr) := o_mac_result
+  when(fpu.io.resp.valid) {
+    fpu.io.resp.bits.result zip OCache.flatten foreach { case (o_mac_result, ocache) =>
+      ocache(fpu.io.resp.bits.tag) := o_mac_result
     }
   }
 
-//  val on_last = bread === maxBCounter.U
+  //  val on_last = bread === maxBCounter.U
 
   /*
    * END DATA PIPELINE
@@ -291,7 +292,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
         dataChannelRow map (_.data.bits) zip OCache foreach { case (dat, cache) =>
           cache.zipWithIndex foreach { case (arithcache, idx) =>
             when(idx.U === arith_id) {
-              arithcache(arith_offset) := dat(0).asSInt
+              arithcache(arith_offset) := dat(0).asUInt
             }
           }
         }
@@ -319,7 +320,7 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
       dataChannelRow.lazyZip(row_loaded).lazyZip(current_a) foreach { case (in_a, aload, areg) =>
         in_a.data.ready := !aload
         when(in_a.data.fire) {
-          areg := in_a.data.bits(0).asSInt
+          areg := in_a.data.bits(0).asUInt
           aload := true.B
         }
       }
@@ -349,7 +350,9 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
     }
     is(s_writeback_1) {
       // split this into two stages for read from banks and then handing to memory
-      state := s_writeback_2
+      when (!fpu.io.busy) {
+        state := s_writeback_2
+      }
       // reading from accumulator
     }
     is(s_writeback_2) {
@@ -397,8 +400,9 @@ class GemmCore(composerCoreParams: ComposerConstructor, coreP: GemmParam)(implic
   }
 }
 
-class WithGemm(withNCores: Int,
-               gp: GemmParam) extends Config((site, _, up) => {
+//noinspection DuplicatedCode
+class WithGemmFloat(withNCores: Int,
+                    gp: GemmParam) extends Config((site, _, up) => {
   case ComposerSystemsKey => up(ComposerSystemsKey, site) ++ Seq(ComposerSystemParams(
     coreParams = ComposerCoreParams(memoryChannelParams = List(
       CScratchpadChannelParams(
@@ -410,15 +414,16 @@ class WithGemm(withNCores: Int,
       CReadChannelParams(
         "ChannelA",
         gp.rowParallelism,
-        maxInFlightTxs = 4),
+        maxInFlightTxs = gp.prefetchAmt),
       CWriteChannelParams(
         "ChannelOut",
-        gp.rowParallelism))),
+        gp.rowParallelism,
+        maxInFlightTxs = gp.prefetchAmt))),
     nCores = withNCores,
     name = "GemmCore",
     buildCore = {
       case (coreParams, parameters) =>
-        new GemmCore(coreParams, gp)(parameters)
+        new GemmFloatCore(coreParams, gp)(parameters)
     }))
 })
 

@@ -2,7 +2,7 @@ package design
 
 import chipsalliance.rocketchip.config.Config
 import chisel3.stage.PrintFullStackTraceAnnotation
-import design.Gemm.{GemmTestF1, GemmTestF1Big}
+import design.machsuite.Gemm.{GemmTestF1, GemmTestF1Big}
 import design.unit.{exampleConfig, exampleConfigKria}
 import firrtl.annotations.DeletedAnnotation
 import freechips.rocketchip.system._
