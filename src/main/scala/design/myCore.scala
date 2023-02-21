@@ -13,8 +13,8 @@ import composer.ComposerCoreIO
 
 class SimpleInput extends Bundle {
   val op = UInt(2.W)
-  val a = UInt(8.W)
-  val b = UInt(8.W)
+  val a = UInt(48.W)
+  val b = UInt(48.W)
 }
 class SimpleOutput extends Bundle {
   val data = UInt(52.W) // TODO: Check size
