@@ -1,5 +1,7 @@
 package composer
 
+import scala.math.ceil
+import Chisel.Cat
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 
@@ -16,44 +18,57 @@ class ComposerBundleIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2, 
   cio.resp.bits.system_id := composerCoreParams.system_id.U
   cio.resp.bits.core_id := composerCoreParams.core_id.U
 
-  //Only works for direct pass-through
-  io.req.valid := cio.req.valid
-  io.resp.ready := cio.resp.ready
   cio.busy := io.busy
-  cio.req.ready := io.req.ready
-  cio.resp.valid := io.resp.valid
 
-//  //Direct pass-through
-//  when(io.req.fire) {
-//    io.req.bits.getElements(2) := cio.req.bits.inst.rs1
-//    io.req.bits.getElements(1) := cio.req.bits.rs1
-//    io.req.bits.getElements(0) := cio.req.bits.rs2
-//  }
+  cio.resp.valid := io.resp.valid
+  io.resp.ready := cio.resp.ready
 
   when(io.resp.fire) {
-    cio.resp.bits.data := io.resp.bits.getElements(0)
+    val payload = io.resp.bits.asUInt
+    loadOutputPayload(payload, cio.resp.bits.data)
   }
 
+  val deliveringReqPayload = RegInit(false.B)
+  val packagingPayload = RegInit(false.B)
 
-  when(cio.req.fire) {
-    var counter = 0
-    for(i <- io.req.bits.getElements.indices) {
-      val nextElement = io.req.bits.getElements(i)
-      val start = counter
-      val end = start + nextElement.getWidth
+  val reqPayloadWidth = Cat(cio.req.bits.rs1, cio.req.bits.rs2).getWidth
+  val reqInputWidth = io.req.bits.getWidth
+  val extendedPayloadWidth = reqPayloadWidth*ceil(reqInputWidth.toDouble/reqPayloadWidth).toInt
 
-      val userBools = VecInit(nextElement.asUInt.asBools)
+  var reqPayloadCounter = RegInit(0.U(64.W)) //TODO: Pick Width
+  val reqPayload = RegInit(VecInit(Seq.fill(extendedPayloadWidth)(0.B)))
+  val reqPayloadChunk = VecInit(Seq.fill(reqPayloadWidth)(0.B))
 
-      if (end < cio.req.bits.rs2.getWidth) {
-        val composerBools = VecInit(cio.req.bits.rs2.asBools)
-        for(j <- 0 until nextElement.getWidth){
-          userBools(j) := composerBools(start + j)
-        }
-        nextElement := userBools.asUInt
-        counter = end
-      }
+  io.req.valid := cio.req.valid
+  cio.req.ready := io.req.ready && !deliveringReqPayload
+  //TODO: How do we know if the next input is continuing bundle or new bundle. Every clock cycle?
+  when(cio.req.fire || deliveringReqPayload && !packagingPayload) {
+    Mux(cio.req.fire, 0.U, reqPayloadCounter + reqPayloadWidth.U)
+    deliveringReqPayload := true.B
+    io.req.valid := false.B
+    cio.busy := true.B
+
+    reqPayloadChunk := Cat(cio.req.bits.rs1, cio.req.bits.rs2).asBools
+    for(i <- 0 until reqPayloadWidth){
+      reqPayload(reqPayloadCounter + i.U) := reqPayloadChunk(0 + i)
     }
+
+    packagingPayload := (reqPayloadCounter + reqPayloadWidth.U >= reqInputWidth.U)
   }
 
+  when(packagingPayload) {
+    io.req.bits := reqPayload.asTypeOf(io.req.bits)
+    io.req.valid := true.B
+    deliveringReqPayload := false.B
+    packagingPayload := false.B
+  }
 
+  def loadOutputPayload(payload: UInt, output: UInt): Unit = {
+    val payloadLen = payload.getWidth
+    val availableLen = output.getWidth
+    if(availableLen < payloadLen)
+      new Exception(s"Not enough payload! Available: $availableLen. Required: $payloadLen")
+
+    output := (if (payloadLen == availableLen) payload else Cat(0.U((availableLen - payloadLen).W), payload))
+  }
 }
