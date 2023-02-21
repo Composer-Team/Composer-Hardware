@@ -5,21 +5,19 @@ import chisel3._
 import chisel3.util._
 import composer.MaximumTransactionLength
 import composer.MemoryStreams.Loaders.CScratchpadPackedSubwordLoader
-import composer.common.on_negEdge
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 
 import scala.annotation.tailrec
 
-class CScratchpadAccessBundle(supportWriteback: Boolean,
-                              scReqBits: Int, dataWidthBits: Int) extends Bundle {
+class CScratchpadAccessBundle(scReqBits: Int, dataWidthBits: Int) extends Bundle {
   // note the flipped
   val readReq = Flipped(ValidIO(UInt(scReqBits.W)))
   val readRes = ValidIO(UInt(dataWidthBits.W))
-  val writeReq = if (supportWriteback) Some(Flipped(ValidIO(new Bundle() {
-    val addr = UInt(scReqBits.W)
-    val data = UInt(dataWidthBits.W)
-  }))) else None
+  val writeReq = Flipped(ValidIO(new Bundle() {
+      val addr = UInt(scReqBits.W)
+      val data = UInt(dataWidthBits.W)
+    }))
 }
 
 class CScratchpadInitReqIO(mem_out: TLBundle, nDatas: Int, maxTxLen: Int) extends Bundle {
@@ -84,7 +82,7 @@ class CScratchpadImp(supportWrite: Boolean,
     else nestPipeline(RegNext(a), depth - 1)
   }
 
-  val access = IO(new CScratchpadAccessBundle(supportWrite, scReqBits, dataWidthBits))
+  val access = IO(new CScratchpadAccessBundle(scReqBits, dataWidthBits))
   val req = IO(new CScratchpadInitReqIO(mem_out, nDatas, supportReadLength))
 
 
@@ -224,8 +222,8 @@ class CScratchpadImp(supportWrite: Boolean,
   }
 
   if (supportWrite) {
-    when(access.writeReq.get.valid) {
-      mem.write(access.writeReq.get.bits.addr, access.writeReq.get.bits.data)
+    when(access.writeReq.valid) {
+      mem.write(access.writeReq.bits.addr, access.writeReq.bits.data)
     }
   }
 }

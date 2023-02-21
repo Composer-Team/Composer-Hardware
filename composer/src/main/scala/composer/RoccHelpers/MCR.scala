@@ -116,8 +116,8 @@ class MCRFile(numRegs: Int)(implicit p: Parameters) extends LazyModule {
       // 40b address
       address = List(AddressSet(p(MMIOBaseAddress), p(AXILSlaveAddressMask))),
       regionType = RegionType.UNCACHED,
-      supportsWrite = TransferSizes(1, 4),
-      supportsRead = TransferSizes(1, 4)
+      supportsWrite = TransferSizes(4),
+      supportsRead = TransferSizes(4)
     )),
     beatBytes = 4
   )))
@@ -145,6 +145,8 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
   val writeId = Reg(UInt(in.aw.bits.id.getWidth.W))
   val wStrb = Reg(UInt(io.mcr.wstrb.getWidth.W))
   val wData = Reg(UInt(in.w.bits.data.getWidth.W))
+
+  println("id is width " + in.aw.bits.id.getWidth)
 
   val readState = RegInit(sReadIdle)
   val readAddr = Reg(UInt(8.W))

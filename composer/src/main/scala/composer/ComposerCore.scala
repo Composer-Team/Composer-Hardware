@@ -252,6 +252,8 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     wire.payload2 := payload2
     wire.pack()
   }
+
+  def addrBits: Int = log2Up(p(ExtMem).get.master.size)
 }
 
 class ComposerSystemIO(implicit p: Parameters) extends Bundle {
