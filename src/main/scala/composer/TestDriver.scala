@@ -1,17 +1,11 @@
-package design
+package composer
 
 import chipsalliance.rocketchip.config.Config
 import chisel3.stage.PrintFullStackTraceAnnotation
-import design.machsuite.Gemm.{GemmTestF1, GemmTestF1Big}
-import design.unit.{exampleConfig, exampleConfigKria}
-import firrtl.annotations.DeletedAnnotation
 import freechips.rocketchip.system._
 import firrtl.stage.FirrtlMain
 
-import java.io.FileWriter
-import java.io.{File,FileInputStream,FileOutputStream}
-
-object Composer {
+object TestDriver {
   def buildConfig(config: Config): Unit = {
     val c_dir = System.getProperty("user.dir")
     val hw_idr = c_dir + "/vsim/generated-src/"
@@ -36,23 +30,4 @@ object Composer {
         ),
       annotations = Seq(PrintFullStackTraceAnnotation))
   }
-}
-
-object GemmDriver extends App {
-  Composer.buildConfig(new GemmTestF1)
-}
-//
-//object GemmBigger extends App {
-//  Composer.buildConfig(new GemmTestF1Bigger)
-//}
-object GemmBig extends App {
-  Composer.buildConfig(new GemmTestF1Big)
-}
-
-object TestDriver extends App {
-  Composer.buildConfig(new exampleConfig)
-}
-
-object TestDriverKria extends App {
-  Composer.buildConfig(new exampleConfigKria)
 }

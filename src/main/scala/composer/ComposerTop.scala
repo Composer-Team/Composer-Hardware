@@ -101,8 +101,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     None
   }
 
-  // TODO think about IDs overlapping....
-
   // We have to share shell DDR ports with DMA bus (which is AXI4). Use RocketChip utils to do that instead of the
   // whole shebang with instantiating strange encrypted Xilinx IPs'
 
@@ -114,8 +112,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       := AXI4Deinterleaver(64)
       := AXI4Buffer()
       := TLToAXI4()
-      // TODO CHECK WITH LISA - This component shrinks TL transactions down to 32B at a time, allowing less resource
-      //  usage in readers/writers?
       := TLWidthWidget(64)
       := m)
   }

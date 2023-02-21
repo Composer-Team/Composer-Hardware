@@ -24,7 +24,7 @@ abstract class WidgetModule(outer: Widget) extends LazyModuleImp(outer) {
   // TODO: use this to get the nastidatabits
   //  val (ctrl, edge) =  outer.node.in
 
-  val nastiXDataBits = 32
+  val nastiXDataBits = outer.node.in(0)._1.r.bits.data.getWidth
 
   var _finalized = false
   val crRegistry = new MCRFileMap()
@@ -128,7 +128,6 @@ abstract class WidgetModule(outer: Widget) extends LazyModuleImp(outer) {
   def printCRs(ostream: Option[FileWriter] = None): Unit = crRegistry.printCRs(ostream)
 }
 
-// TODO: Need to handle names better; try and stick ctrl IO elaboration in here,
 // instead of relying on the widget writer
 object Widget {
   def apply[T <: Widget](m: => T, wName: String): T = {

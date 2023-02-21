@@ -65,7 +65,7 @@ class WithAWSMem(nMemoryChannels: Int) extends Config((_, _, _) => {
   // TODO this can be tuned
   case CXbarMaxDegree => 32
   case HasDiscreteMemory => true
-  case AXILSlaveAddressMask => 0xFFFF
+  case AXILSlaveAddressMask => 0xFFFFL
   case MMIOBaseAddress => 0L
 })
 
@@ -87,10 +87,6 @@ class WithKriaMem extends Config((_, _, _) => {
 })
 
 class WithNoMem extends WithAWSMem(1)
-
-
-// TODO work DMA into Trait
-// TODO work Kria Memory (4GB) into Trait
 
 class WithComposer(maximumTxLengthBytes: Int = 1 << 14) extends Config((site, _, _) => {
   case ComposerSystemsKey => Seq()
