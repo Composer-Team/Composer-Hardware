@@ -86,7 +86,10 @@ abstract case class CChannelParams(name: String, nChannels: Int, channelType: CC
 class CReadChannelParams(name: String, nChannels: Int, val maxInFlightTxs: Int = 1, location: String = "Mem") extends CChannelParams(name, nChannels, CChannelType.ReadChannel, location)
 
 object CReadChannelParams {
-  def apply(name: String, nChannels: Int, maxInFlightTxs: Int = 1, location: String = "Mem"): CReadChannelParams =
+  def apply(name: String,
+            nChannels: Int,
+            maxInFlightTxs: Int = 1,
+            location: String = "Mem"): CReadChannelParams =
     new CReadChannelParams(name, nChannels, maxInFlightTxs, location)
 }
 
@@ -98,7 +101,10 @@ object CReadChannelParams {
   * @param maxInFlightTxs maximum number of AXI/TileLink memory transactions can be inflight per writer module at once
   * @param location       location of access
   */
-class CWriteChannelParams(name: String, nChannels: Int, val maxInFlightTxs: Int = 2, location: String = "Mem") extends CChannelParams(name, nChannels, CChannelType.WriteChannel, location)
+class CWriteChannelParams(name: String,
+                          nChannels: Int,
+                          val maxInFlightTxs: Int = 2,
+                          location: String = "Mem") extends CChannelParams(name, nChannels, CChannelType.WriteChannel, location)
 
 object CWriteChannelParams {
   def apply(name: String, nChannels: Int, maxInFlightTxs: Int = 2, location: String = "Mem"): CWriteChannelParams =
@@ -133,7 +139,9 @@ class CScratchpadChannelParams(name: String,
                                val specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked)
   extends CChannelParams(name, nChannels = 1, channelType = CChannelType.Scratchpad) {
   private[composer] def make(implicit p: Parameters): CScratchpad = {
-    new CScratchpad(supportWriteback, dataWidthBits, nDatas, latency, supportReadLength, specialization)
+    new CScratchpad(
+      supportWriteback,
+      dataWidthBits, nDatas, latency, supportReadLength, specialization)
   }
 }
 

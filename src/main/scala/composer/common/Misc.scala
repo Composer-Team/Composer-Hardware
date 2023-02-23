@@ -3,8 +3,7 @@ package composer.common
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import composer.{CoreIDLengthKey, SystemIDLengthKey}
-import freechips.rocketchip.tile.{RoCCResponse, XLen}
+import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 
 /**
   * A small register-based memory providing an easy interface for setting
@@ -72,11 +71,11 @@ class ComposerRoccCommand()(implicit p: Parameters) extends Bundle {
     val xs2 = Bool()
     val opcode = UInt(7.W)
 
-    val system_id = UInt(p(SystemIDLengthKey).W)
-    val funct = UInt((7 - p(SystemIDLengthKey)).W)
+    val system_id = UInt(SystemIDLengthKey.W)
+    val funct = UInt((7 - SystemIDLengthKey).W)
   }
-  val core_id = UInt(p(CoreIDLengthKey).W)
-  val payload1 = UInt((64 - p(CoreIDLengthKey)).W)
+  val core_id = UInt(CoreIDLengthKey.W)
+  val payload1 = UInt((64 - CoreIDLengthKey).W)
   val payload2 = UInt(64.W)
 
   def pack(bufferToPow2: Boolean = true, withRoutingPayload: Option[UInt] = None): UInt = {
@@ -99,12 +98,10 @@ object ComposerRoccCommand {
   def apply(a: UInt)(implicit p: Parameters): ComposerRoccCommand = {
     val b = Wire(new ComposerRoccCommand())
     b.payload2 := a(63, 0)
-    val coreId_len = p(CoreIDLengthKey)
-    val sysId_len = p(SystemIDLengthKey)
-    b.payload1 := a(127 - coreId_len, 64)
-    b.core_id := a(127, 128 - coreId_len)
-    b.inst.funct := a(134 - sysId_len, 128)
-    b.inst.system_id := a(134, 135 - sysId_len)
+    b.payload1 := a(127 - CoreIDLengthKey, 64)
+    b.core_id := a(127, 128 - CoreIDLengthKey)
+    b.inst.funct := a(134 - SystemIDLengthKey, 128)
+    b.inst.system_id := a(134, 135 - SystemIDLengthKey)
     b.inst.opcode := a(141, 135)
     b.inst.xs2 := a(142)
     b.inst.xs1 := a(143)
@@ -119,15 +116,15 @@ object ComposerRoccCommand {
 }
 
 class ComposerRoccUserResponse()(implicit p: Parameters) extends Bundle {
-  val data = UInt((64 - p(SystemIDLengthKey)).W)
+  val data = UInt((64 - SystemIDLengthKey).W)
   val rd = UInt(5.W)
 }
 
 class ComposerRoccResponse()(implicit p: Parameters) extends Bundle {
   val rd = UInt(5.W)
-  val system_id = UInt(p(SystemIDLengthKey).W)
-  val core_id = UInt(p(CoreIDLengthKey).W)
-  val data = UInt((59 - p(SystemIDLengthKey) - p(CoreIDLengthKey)).W)
+  val system_id = UInt(SystemIDLengthKey.W)
+  val core_id = UInt(CoreIDLengthKey.W)
+  val data = UInt((59 - SystemIDLengthKey - CoreIDLengthKey).W)
 
   def pack(): UInt = {
     Cat(system_id, core_id, rd, data)
@@ -138,16 +135,14 @@ object ComposerRoccResponse {
   def apply(a: UInt)(implicit p: Parameters): ComposerRoccResponse = {
     // unpack from @pack
     val wire = Wire(new ComposerRoccResponse())
-    val syswid = p(SystemIDLengthKey)
-    val corewid = p(CoreIDLengthKey)
-    wire.data := a(58 - syswid - corewid, 0)
-    wire.rd := a(63 - syswid - corewid, 59 - syswid - corewid)
-    wire.core_id := a(63 - syswid, 64 - syswid - corewid)
-    wire.system_id := a(63, 64 - syswid)
+    wire.data := a(58 - SystemIDLengthKey - CoreIDLengthKey, 0)
+    wire.rd := a(63 - SystemIDLengthKey - CoreIDLengthKey, 59 - SystemIDLengthKey - CoreIDLengthKey)
+    wire.core_id := a(63 - SystemIDLengthKey, 64 - SystemIDLengthKey - CoreIDLengthKey)
+    wire.system_id := a(63, 64 - SystemIDLengthKey)
     wire
   }
 
-  def getDataWidth(implicit p: Parameters): Int = 59 - p(SystemIDLengthKey) - p(CoreIDLengthKey)
+  def getDataWidth(implicit p: Parameters): Int = 59 - SystemIDLengthKey - CoreIDLengthKey
 
   val getWidthBits: Int = 64
   val getWidthBytes: Int = getWidthBits / 8

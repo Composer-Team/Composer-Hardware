@@ -24,7 +24,6 @@ class AXILHubModule(outer: AXILHub)(implicit p: Parameters) extends LazyModuleIm
     val rocc_in = Decoupled(new RoCCCommand)
     val rocc_out = Flipped(Decoupled(new RoCCResponse))
   })
-  val axil_aggregator = outer.axil_aggregator.module
   val axil_widget = outer.axil_widget.module
 
   val axil_rocc_converter = Module(new AXILRoccConverter)
@@ -34,9 +33,5 @@ class AXILHubModule(outer: AXILHub)(implicit p: Parameters) extends LazyModuleIm
   rocc_axil_converter.io.rocc <> io.rocc_out
   axil_rocc_converter.io.in <> axil_widget.io.cmds
   io.rocc_in <> axil_rocc_converter.io.rocc
-
-  axil_aggregator.io.write_in <> axil_widget.io.mem_in
-  axil_aggregator.io.read_in <> axil_widget.io.read_addrs
-  axil_widget.io.mem_out <> axil_aggregator.io.read_out
 
 }

@@ -3,6 +3,7 @@ package composer
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.experimental.{ChiselEnum, EnumFactory}
 import chisel3.util.log2Up
+import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import composer.RoccHelpers.MCRFileMap
 import freechips.rocketchip.subsystem.ExtMem
 
@@ -41,8 +42,8 @@ object CppGeneration {
       "#include <composer/rocc_cmd.h>\n" +
       "#include <cinttypes>\n" +
       "#ifndef COMPOSER_ALLOCATOR_GEN\n" +
-      "#define COMPOSER_ALLOCATOR_GEN\n")
-
+      "#define COMPOSER_ALLOCATOR_GEN\n" +
+      s"const int AXIL_BUS_WIDTH = ${p(AXILSlaveBeatBytes)*8};\n")
     if (!p(HasDiscreteMemory)) f.write("#ifdef SIM\n")
     f.write("#define COMPOSER_USE_CUSTOM_ALLOC\n" +
       "#define NUM_DDR_CHANNELS " + mem.nMemoryChannels + "\n" +
@@ -152,8 +153,8 @@ object CppGeneration {
         |""".stripMargin)
 
 
-    f.write(s"static const uint8_t system_id_bits = ${p(SystemIDLengthKey)};\n")
-    f.write(s"static const uint8_t core_id_bits = ${p(CoreIDLengthKey)};\n")
+    f.write(s"static const uint8_t system_id_bits = $SystemIDLengthKey;\n")
+    f.write(s"static const uint8_t core_id_bits = $CoreIDLengthKey;\n")
     //    f.write(//s"static const uint8_t numChannelSelectionBits = ${p(ChannelSelectionBitsKey)}," +
     //      s"static const uint8_t channelTransactionLenBits = ${log2Up(p(MaxChannelTransactionLenKey))};\n")
     f.write(s"static const composer::composer_pack_info pack_cfg(system_id_bits, core_id_bits);\n")

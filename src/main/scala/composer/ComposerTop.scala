@@ -60,11 +60,10 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   val S00_AXI = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     masters = Seq(AXI4MasterParameters(
       name = "S00_AXI",
-      //      aligned = false, // could be true?
+      aligned = true,
       maxFlight = Some(1),
       id = IdRange(0, 1 << 16)
     )),
-    //    userBits = 0
   )))
   // AXI4 DRAM Ports
   val AXI_MEM = AXI4SlaveNode(Seq.tabulate(nMemChannels) { channel =>

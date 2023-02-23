@@ -3,6 +3,7 @@ package composer
 import chipsalliance.rocketchip.config._
 import chisel3.util._
 import chisel3._
+import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import composer.MemoryStreams._
 import composer.RoccHelpers.{ComposerConsts, ComposerFunc}
 import composer.TLManagement.{TLClientModule, TLManagerModule}
@@ -159,8 +160,8 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   }
 
   val internalReturnDestinations = if (p(RequireInternalCommandRouting)) Some(VecInit(Seq.fill(outer.nCores)(Reg(new Bundle() {
-    val sys = UInt(p(SystemIDLengthKey).W)
-    val core = UInt(p(CoreIDLengthKey).W)
+    val sys = UInt(SystemIDLengthKey.W)
+    val core = UInt(CoreIDLengthKey.W)
   })))) else None
 
   if (p(RequireInternalCommandRouting)) {
@@ -168,10 +169,10 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     // the response must go to that same core, and if from software then back to software. Mark this bit whenever a
     // command is processed to remember where it came from
     val routingPayload = outer.internalCommandManager.get.in(0)._1.a.bits.data(
-      ComposerRoccCommand.packLengthBytes * 8 + p(SystemIDLengthKey) + p(CoreIDLengthKey) - 1,
+      ComposerRoccCommand.packLengthBytes * 8 + SystemIDLengthKey + CoreIDLengthKey - 1,
       ComposerRoccCommand.packLengthBytes * 8)
-    val fromCore = routingPayload(p(CoreIDLengthKey) - 1, 0)
-    val fromSys = routingPayload(p(CoreIDLengthKey) + p(SystemIDLengthKey) - 1, p(CoreIDLengthKey))
+    val fromCore = routingPayload(CoreIDLengthKey - 1, 0)
+    val fromSys = routingPayload(CoreIDLengthKey + SystemIDLengthKey - 1, CoreIDLengthKey)
     val intCmd = icmAsCmdSrc.get
 
     // arbiter is choosing this one

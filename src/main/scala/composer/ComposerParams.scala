@@ -9,22 +9,26 @@ import freechips.rocketchip.rocket.PgLevels
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
 
+// Parameters describing platform-specific things
 case object MMIOBaseAddress extends Field[Long]
 case object HasDiscreteMemory extends Field[Boolean]
+case object HasDMA extends Field[Option[Int]]
+case object HasAXILExternalMMIO extends Field[Boolean]
+case object AXILSlaveAddressMask extends Field[Long]
+case object AXILSlaveBeatBytes extends Field[Int]
+
+// Composer-system parameters
 case object ComposerSystemsKey extends Field[List[ComposerSystemParams]]
-case object SystemIDLengthKey extends Field[Int]
-case object CoreIDLengthKey extends Field[Int]
+case object SystemName2IdMapKey extends Field[Map[String, Int]]
+
+// Architecture parameters
 //case object MaxChannelTransactionLenKey extends Field[Int]
 case object TLInterconnectWidthBytes extends Field[Int]
 // if we support a dedicated DMA port, provide the number of ID bits
-case object HasDMA extends Field[Option[Int]]
-case object HasAXILExternalMMIO extends Field[Boolean]
 case object CXbarMaxDegree extends Field[Int]
 case object MaximumTransactionLength extends Field[Int]
-case object SystemName2IdMapKey extends Field[Map[String, Int]]
 case object RequireInternalCommandRouting extends Field[Boolean]
-
-case object AXILSlaveAddressMask extends Field[Long]
+case object CmdRespBusWidthBytes extends Field[Int]
 
 case class ComposerCoreParams(memoryChannelParams: List[CChannelParams] = List(),
                               core_id: Int = 0, // for internal use
@@ -48,7 +52,7 @@ case class ComposerSystemParams(nCores: Int,
                                )
 
 
-class WithAWSMem(nMemoryChannels: Int) extends Config((_, _, _) => {
+class WithAWSPlatform(nMemoryChannels: Int) extends Config((_, _, _) => {
   // why did this ever become 128? It's 2X the bus width... That doesn't seem to make much sense...
   //  case CacheBlockBytes => 128
   case ExtMem =>
@@ -67,9 +71,10 @@ class WithAWSMem(nMemoryChannels: Int) extends Config((_, _, _) => {
   case HasDiscreteMemory => true
   case AXILSlaveAddressMask => 0xFFFFL
   case MMIOBaseAddress => 0L
+  case AXILSlaveBeatBytes => 4
 })
 
-class WithKriaMem extends Config((_, _, _) => {
+class WithKriaPlatform extends Config((_, _, _) => {
   case ExtMem => Some(MemoryPortParams(MasterPortParams(
     base = 0,
     size = 1L << 49,
@@ -84,9 +89,8 @@ class WithKriaMem extends Config((_, _, _) => {
   case CXbarMaxDegree => 8
   case HasAXILExternalMMIO => false // use full AXI4
   case HasDiscreteMemory => false
+  case AXILSlaveBeatBytes => 16
 })
-
-class WithNoMem extends WithAWSMem(1)
 
 class WithComposer(maximumTxLengthBytes: Int = 1 << 14) extends Config((site, _, _) => {
   case ComposerSystemsKey => Seq()
@@ -98,8 +102,7 @@ class WithComposer(maximumTxLengthBytes: Int = 1 << 14) extends Config((site, _,
   // in elaboration
   case PgLevels => 5
   case XLen => 64 // Applies to all cores
-  case SystemIDLengthKey => 4
-  case CoreIDLengthKey => 8
+  case CmdRespBusWidthBytes => 4
   case MaximumTransactionLength =>
     require(maximumTxLengthBytes <= (1 << 14), "Maximum transaction length supported by AXI is 2^14 B. ")
     maximumTxLengthBytes
@@ -146,3 +149,8 @@ class WithComposer(maximumTxLengthBytes: Int = 1 << 14) extends Config((site, _,
   //  case ForceFanoutKey => ForceFanoutParams(false, false, false, false, false)
   //------------------------------------------------------
 })
+
+object ComposerParams {
+  val SystemIDLengthKey = 4
+  val CoreIDLengthKey = 8
+}

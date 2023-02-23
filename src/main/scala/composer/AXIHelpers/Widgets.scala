@@ -24,17 +24,13 @@ abstract class WidgetModule(outer: Widget) extends LazyModuleImp(outer) {
   // TODO: use this to get the nastidatabits
   //  val (ctrl, edge) =  outer.node.in
 
-  val nastiXDataBits = outer.node.in(0)._1.r.bits.data.getWidth
+  val nastiXDataBits = p(AXILSlaveBeatBytes) * 8
 
   var _finalized = false
   val crRegistry = new MCRFileMap()
 
   def numRegs = crRegistry.numRegs
 
-  val customSize: Option[BigInt] = None
-  // Default case we set the region to be large enough to hold the CRs
-  lazy val memRegionSize = customSize.getOrElse(
-    BigInt(1 << log2Up(numRegs * (nastiXDataBits / 8))))
 
   protected var wName: Option[String] = None
 
@@ -138,59 +134,6 @@ object Widget {
     w
   }
 }
-
-/*object WidgetRegion {
-  def apply(start: BigInt, size: BigInt) = {
-    require(isPow2(size))
-    MemRange(start, size, MemAttr(AddrMapProt.RW))
-  }
-}
-
-trait HasWidgets {
-  private var _finalized = false
-  private val widgets = ArrayBuffer[Widget]()
-  private val name2inst = HashMap[String, Widget]()
-  private lazy val addrMap = new AddrMap({
-    val (_, entries) = (sortedWidgets foldLeft (BigInt(0), Seq[AddrMapEntry]())){
-      case ((start, es), w) =>
-        val name = w.getWName
-        val size = w.memRegionSize
-        (start + size, es :+ AddrMapEntry(name, WidgetRegion(start, size)))
-    }
-    entries
-  })
-
-  def addWidget[T <: Widget](m: => T, wName: String): T = {
-    val w = Widget(m, wName)
-    assert(!name2inst.contains(wName), "Widget name: $wName already allocated")
-    widgets += w
-    name2inst += (wName -> w)
-    w
-  }
-
-  private def sortedWidgets = widgets.toSeq.sortWith(_.memRegionSize > _.memRegionSize)
-
-  def genHeader(sb: StringBuilder)(implicit channelWidth: Int) {
-    widgets foreach ((w: Widget) => w.genHeader(addrMap(w.getWName).start >> log2Up(channelWidth/8), sb))
-  }
-
-  def printWidgets {
-    widgets foreach ((w: Widget) => println(w.getWName))
-  }
-
-  def getCRAddr(wName: String, crName: String)(implicit channelWidth: Int): BigInt = {
-    val widget = name2inst.get(wName).getOrElse(
-      throw new RuntimeException("Could not find Widget: $wName"))
-    getCRAddr(widget, crName)
-  }
-
-  def getCRAddr(w: Widget, crName: String)(implicit channelWidth: Int): BigInt = {
-    // TODO: Deal with byte vs word addresses && don't use a name in the hash?
-    val base = (addrMap(w.getWName).start >> log2Up(channelWidth/8))
-    base + w.getCRAddr(crName)
-  }
-}*/
-
 object Pulsify {
   def apply(in: Bool, pulseLength: Int): Unit = {
     require(pulseLength > 0)

@@ -3,6 +3,7 @@ package composer.AXIHelpers
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import composer.{AXILSlaveBeatBytes, CmdRespBusWidthBytes}
 import freechips.rocketchip.amba.axi4.{AXI4MasterNode, AXI4MasterParameters, AXI4MasterPortParameters}
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.subsystem.CacheBlockBytes
@@ -13,7 +14,6 @@ class AXILAggregator(implicit p: Parameters) extends LazyModule {
   // number of in flight commands?
   val numInFlight = 8
   // width of AXI-L bus?
-  val nastiXDataBits = 32
   val node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     masters = Seq(AXI4MasterParameters(
       name = "axil_hub_mem_out",
@@ -28,16 +28,18 @@ class AXILAggregator(implicit p: Parameters) extends LazyModule {
 }
 
 class AXILAggregatorModule(outer: AXILAggregator)(implicit p: Parameters) extends LazyModuleImp(outer) {
+  private val slaveBytes = p(CmdRespBusWidthBytes)
+  private val slaveBits = slaveBytes * 8
+  private val tlBlockBytes = p(CacheBlockBytes)
+
   val io = IO(new Bundle {
-    val write_in = Flipped(Decoupled(UInt(outer.nastiXDataBits.W)))
-    val read_in = Flipped(Decoupled(UInt(outer.nastiXDataBits.W)))
-    val read_out = Decoupled(UInt(outer.nastiXDataBits.W))
+    val write_in = Flipped(Decoupled(UInt(slaveBits.W)))
+    val read_in = Flipped(Decoupled(UInt(slaveBits.W)))
+    val read_out = Decoupled(UInt(slaveBits.W))
   })
 
   val (out, _) = outer.node.out(0)
 
-  private val tlBlockBytes = p(CacheBlockBytes)
-  private val nastiXDataBytes = outer.nastiXDataBits / 8
   private val nastiXAddrBits = out.aw.bits.addr.getWidth
 
   //writes a cacheBlock at a time with one address input
@@ -46,12 +48,12 @@ class AXILAggregatorModule(outer: AXILAggregator)(implicit p: Parameters) extend
   val sIdle :: sWriteHasAddrHigh :: sWriteNeedData :: sWriteSend :: sReadHasAddrHigh :: sReadSendAddr :: Nil = Enum(6)
   val state = RegInit(sIdle)
   val writeAddr = RegInit(0.U(nastiXAddrBits.W))
-  val writeCounter = RegInit(0.U(log2Ceil(tlBlockBytes/nastiXDataBytes).W))
-  val writeData = RegInit(0.U(outer.nastiXDataBits.W))
+  val writeCounter = RegInit(0.U(log2Ceil(tlBlockBytes/p(AXILSlaveBeatBytes)).W))
+  val writeData = RegInit(0.U(slaveBits.W))
   val writeID_low = OHToUInt(writes_onehot)
   val reads = RegInit(0.U(outer.numInFlight.W))
   val reads_onehot = PriorityEncoderOH(~reads)
-  val readCounter = RegInit(0.U(log2Ceil(tlBlockBytes/nastiXDataBytes).W))
+  val readCounter = RegInit(0.U(log2Ceil(tlBlockBytes/slaveBytes).W))
   val readAddr = RegInit(0.U(nastiXAddrBits.W))
   val readID_low = OHToUInt(reads_onehot)
   //high order bits in writeAddr(0)
@@ -90,10 +92,10 @@ class AXILAggregatorModule(outer: AXILAggregator)(implicit p: Parameters) extend
     }
     is (sWriteSend) {
       when (out.aw.fire) {
-        writeAddr := writeAddr + nastiXDataBytes.U
+        writeAddr := writeAddr + slaveBytes.U
       }
       when (out.w.fire) {
-        when (writeCounter === ((tlBlockBytes/nastiXDataBytes) - 1).U) {
+        when (writeCounter === ((tlBlockBytes/slaveBytes) - 1).U) {
           state := sIdle
           writeCounter := 0.U
         }.otherwise {
@@ -110,9 +112,9 @@ class AXILAggregatorModule(outer: AXILAggregator)(implicit p: Parameters) extend
     }
     is (sReadSendAddr) {
       when (out.ar.fire) {
-        readAddr := readAddr + nastiXDataBytes.U
+        readAddr := readAddr + slaveBytes.U
         //this could be simplified to use reduce
-        when (readCounter === ((tlBlockBytes/nastiXDataBytes) - 1).U) {
+        when (readCounter === ((tlBlockBytes/slaveBytes) - 1).U) {
           readCounter := 0.U
           state := sIdle
         }.otherwise {

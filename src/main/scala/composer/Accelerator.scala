@@ -2,6 +2,7 @@ package composer
 
 import chisel3._
 import chisel3.util._
+import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import composer.TLManagement.makeTLMultilayerXbar
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
@@ -79,15 +80,11 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   accCmd.bits.inst.xs2 := cmdRouter.io.out(1).bits.inst.xs2
   accCmd.bits.inst.opcode := cmdRouter.io.out(1).bits.inst.opcode
 
-  val nSystemIDBits = p(SystemIDLengthKey)
-  require(nSystemIDBits <= 7)
-  accCmd.bits.inst.funct := cmdRouter.io.out(1).bits.inst.funct(6-nSystemIDBits, 0)
-  accCmd.bits.inst.system_id := cmdRouter.io.out(1).bits.inst.funct(6, 6-nSystemIDBits+1)
+  accCmd.bits.inst.funct := cmdRouter.io.out(1).bits.inst.funct(6-SystemIDLengthKey, 0)
+  accCmd.bits.inst.system_id := cmdRouter.io.out(1).bits.inst.funct(6, 6-SystemIDLengthKey+1)
 
-  val nCoreIDBits = p(CoreIDLengthKey)
-  require(nCoreIDBits < 64)
-  accCmd.bits.core_id := cmdRouter.io.out(1).bits.rs1(63, 64-nCoreIDBits)
-  accCmd.bits.payload1 := cmdRouter.io.out(1).bits.rs1(63-nCoreIDBits, 0)
+  accCmd.bits.core_id := cmdRouter.io.out(1).bits.rs1(63, 64-CoreIDLengthKey)
+  accCmd.bits.payload1 := cmdRouter.io.out(1).bits.rs1(63-CoreIDLengthKey, 0)
   accCmd.bits.payload2 := cmdRouter.io.out(1).bits.rs2
 
   val system_id = accCmd.bits.inst.system_id

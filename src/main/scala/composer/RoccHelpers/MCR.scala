@@ -3,9 +3,9 @@ package composer.RoccHelpers
 import chisel3._
 import chisel3.util._
 import composer._
-import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 
 import java.io.FileWriter
@@ -63,7 +63,7 @@ class MCRFileMap() {
 
   def printCRs(outStream: Option[FileWriter] = None)(implicit p: Parameters): Unit = {
     regList.zipWithIndex foreach { case (entry, i) =>
-      val addr = i << 2
+      val addr = i << log2Up(p(AXILSlaveBeatBytes))
       require(i < 1024)
       outStream match {
         case a: Some[FileWriter] => a.get.write(s"#define ${entry.name.toUpperCase()} ($addr)\n")
@@ -74,9 +74,9 @@ class MCRFileMap() {
 }
 
 class MCRIO(numCRs: Int)(implicit p: Parameters) extends ParameterizedBundle()(p) {
-  val read = Vec(numCRs, Flipped(Decoupled(UInt(32.W))))
-  val write = Vec(numCRs, Decoupled(UInt(32.W)))
-  val wstrb = Output(UInt(4.W))
+  val read = Vec(numCRs, Flipped(Decoupled(UInt((p(CmdRespBusWidthBytes) * 8).W))))
+  val write = Vec(numCRs, Decoupled(UInt((p(CmdRespBusWidthBytes) * 8).W)))
+  val wstrb = Output(UInt(p(CmdRespBusWidthBytes).W))
 
   def bindReg(reg: RegisterEntry, addr: Int): Unit = {
     if (reg.permissions.writeable) {
@@ -111,17 +111,15 @@ class MCRIO(numCRs: Int)(implicit p: Parameters) extends ParameterizedBundle()(p
 
 class MCRFile(numRegs: Int)(implicit p: Parameters) extends LazyModule {
   require((p(MMIOBaseAddress) & 0x3FFL) == 0)
-  val node = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
-    slaves = Seq(AXI4SlaveParameters(
-      // 40b address
+  val node = TLManagerNode(portParams = Seq(TLSlavePortParameters.v1(
+    managers = Seq(TLSlaveParameters.v1(
       address = List(AddressSet(p(MMIOBaseAddress), p(AXILSlaveAddressMask))),
-      regionType = RegionType.UNCACHED,
-      supportsWrite = TransferSizes(4),
-      supportsRead = TransferSizes(4)
+      supportsGet = TransferSizes(1, p(AXILSlaveBeatBytes)),
+      supportsPutFull = TransferSizes(1, p(AXILSlaveBeatBytes)),
+      supportsPutPartial = TransferSizes(1, p(AXILSlaveBeatBytes))
     )),
-    beatBytes = 4
+    beatBytes = p(CmdRespBusWidthBytes)
   )))
-
   lazy val module = new MCRFileModule(this, numRegs)
 }
 
@@ -132,31 +130,22 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
   })
 
   val logNumRegs = log2Up(numRegs)
-  val lnr_mo = logNumRegs - 1
-
   val (in, _) = outer.node.in(0)
 
-  val sWriteIdle :: sGetWrite :: sDoWrite :: sWriteResp :: sWriteErrorWait :: sWriteErrorWb :: Nil = Enum(6)
-  val sReadIdle :: sGetReadData :: sPublishRead :: sReadError :: Nil = Enum(4)
+  val s_idle :: s_read :: s_read_response :: s_write :: s_write_response :: Nil = Enum(5)
+  val state = RegInit(s_idle)
 
-  val writeState = RegInit(sWriteIdle)
-  val writeAddr = Reg(UInt(8.W))
-  val writeLen = Reg(UInt(in.aw.bits.len.getWidth.W))
-  val writeId = Reg(UInt(in.aw.bits.id.getWidth.W))
-  val wStrb = Reg(UInt(io.mcr.wstrb.getWidth.W))
-  val wData = Reg(UInt(in.w.bits.data.getWidth.W))
+  val address = Reg(UInt(logNumRegs.W))
+  val writeData = Reg(UInt(in.params.dataBits.W))
+  val readData = Reg(UInt(in.params.dataBits.W))
+  val source = Reg(UInt(in.params.sourceBits.W))
+  val strobe = Reg(UInt((in.params.dataBits/8).W))
 
-  println("id is width " + in.aw.bits.id.getWidth)
-
-  val readState = RegInit(sReadIdle)
-  val readAddr = Reg(UInt(8.W))
-  val readLen = Reg(UInt(in.aw.bits.len.getWidth.W))
-  val readID = Reg(UInt(in.ar.bits.id.getWidth.W))
-  val readData = Reg(UInt(in.r.bits.data.getWidth.W))
-
-  in.ar.ready := readState === sReadIdle
-  in.aw.ready := writeState === sWriteIdle
-  in.w.ready := writeState === sGetWrite || writeState === sWriteErrorWait
+  in.a.ready := state === s_idle
+  in.d.bits := DontCare
+  in.d.bits.data := readData
+  in.d.bits.source := source
+  in.d.valid := false.B
 
   // initialize read/write value wires
   io.mcr.read.foreach { rChannel =>
@@ -167,116 +156,44 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
     wChannel.valid := false.B
   }
 
-  io.mcr.write(writeAddr).bits := wData
-  io.mcr.wstrb := wStrb
-  io.mcr.write(writeAddr).valid := writeState === sDoWrite
-
-  in.r.valid := readState === sPublishRead
-  in.r.bits.data := io.mcr.read(readAddr).bits
-  in.r.bits.resp := 0.U
-  in.r.bits.last := readLen === 0.U
-  in.r.bits.id := readID
-
-  in.b.valid := writeState === sWriteResp
-  in.b.bits.resp := 0.U
-
-  switch(writeState) {
-    is(sWriteIdle) {
-      when(in.aw.valid) {
-        writeAddr := (in.aw.bits.addr >> 2)(lnr_mo, 0)
-        writeState := sGetWrite
-        writeLen := in.aw.bits.len
-        // this only actually asserts during simulation. During a real execution, we return errors for each beat instead
-        assert(in.aw.bits.len === 0.U, "Currently only support single word writes")
-        when(in.aw.bits.len =/= 0.U) {
-          writeState := sWriteErrorWait
-        }
-        writeId := in.aw.bits.id
+  // For bus widths > 64, we expect multiple transactions to
+  switch(state) {
+    is(s_idle) {
+      writeData := in.a.bits.data
+      val asbb = log2Up(p(AXILSlaveBeatBytes))
+      address := in.a.bits.address(asbb + log2Up(numRegs) - 1, asbb)
+      state := Mux(in.a.bits.opcode === TLMessages.PutFullData, s_write, s_read)
+      source := in.a.bits.source
+      strobe := in.a.bits.mask
+    }
+    is(s_read) {
+      io.mcr.read(address).ready := true.B
+      readData := io.mcr.read(address).bits
+      when(io.mcr.read(address).fire) {
+        state := s_read_response
       }
     }
-    is(sGetWrite) {
-      when(in.w.fire) {
-        wStrb := in.w.bits.strb
-        wData := in.w.bits.data
-        writeState := sDoWrite
+    is(s_read_response) {
+      in.d.valid := true.B
+      in.d.bits.opcode := TLMessages.AccessAckData
+      // other fields already set above
+      when(in.d.fire) {
+        state := s_idle
       }
     }
-    is(sDoWrite) {
-      io.mcr.write(writeAddr).valid := true.B
-      when(io.mcr.write(writeAddr).fire) {
-        when(writeLen === 0.U) {
-          writeState := sWriteResp
-        } .otherwise {
-          writeLen := writeLen - 1.U
-          // don't increment the address because we're writing to the same register
-        }
+    is(s_write) {
+      val move_on = io.mcr.write(address).ready || (strobe === 0.U)
+      io.mcr.write(address).valid := strobe =/= 0.U
+      io.mcr.write(address).bits := writeData
+      when(move_on) {
+        state := s_write_response
       }
     }
-    is(sWriteResp) {
-      in.b.bits.resp := 0.U // OKAY signal
-      in.b.bits.id := writeId
-      when(in.b.fire) {
-        writeState := sWriteIdle
-      }
-    }
-    is(sWriteErrorWait) {
-      when (in.w.fire) {
-        when (writeLen === 0.U) {
-          writeState := sWriteErrorWb
-        }.otherwise {
-          writeLen := writeLen - 1.U
-        }
-      }
-    }
-    is(sWriteErrorWb) {
-      in.b.bits.resp := 2.U // slave error
-      in.b.valid := true.B
-      when (in.b.fire) {
-        writeState := sWriteIdle
-      }
-    }
-  }
-
-  switch(readState) {
-    is(sReadIdle) {
-      when(in.ar.valid) {
-        readAddr := (in.ar.bits.addr >> 2)(lnr_mo, 0)
-        readState := sGetReadData
-        readLen := in.ar.bits.len
-        readID := in.ar.bits.id
-        assert(in.ar.bits.len === 0.U, "Currently only support single word reads")
-        when (in.ar.bits.len =/= 0.U) {
-          readState := sReadError
-        }
-      }
-    }
-    is (sGetReadData){
-      io.mcr.read(readAddr).ready := true.B
-      when(io.mcr.read(readAddr).fire) {
-        readData := io.mcr.read(readAddr).bits
-        readState := sPublishRead
-      }
-    }
-    is(sPublishRead) {
-      in.r.valid := true.B
-      when(in.r.fire) {
-        when (readLen === 0.U) {
-          readState := sReadIdle
-        }.otherwise {
-          readLen := readLen - 1.U
-        }
-      }
-    }
-    is (sReadError) {
-      in.r.bits.data := DontCare
-      in.r.bits.resp := 2.U // slave error
-      in.r.valid := true.B
-      when(in.r.fire) {
-        when (readLen === 0.U) {
-          readState := sReadIdle
-        }.otherwise {
-          readLen := readLen - 1.U
-        }
+    is(s_write_response) {
+      in.d.valid := true.B
+      in.d.bits.opcode := TLMessages.AccessAck
+      when(in.d.fire) {
+        state := s_idle
       }
     }
   }
