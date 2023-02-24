@@ -2,10 +2,9 @@ package composer
 
 import chisel3._
 import chisel3.util._
-import composer.AXIHelpers.{AXI4Compat, AXILHub}
 import composer.ComposerTop._
 import composer.CppGeneration.genCPPHeader
-import composer.RoccHelpers.RDReserves
+import composer.RoccHelpers.{AXI4Compat, AXILHub, RDReserves}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
@@ -141,17 +140,17 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   cmd_resp_axilhub.node := AXI4Buffer() := S00_AXI
   // connect axil hub to accelerator
 
-  (acc.hostmem
-    := TLFIFOFixer()
-    := TLBuffer()
-    := TLWidthWidget(4) // axil hub width = 4 bytes, adamacc width = 32 bytes
-    := TLBuffer()
-    := AXI4ToTL()
-    //:= AXI4UserYanker()
-    //:= AXI4Fragmenter()
-    //:= AXI4IdIndexer(idBits = log2Ceil(8))
-    := cmd_resp_axilhub.mem_out
-    )
+//  (acc.hostmem
+//    := TLFIFOFixer()
+//    := TLBuffer()
+//    := TLWidthWidget(4) // axil hub width = 4 bytes, adamacc width = 32 bytes
+//    := TLBuffer()
+//    := AXI4ToTL()
+//    //:= AXI4UserYanker()
+//    //:= AXI4Fragmenter()
+//    //:= AXI4IdIndexer(idBits = log2Ceil(8))
+//    := cmd_resp_axilhub.mem_out
+//    )
 
   lazy val module = new TopImpl(this)
 }

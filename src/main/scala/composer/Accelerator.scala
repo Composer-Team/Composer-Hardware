@@ -135,7 +135,7 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
 class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
   val nMemChannels = p(ExtMem).get.nMemoryChannels
 
-  val hostmem = TLIdentityNode()
+//  val hostmem = TLIdentityNode()
   val mem = Seq.fill(nMemChannels) { TLIdentityNode() }
 
   val dummyTL = p.alterPartial({ case TileVisibilityNodeKey => mem.head})
@@ -147,7 +147,7 @@ class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
 
   acc.mems foreach (crossbar := _)
   mem.foreach ( _ := crossbar)
-  crossbar := hostmem
+//  crossbar := hostmem
 
   lazy val module = new ComposerAccSystemModule(this)
 }

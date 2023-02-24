@@ -6,6 +6,7 @@ import chisel3.util.log2Up
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import composer.RoccHelpers.MCRFileMap
 import freechips.rocketchip.subsystem.ExtMem
+import os.Path
 
 import java.io.FileWriter
 
@@ -35,7 +36,9 @@ object CppGeneration {
 
   def genCPPHeader(cr: MCRFileMap, acc: ComposerAcc)(implicit p: Parameters): Unit = {
     // we might have multiple address spaces...
-    val f = new FileWriter("vsim/generated-src/composer_allocator_declaration.h")
+    val path = Path(System.getenv("COMPOSER_ROOT")) / "Composer-Hardware" / "vsim" / "generated-src"
+    os.makeDir.all(path)
+    val f = new FileWriter((path / "composer_allocator_declaration.h").toString())
     val mem = p(ExtMem).get
     f.write("// Automatically generated memory-allocator declaration from Composer-Hardware:CppGeneration\n" +
       "#include <composer/alloc.h>\n" +
@@ -43,7 +46,7 @@ object CppGeneration {
       "#include <cinttypes>\n" +
       "#ifndef COMPOSER_ALLOCATOR_GEN\n" +
       "#define COMPOSER_ALLOCATOR_GEN\n" +
-      s"const int AXIL_BUS_WIDTH = ${p(AXILSlaveBeatBytes)*8};\n")
+      s"#define AXIL_BUS_WIDTH ${p(AXILSlaveBeatBytes)*8}\n")
     if (!p(HasDiscreteMemory)) f.write("#ifdef SIM\n")
     f.write("#define COMPOSER_USE_CUSTOM_ALLOC\n" +
       "#define NUM_DDR_CHANNELS " + mem.nMemoryChannels + "\n" +

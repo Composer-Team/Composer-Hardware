@@ -1,17 +1,14 @@
-package composer.AXIHelpers
+package composer.RoccHelpers
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import composer.AXILSlaveBeatBytes
-import composer.RoccHelpers.MCRFile
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy.LazyModule
-import freechips.rocketchip.tilelink.{TLBuffer, TLFragmenter, TLWidthWidget}
 
 class AXILWidget(implicit p: Parameters) extends Widget()(p) {
   override val crFile = LazyModule(new MCRFile(8)(p))
-  crFile.node := TLFragmenter(8, 8) := TLWidthWidget(p(AXILSlaveBeatBytes)) := TLBuffer() := AXI4ToTL() := AXI4IdIndexer(1) := node
+  crFile.node := AXI4IdIndexer(1) := node
   override lazy val module = new AXILWidgetModule(this)
 }
 

@@ -314,5 +314,5 @@ class exampleConfigKria extends Config(
 
 // Drivers
 object td extends App {
-  TestDriver.buildConfig(new exampleConfig)
+  TestDriver.buildConfig(new exampleConfigKria)
 }

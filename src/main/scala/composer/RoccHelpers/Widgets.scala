@@ -1,8 +1,7 @@
-package composer.AXIHelpers
+package composer.RoccHelpers
 
 import chisel3._
 import chisel3.util._
-import composer.RoccHelpers.{DecoupledSinkEntry, DecoupledSourceEntry, MCRFile, MCRFileMap, Permissions, ReadOnly, ReadWrite, RegisterEntry}
 import composer._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
@@ -24,7 +23,7 @@ abstract class WidgetModule(outer: Widget) extends LazyModuleImp(outer) {
   // TODO: use this to get the nastidatabits
   //  val (ctrl, edge) =  outer.node.in
 
-  val nastiXDataBits = p(AXILSlaveBeatBytes) * 8
+  val nastiXDataBits = 32
 
   var _finalized = false
   val crRegistry = new MCRFileMap()

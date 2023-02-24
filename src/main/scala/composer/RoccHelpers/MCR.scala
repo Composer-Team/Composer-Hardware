@@ -3,6 +3,7 @@ package composer.RoccHelpers
 import chisel3._
 import chisel3.util._
 import composer._
+import freechips.rocketchip.amba.axi4.{AXI4SlaveNode, AXI4SlaveParameters, AXI4SlavePortParameters}
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
@@ -111,17 +112,104 @@ class MCRIO(numCRs: Int)(implicit p: Parameters) extends ParameterizedBundle()(p
 
 class MCRFile(numRegs: Int)(implicit p: Parameters) extends LazyModule {
   require((p(MMIOBaseAddress) & 0x3FFL) == 0)
-  val node = TLManagerNode(portParams = Seq(TLSlavePortParameters.v1(
-    managers = Seq(TLSlaveParameters.v1(
-      address = List(AddressSet(p(MMIOBaseAddress), p(AXILSlaveAddressMask))),
-      supportsGet = TransferSizes(1, p(AXILSlaveBeatBytes)),
-      supportsPutFull = TransferSizes(1, p(AXILSlaveBeatBytes)),
-      supportsPutPartial = TransferSizes(1, p(AXILSlaveBeatBytes))
+//  val node = TLManagerNode(portParams = Seq(TLSlavePortParameters.v1(
+//    managers = Seq(TLSlaveParameters.v1(
+//      address = List(AddressSet(p(MMIOBaseAddress), p(AXILSlaveAddressMask))),
+//      supportsGet = TransferSizes(1, p(AXILSlaveBeatBytes)),
+//      supportsPutFull = TransferSizes(1, p(AXILSlaveBeatBytes)),
+////      supportsPutPartial = TransferSizes(1, p(AXILSlaveBeatBytes))
+//    )),
+//    beatBytes = p(CmdRespBusWidthBytes),
+//  )))
+  val node = AXI4SlaveNode(portParams = Seq(AXI4SlavePortParameters(slaves = Seq(
+    AXI4SlaveParameters(
+      address = Seq(AddressSet(p(MMIOBaseAddress), p(AXILSlaveAddressMask))),
+      supportsRead = TransferSizes(p(AXILSlaveBeatBytes)),
+      supportsWrite = TransferSizes(p(AXILSlaveBeatBytes))
     )),
-    beatBytes = p(CmdRespBusWidthBytes)
-  )))
+  beatBytes = p(AXILSlaveBeatBytes))))
   lazy val module = new MCRFileModule(this, numRegs)
 }
+
+//class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extends LazyModuleImp(outer) {
+//
+//  val io = IO(new Bundle {
+//    val mcr = new MCRIO(numRegs)
+//  })
+//
+//  val logNumRegs = log2Up(numRegs)
+//  val (in, _) = outer.node.in(0)
+//
+//  val s_idle :: s_read :: s_read_response :: s_write :: s_write_response :: Nil = Enum(5)
+//  val state = RegInit(s_idle)
+//
+//  val address = Reg(UInt(logNumRegs.W))
+//  val writeData = Reg(UInt(in.params.dataBits.W))
+//  val readData = Reg(UInt(in.params.dataBits.W))
+//  val source = Reg(UInt(in.params.sourceBits.W))
+//  val strobe = Reg(UInt((in.params.dataBits/8).W))
+//
+//  in.a.ready := false.B
+//  in.d.bits := DontCare
+//  in.d.bits.data := readData
+//  in.d.bits.source := source
+//  in.d.valid := false.B
+//
+//  // initialize read/write value wires
+//  io.mcr.read.foreach { rChannel =>
+//    rChannel.ready := false.B
+//  }
+//  io.mcr.write.foreach { wChannel =>
+//    wChannel.bits := DontCare
+//    wChannel.valid := false.B
+//  }
+//
+//  // For bus widths > 64, we expect multiple transactions to
+//  switch(state) {
+//    is(s_idle) {
+//      in.a.ready := true.B
+//      when (in.a.fire) {
+//        writeData := in.a.bits.data
+//        val asbb = log2Up(p(AXILSlaveBeatBytes))
+//        address := in.a.bits.address(asbb + log2Up(numRegs) - 1, asbb)
+//        val is_write = in.a.bits.opcode === TLMessages.PutFullData || in.a.bits.opcode === TLMessages.PutPartialData
+//        state := Mux(is_write, s_write, s_read)
+//        source := in.a.bits.source
+//        strobe := in.a.bits.mask
+//      }
+//    }
+//    is(s_read) {
+//      io.mcr.read(address).ready := true.B
+//      readData := io.mcr.read(address).bits
+//      when(io.mcr.read(address).fire) {
+//        state := s_read_response
+//      }
+//    }
+//    is(s_read_response) {
+//      in.d.valid := true.B
+//      in.d.bits.opcode := TLMessages.AccessAckData
+//      // other fields already set above
+//      when(in.d.fire) {
+//        state := s_idle
+//      }
+//    }
+//    is(s_write) {
+//      val move_on = io.mcr.write(address).ready || (strobe === 0.U)
+//      io.mcr.write(address).valid := strobe =/= 0.U
+//      io.mcr.write(address).bits := writeData
+//      when(move_on) {
+//        state := s_write_response
+//      }
+//    }
+//    is(s_write_response) {
+//      in.d.valid := true.B
+//      in.d.bits.opcode := TLMessages.AccessAck
+//      when(in.d.fire) {
+//        state := s_idle
+//      }
+//    }
+//  }
+//}
 
 class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extends LazyModuleImp(outer) {
 
@@ -130,22 +218,24 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
   })
 
   val logNumRegs = log2Up(numRegs)
-  val (in, _) = outer.node.in(0)
+  val (in, edge) = outer.node.in(0)
 
-  val s_idle :: s_read :: s_read_response :: s_write :: s_write_response :: Nil = Enum(5)
+  val s_idle :: s_read :: s_read_send :: s_write :: s_write_data :: s_write_response :: Nil = Enum(6)
   val state = RegInit(s_idle)
 
   val address = Reg(UInt(logNumRegs.W))
-  val writeData = Reg(UInt(in.params.dataBits.W))
-  val readData = Reg(UInt(in.params.dataBits.W))
-  val source = Reg(UInt(in.params.sourceBits.W))
-  val strobe = Reg(UInt((in.params.dataBits/8).W))
+  val writeData = Reg(UInt(32.W))
+  val readData = Reg(UInt(32.W))
 
-  in.a.ready := state === s_idle
-  in.d.bits := DontCare
-  in.d.bits.data := readData
-  in.d.bits.source := source
-  in.d.valid := false.B
+  in.ar.ready := false.B
+  in.aw.ready := false.B
+  in.r.valid := false.B
+  in.r.bits.data := readData
+  in.r.bits.id := 0.U
+  in.r.bits.last := true.B
+  in.w.ready := false.B
+  in.b.valid := false.B
+  in.b.bits := DontCare
 
   // initialize read/write value wires
   io.mcr.read.foreach { rChannel =>
@@ -159,40 +249,53 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
   // For bus widths > 64, we expect multiple transactions to
   switch(state) {
     is(s_idle) {
-      writeData := in.a.bits.data
-      val asbb = log2Up(p(AXILSlaveBeatBytes))
-      address := in.a.bits.address(asbb + log2Up(numRegs) - 1, asbb)
-      state := Mux(in.a.bits.opcode === TLMessages.PutFullData, s_write, s_read)
-      source := in.a.bits.source
-      strobe := in.a.bits.mask
-    }
-    is(s_read) {
-      io.mcr.read(address).ready := true.B
-      readData := io.mcr.read(address).bits
-      when(io.mcr.read(address).fire) {
-        state := s_read_response
+      in.aw.ready := true.B
+      in.ar.ready := !in.aw.valid
+
+      when (in.aw.fire) {
+        address := in.aw.bits.addr >> log2Up(p(AXILSlaveBeatBytes))
+        state := s_write_data
+        assert(in.aw.bits.len === 0.U)
+      }
+      when (in.ar.fire) {
+        address := in.ar.bits.addr >> log2Up(p(AXILSlaveBeatBytes))
+        state := s_read
+        assert(in.ar.bits.len === 0.U)
       }
     }
-    is(s_read_response) {
-      in.d.valid := true.B
-      in.d.bits.opcode := TLMessages.AccessAckData
-      // other fields already set above
-      when(in.d.fire) {
-        state := s_idle
+    is(s_write_data) {
+      in.w.ready := true.B
+      when (in.w.fire) {
+        writeData := in.w.bits.data
+        state := s_write
       }
     }
     is(s_write) {
-      val move_on = io.mcr.write(address).ready || (strobe === 0.U)
-      io.mcr.write(address).valid := strobe =/= 0.U
       io.mcr.write(address).bits := writeData
-      when(move_on) {
+      io.mcr.write(address).valid := true.B
+      when (io.mcr.write(address).fire) {
         state := s_write_response
       }
     }
     is(s_write_response) {
-      in.d.valid := true.B
-      in.d.bits.opcode := TLMessages.AccessAck
-      when(in.d.fire) {
+      in.b.valid := true.B
+      in.b.bits.resp := 0.U
+      when (in.b.fire) {
+        state := s_idle
+      }
+    }
+    is(s_read) {
+      io.mcr.read(address).ready := true.B
+      readData := io.mcr.read(address).bits
+      when (io.mcr.read(address).fire) {
+        state := s_read_send
+      }
+    }
+    is(s_read_send) {
+      in.r.valid := true.B
+      in.r.bits.resp := 0.U
+      in.r.bits.data := readData
+      when (in.r.fire) {
         state := s_idle
       }
     }
