@@ -112,15 +112,6 @@ class MCRIO(numCRs: Int)(implicit p: Parameters) extends ParameterizedBundle()(p
 
 class MCRFile(numRegs: Int)(implicit p: Parameters) extends LazyModule {
   require((p(MMIOBaseAddress) & 0x3FFL) == 0)
-//  val node = TLManagerNode(portParams = Seq(TLSlavePortParameters.v1(
-//    managers = Seq(TLSlaveParameters.v1(
-//      address = List(AddressSet(p(MMIOBaseAddress), p(AXILSlaveAddressMask))),
-//      supportsGet = TransferSizes(1, p(AXILSlaveBeatBytes)),
-//      supportsPutFull = TransferSizes(1, p(AXILSlaveBeatBytes)),
-////      supportsPutPartial = TransferSizes(1, p(AXILSlaveBeatBytes))
-//    )),
-//    beatBytes = p(CmdRespBusWidthBytes),
-//  )))
   val node = AXI4SlaveNode(portParams = Seq(AXI4SlavePortParameters(slaves = Seq(
     AXI4SlaveParameters(
       address = Seq(AddressSet(p(MMIOBaseAddress), p(AXILSlaveAddressMask))),
@@ -131,85 +122,6 @@ class MCRFile(numRegs: Int)(implicit p: Parameters) extends LazyModule {
   lazy val module = new MCRFileModule(this, numRegs)
 }
 
-//class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extends LazyModuleImp(outer) {
-//
-//  val io = IO(new Bundle {
-//    val mcr = new MCRIO(numRegs)
-//  })
-//
-//  val logNumRegs = log2Up(numRegs)
-//  val (in, _) = outer.node.in(0)
-//
-//  val s_idle :: s_read :: s_read_response :: s_write :: s_write_response :: Nil = Enum(5)
-//  val state = RegInit(s_idle)
-//
-//  val address = Reg(UInt(logNumRegs.W))
-//  val writeData = Reg(UInt(in.params.dataBits.W))
-//  val readData = Reg(UInt(in.params.dataBits.W))
-//  val source = Reg(UInt(in.params.sourceBits.W))
-//  val strobe = Reg(UInt((in.params.dataBits/8).W))
-//
-//  in.a.ready := false.B
-//  in.d.bits := DontCare
-//  in.d.bits.data := readData
-//  in.d.bits.source := source
-//  in.d.valid := false.B
-//
-//  // initialize read/write value wires
-//  io.mcr.read.foreach { rChannel =>
-//    rChannel.ready := false.B
-//  }
-//  io.mcr.write.foreach { wChannel =>
-//    wChannel.bits := DontCare
-//    wChannel.valid := false.B
-//  }
-//
-//  // For bus widths > 64, we expect multiple transactions to
-//  switch(state) {
-//    is(s_idle) {
-//      in.a.ready := true.B
-//      when (in.a.fire) {
-//        writeData := in.a.bits.data
-//        val asbb = log2Up(p(AXILSlaveBeatBytes))
-//        address := in.a.bits.address(asbb + log2Up(numRegs) - 1, asbb)
-//        val is_write = in.a.bits.opcode === TLMessages.PutFullData || in.a.bits.opcode === TLMessages.PutPartialData
-//        state := Mux(is_write, s_write, s_read)
-//        source := in.a.bits.source
-//        strobe := in.a.bits.mask
-//      }
-//    }
-//    is(s_read) {
-//      io.mcr.read(address).ready := true.B
-//      readData := io.mcr.read(address).bits
-//      when(io.mcr.read(address).fire) {
-//        state := s_read_response
-//      }
-//    }
-//    is(s_read_response) {
-//      in.d.valid := true.B
-//      in.d.bits.opcode := TLMessages.AccessAckData
-//      // other fields already set above
-//      when(in.d.fire) {
-//        state := s_idle
-//      }
-//    }
-//    is(s_write) {
-//      val move_on = io.mcr.write(address).ready || (strobe === 0.U)
-//      io.mcr.write(address).valid := strobe =/= 0.U
-//      io.mcr.write(address).bits := writeData
-//      when(move_on) {
-//        state := s_write_response
-//      }
-//    }
-//    is(s_write_response) {
-//      in.d.valid := true.B
-//      in.d.bits.opcode := TLMessages.AccessAck
-//      when(in.d.fire) {
-//        state := s_idle
-//      }
-//    }
-//  }
-//}
 
 class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extends LazyModuleImp(outer) {
 
@@ -220,19 +132,21 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
   val logNumRegs = log2Up(numRegs)
   val (in, edge) = outer.node.in(0)
 
-  val s_idle :: s_read :: s_read_send :: s_write :: s_write_data :: s_write_response :: Nil = Enum(6)
+  val s_idle :: s_read :: s_read_send :: s_read_send_blanks :: s_write :: s_write_data :: s_write_response :: Nil = Enum(6)
   val state = RegInit(s_idle)
 
   val address = Reg(UInt(logNumRegs.W))
   val writeData = Reg(UInt(32.W))
   val readData = Reg(UInt(32.W))
+  val opLen = Reg(UInt(8.W))
+  val opvalid = Reg(Bool())
 
   in.ar.ready := false.B
   in.aw.ready := false.B
   in.r.valid := false.B
   in.r.bits.data := readData
   in.r.bits.id := 0.U
-  in.r.bits.last := true.B
+  in.r.bits.last := false.B
   in.w.ready := false.B
   in.b.valid := false.B
   in.b.bits := DontCare
@@ -255,11 +169,15 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
       when (in.aw.fire) {
         address := in.aw.bits.addr >> log2Up(p(AXILSlaveBeatBytes))
         state := s_write_data
+        opLen := in.aw.bits.len
+        opvalid := true.B
         assert(in.aw.bits.len === 0.U)
       }
       when (in.ar.fire) {
         address := in.ar.bits.addr >> log2Up(p(AXILSlaveBeatBytes))
         state := s_read
+        opLen := in.ar.bits.len
+        opvalid := true.B
         assert(in.ar.bits.len === 0.U)
       }
     }
@@ -272,9 +190,15 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
     }
     is(s_write) {
       io.mcr.write(address).bits := writeData
-      io.mcr.write(address).valid := true.B
-      when (io.mcr.write(address).fire) {
-        state := s_write_response
+      val go = io.mcr.write(address).ready || !opvalid
+      io.mcr.write(address).valid := opvalid
+      when (go) {
+        opLen := opLen - 1.U
+        when (opLen === 0.U) {
+          state := s_write_response
+        }.otherwise {
+          state := s_write_data
+        }
       }
     }
     is(s_write_response) {
@@ -285,9 +209,10 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
       }
     }
     is(s_read) {
-      io.mcr.read(address).ready := true.B
+      io.mcr.read(address).ready := opvalid
       readData := io.mcr.read(address).bits
-      when (io.mcr.read(address).fire) {
+      when (io.mcr.read(address).fire || !opvalid) {
+        opvalid := false.B
         state := s_read_send
       }
     }
@@ -295,8 +220,10 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
       in.r.valid := true.B
       in.r.bits.resp := 0.U
       in.r.bits.data := readData
+      in.r.bits.last := opLen === 0.U
       when (in.r.fire) {
         state := s_idle
+        opLen := opLen - 1.U
       }
     }
   }
