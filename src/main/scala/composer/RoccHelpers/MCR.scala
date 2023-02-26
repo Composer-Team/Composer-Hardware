@@ -132,7 +132,7 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
   val logNumRegs = log2Up(numRegs)
   val (in, edge) = outer.node.in(0)
 
-  val s_idle :: s_read :: s_read_send :: s_read_send_blanks :: s_write :: s_write_data :: s_write_response :: Nil = Enum(6)
+  val s_idle :: s_read :: s_read_send :: s_write :: s_write_data :: s_write_response :: Nil = Enum(6)
   val state = RegInit(s_idle)
 
   val address = Reg(UInt(logNumRegs.W))
