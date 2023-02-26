@@ -222,7 +222,11 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
       in.r.bits.data := readData
       in.r.bits.last := opLen === 0.U
       when (in.r.fire) {
-        state := s_idle
+        when(opLen === 0.U) {
+          state := s_idle
+        }.otherwise {
+          state := s_read
+        }
         opLen := opLen - 1.U
       }
     }
