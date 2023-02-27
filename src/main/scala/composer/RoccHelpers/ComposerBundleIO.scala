@@ -33,7 +33,6 @@ class ComposerBundleIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2, 
 
   val reqPayloadWidth = Cat(cio.req.bits.rs1, cio.req.bits.rs2).getWidth
   val reqInputWidth = io.req.bits.getWidth
-  val lastStepWidth = reqInputWidth - reqPayloadWidth
   val extendedPayloadWidth = reqPayloadWidth*ceil(reqInputWidth.toDouble/reqPayloadWidth).toInt
 
   var reqPayloadCounter = RegInit(0.U(64.W)) //TODO: Pick Width
@@ -41,10 +40,10 @@ class ComposerBundleIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2, 
   val reqPayloadChunk = VecInit(Seq.fill(reqPayloadWidth)(0.B))
 
   io.req.valid := cio.req.valid
-  cio.req.ready := io.req.ready || deliveringReqPayload && (reqPayloadCounter < reqInputWidth.U)
-
-  when(cio.req.fire) {
-    reqPayloadCounter := (reqPayloadCounter + reqPayloadWidth.U)
+  cio.req.ready := io.req.ready && !deliveringReqPayload
+  //TODO: How do we know if the next input is continuing bundle or new bundle. Every clock cycle?
+  when(cio.req.fire || deliveringReqPayload && !packagingPayload) {
+    Mux(cio.req.fire, 0.U, reqPayloadCounter + reqPayloadWidth.U)
     deliveringReqPayload := true.B
     io.req.valid := false.B
     cio.busy := true.B
@@ -53,14 +52,11 @@ class ComposerBundleIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2, 
     for(i <- 0 until reqPayloadWidth){
       reqPayload(reqPayloadCounter + i.U) := reqPayloadChunk(0 + i)
     }
-  }
 
-  when(deliveringReqPayload) {
-    packagingPayload := (reqPayloadCounter >= reqInputWidth.U)
+    packagingPayload := (reqPayloadCounter + reqPayloadWidth.U >= reqInputWidth.U)
   }
 
   when(packagingPayload) {
-    reqPayloadCounter := 0.U
     io.req.bits := reqPayload.asTypeOf(io.req.bits)
     io.req.valid := true.B
     deliveringReqPayload := false.B

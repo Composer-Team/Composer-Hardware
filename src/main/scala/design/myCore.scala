@@ -12,9 +12,12 @@ import composer.ComposerCoreIO
 // * * * * * * * * * * * * * * * * * * * * * * * * * * Simple ALU Implementation * * * * * * * * * * * * * * * * * * *
 
 class SimpleInput extends Bundle {
-  val op = UInt(2.W)
-  val a = UInt(48.W)
-  val b = UInt(48.W)
+//  val op = UInt(2.W)
+//  val a = UInt(48.W)
+//  val b = UInt(48.W)
+  val op = UInt(8.W)
+  val a = UInt(120.W)
+  val b = UInt(120.W)
 }
 class SimpleOutput extends Bundle {
   val data = UInt(52.W) // TODO: Check size
@@ -61,6 +64,7 @@ class SimpleCore()(implicit p: Parameters, composerCoreParams: ComposerConstruct
   }.elsewhen(state === s_finish) {
     cio.resp.bits.data := result
     cio.resp.valid := true.B
+    cio.busy := false.B
     when(cio.resp.fire) {
       state := s_idle
     }
