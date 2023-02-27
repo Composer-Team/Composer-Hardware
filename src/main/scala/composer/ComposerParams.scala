@@ -89,7 +89,7 @@ class WithKriaPlatform extends Config((_, _, _) => {
   case CXbarMaxDegree => 8
   case HasAXILExternalMMIO => false // use full AXI4
   case HasDiscreteMemory => false
-  case AXILSlaveBeatBytes => 16
+  case AXILSlaveBeatBytes => 4
 })
 
 class WithComposer(maximumTxLengthBytes: Int = 1 << 14) extends Config((site, _, _) => {
