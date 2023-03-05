@@ -144,7 +144,7 @@ object CppGeneration {
         if (sys_id < num_systems - 1) f.write(", ")
       }
       f.write("};\n")
-    } else f.write(s"static const char __composer_channel_map[1][1][1][1] = {{{{-1}}}};\nenum ComposerChannels {};\n")
+    } else f.write(s"static const char __composer_channel_map[1][1][1][1] = {{{{0xFF}}}};\nenum ComposerChannels {};\n")
     f.write(
       """
         |namespace composer {

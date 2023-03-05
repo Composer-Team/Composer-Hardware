@@ -37,7 +37,6 @@ case class DecoupledSourceEntry(node: DecoupledIO[UInt], name: String) extends M
 
 case class RegisterEntry(node: Data, name: String, permissions: Permissions) extends MCRMapEntry
 
-
 class MCRFileMap() {
   // DO NOT put the MMIOs in the first page. For unified memory systems this will result in null pointer dereferences
   // not segfaulting
@@ -110,20 +109,43 @@ class MCRIO(numCRs: Int)(implicit p: Parameters) extends ParameterizedBundle()(p
 
 }
 
-class MCRFile(numRegs: Int)(implicit p: Parameters) extends LazyModule {
+trait MCRFile {
+  def getMCRIO: MCRIO
+}
+
+class MCRFileTL(numRegs: Int)(implicit p: Parameters) extends LazyModule with MCRFile {
   require((p(MMIOBaseAddress) & 0x3FFL) == 0)
-  val node = AXI4SlaveNode(portParams = Seq(AXI4SlavePortParameters(slaves = Seq(
-    AXI4SlaveParameters(
+  val node = TLManagerNode(portParams = Seq(TLSlavePortParameters.v1(
+    managers = Seq(TLSlaveParameters.v1(
       address = Seq(AddressSet(p(MMIOBaseAddress), p(AXILSlaveAddressMask))),
-      supportsRead = TransferSizes(p(AXILSlaveBeatBytes)),
-      supportsWrite = TransferSizes(p(AXILSlaveBeatBytes))
+      supportsPutFull = TransferSizes(1, p(AXILSlaveBeatBytes)),
+      supportsPutPartial = TransferSizes(1, p(AXILSlaveBeatBytes)),
+      supportsGet = TransferSizes(1, p(AXILSlaveBeatBytes))
     )),
-  beatBytes = p(AXILSlaveBeatBytes))))
-  lazy val module = new MCRFileModule(this, numRegs)
+    beatBytes = p(AXILSlaveBeatBytes))
+  ))
+
+  lazy val module = new MCRFileModuleTL(this, numRegs)
+
+  override def getMCRIO: MCRIO = module.io.mcr
+}
+
+class MCRFileAXI(numRegs: Int)(implicit p: Parameters) extends LazyModule with MCRFile {
+  require((p(MMIOBaseAddress) & 0x3FFL) == 0)
+    val node = AXI4SlaveNode(portParams = Seq(AXI4SlavePortParameters(slaves = Seq(
+      AXI4SlaveParameters(
+        address = Seq(AddressSet(p(MMIOBaseAddress), p(AXILSlaveAddressMask))),
+        supportsRead = TransferSizes(p(AXILSlaveBeatBytes)),
+        supportsWrite = TransferSizes(p(AXILSlaveBeatBytes))
+      )),
+    beatBytes = p(AXILSlaveBeatBytes))))
+  lazy val module = new MCRFileModuleAXI(this, numRegs)
+
+  override def getMCRIO: MCRIO = module.io.mcr
 }
 
 
-class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extends LazyModuleImp(outer) {
+class MCRFileModuleAXI(outer: MCRFileAXI, numRegs: Int)(implicit p: Parameters) extends LazyModuleImp(outer) {
 
   val io = IO(new Bundle {
     val mcr = new MCRIO(numRegs)
@@ -166,14 +188,14 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
       in.aw.ready := true.B
       in.ar.ready := !in.aw.valid
 
-      when (in.aw.fire) {
+      when(in.aw.fire) {
         address := in.aw.bits.addr >> log2Up(p(AXILSlaveBeatBytes))
         state := s_write_data
         opLen := in.aw.bits.len
         opvalid := true.B
         assert(in.aw.bits.len === 0.U)
       }
-      when (in.ar.fire) {
+      when(in.ar.fire) {
         address := in.ar.bits.addr >> log2Up(p(AXILSlaveBeatBytes))
         state := s_read
         opLen := in.ar.bits.len
@@ -183,7 +205,7 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
     }
     is(s_write_data) {
       in.w.ready := true.B
-      when (in.w.fire) {
+      when(in.w.fire) {
         writeData := in.w.bits.data
         state := s_write
       }
@@ -192,9 +214,9 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
       io.mcr.write(address).bits := writeData
       val go = io.mcr.write(address).ready || !opvalid
       io.mcr.write(address).valid := opvalid
-      when (go) {
+      when(go) {
         opLen := opLen - 1.U
-        when (opLen === 0.U) {
+        when(opLen === 0.U) {
           state := s_write_response
         }.otherwise {
           state := s_write_data
@@ -204,14 +226,14 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
     is(s_write_response) {
       in.b.valid := true.B
       in.b.bits.resp := 0.U
-      when (in.b.fire) {
+      when(in.b.fire) {
         state := s_idle
       }
     }
     is(s_read) {
       io.mcr.read(address).ready := opvalid
       readData := io.mcr.read(address).bits
-      when (io.mcr.read(address).fire || !opvalid) {
+      when(io.mcr.read(address).fire || !opvalid) {
         opvalid := false.B
         state := s_read_send
       }
@@ -221,7 +243,7 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
       in.r.bits.resp := 0.U
       in.r.bits.data := readData
       in.r.bits.last := opLen === 0.U
-      when (in.r.fire) {
+      when(in.r.fire) {
         when(opLen === 0.U) {
           state := s_idle
         }.otherwise {
@@ -232,3 +254,86 @@ class MCRFileModule(outer: MCRFile, numRegs: Int)(implicit p: Parameters) extend
     }
   }
 }
+
+class MCRFileModuleTL(outer: MCRFileTL, numRegs: Int)(implicit p: Parameters) extends LazyModuleImp(outer) {
+
+  val io = IO(new Bundle {
+    val mcr = new MCRIO(numRegs)
+  })
+
+  val logNumRegs = log2Up(numRegs)
+  val (in, edge) = outer.node.in(0)
+
+  val s_idle :: s_read :: s_read_send :: s_write  :: s_write_response :: Nil = Enum(5)
+  val state = RegInit(s_idle)
+
+  val address = Reg(UInt(logNumRegs.W))
+  val writeData = Reg(UInt(32.W))
+  val readData = Reg(UInt(32.W))
+  val id = Reg(UInt(in.params.sourceBits.W))
+  val opLen = Reg(UInt(8.W))
+  val param = Reg(UInt(in.params.sizeBits.W))
+
+
+  // initialize read/write value wires
+  io.mcr.read.foreach { rChannel =>
+    rChannel.ready := false.B
+  }
+  io.mcr.write.foreach { wChannel =>
+    wChannel.bits := DontCare
+    wChannel.valid := false.B
+  }
+
+  in.a.ready := false.B
+  in.d.valid := false.B
+  in.d.bits := DontCare
+
+  // For bus widths > 64, we expect multiple transactions to
+  switch(state) {
+    is(s_idle) {
+      in.a.ready := true.B
+      when (in.a.fire) {
+        id := in.a.bits.source
+        param := in.a.bits.size
+        val start = log2Up(p(AXILSlaveBeatBytes))
+        val end = start + log2Up(numRegs) - 1
+        println(p(AXILSlaveBeatBytes))
+        address := in.a.bits.address(end, start)
+        when (in.a.bits.opcode === TLMessages.PutFullData || in.a.bits.opcode === TLMessages.PutPartialData) {
+          state := s_write
+          writeData := in.a.bits.data(31, 0)
+        }
+        when (in.a.bits.opcode === TLMessages.Get) {
+          state := s_read
+        }
+      }
+    }
+    is(s_write) {
+      io.mcr.write(address).bits := writeData
+      io.mcr.write(address).valid := true.B
+      state := s_write_response
+    }
+    is(s_write_response) {
+      in.d.valid := true.B
+      in.d.bits := edge.AccessAck(id, param)
+      when (in.d.fire) {
+        state := s_idle
+      }
+    }
+    is(s_read) {
+      io.mcr.read(address).ready := true.B
+      readData := io.mcr.read(address).bits
+      when(io.mcr.read(address).fire) {
+        state := s_read_send
+      }
+    }
+    is(s_read_send) {
+      in.d.valid := true.B
+      in.d.bits := edge.AccessAck(id, param, readData)
+      when (in.d.fire) {
+        state := s_idle
+      }
+    }
+  }
+}
+
