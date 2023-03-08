@@ -3,7 +3,7 @@ package composer
 import chisel3._
 import chisel3.util._
 import composer.MemoryStreams._
-import composer.RoccHelpers.{ComposerConsts, ComposerFunc, ComposerOpcode}
+import composer.RoccHelpers.{ComposerBundleIO, ComposerConsts, ComposerFunc, ComposerOpcode}
 import composer.TLManagement.TLClientModule
 import freechips.rocketchip.util._
 import freechips.rocketchip.config._
@@ -11,6 +11,12 @@ import composer.common._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
+
+class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2)(implicit p: Parameters) extends ParameterizedBundle()(p) {
+  val req = DecoupledIO(bundleIn.cloneType)
+  val resp = Flipped(DecoupledIO(bundleOut.cloneType))
+  val busy = Input(Bool())
+}
 
 class ComposerCoreIO(implicit p: Parameters) extends ParameterizedBundle()(p) {
   val req = Flipped(DecoupledIO(new ComposerRoccCommand))
@@ -254,6 +260,12 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   }
 
   def addrBits: Int = log2Up(p(ExtMem).get.master.size)
+
+  def getIO[T1 <: Bundle, T2 <: Bundle](bundIn: T1, bundOut: T2): CustomIO[T1, T2] = {
+    val m = Module(new ComposerBundleIO(bundIn, bundOut, composerConstructor.composerCoreParams))
+    m.cio <> io
+    m.io
+  }
 }
 
 class ComposerSystemIO(implicit p: Parameters) extends Bundle {

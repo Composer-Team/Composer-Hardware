@@ -1,9 +1,10 @@
-package composer
+package composer.RoccHelpers
 
 import scala.math.ceil
 import Chisel.Cat
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import composer.{ComposerCoreIO, ComposerCoreParams, CustomIO}
 
 class ComposerBundleIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2, composerCoreParams: ComposerCoreParams)(implicit p: Parameters) extends Module {
 
@@ -14,9 +15,9 @@ class ComposerBundleIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2, 
   io.req.bits.elements.foreach { case (_, data) => data := 0.U }
   cio.resp.bits.elements.foreach { case (_, data) => data := 0.U }
 
-  //System initialized values
-  cio.resp.bits.system_id := composerCoreParams.system_id.U
-  cio.resp.bits.core_id := composerCoreParams.core_id.U
+//  //System initialized values
+//  cio.resp.bits.inst.system_id := composerCoreParams.system_id.U
+//  cio.resp.bits.core_id := composerCoreParams.core_id.U
 
   cio.busy := io.busy
 
@@ -31,7 +32,7 @@ class ComposerBundleIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2, 
   val deliveringReqPayload = RegInit(false.B)
   val packagingPayload = RegInit(false.B)
 
-  val reqPayloadWidth = Cat(cio.req.bits.rs1, cio.req.bits.rs2).getWidth
+  val reqPayloadWidth = Cat(cio.req.bits.payload1, cio.req.bits.payload2).getWidth
   val reqInputWidth = io.req.bits.getWidth
   val extendedPayloadWidth = reqPayloadWidth*ceil(reqInputWidth.toDouble/reqPayloadWidth).toInt
 
@@ -40,23 +41,26 @@ class ComposerBundleIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2, 
   val reqPayloadChunk = VecInit(Seq.fill(reqPayloadWidth)(0.B))
 
   io.req.valid := cio.req.valid
-  cio.req.ready := io.req.ready && !deliveringReqPayload
+  cio.req.ready := io.req.ready && !packagingPayload
   //TODO: How do we know if the next input is continuing bundle or new bundle. Every clock cycle?
-  when(cio.req.fire || deliveringReqPayload && !packagingPayload) {
-    Mux(cio.req.fire, 0.U, reqPayloadCounter + reqPayloadWidth.U)
+  when(cio.req.fire) {
     deliveringReqPayload := true.B
     io.req.valid := false.B
-    cio.busy := true.B
 
-    reqPayloadChunk := Cat(cio.req.bits.rs1, cio.req.bits.rs2).asBools
-    for(i <- 0 until reqPayloadWidth){
+    reqPayloadCounter := reqPayloadCounter + reqPayloadWidth.U
+    reqPayloadChunk := Cat(cio.req.bits.payload1, cio.req.bits.payload2).asBools
+    for (i <- 0 until reqPayloadWidth) {
       reqPayload(reqPayloadCounter + i.U) := reqPayloadChunk(0 + i)
     }
+  }
 
-    packagingPayload := (reqPayloadCounter + reqPayloadWidth.U >= reqInputWidth.U)
+  when(deliveringReqPayload) {
+    packagingPayload := (reqPayloadCounter >= reqInputWidth.U)
+    io.req.valid := false.B
   }
 
   when(packagingPayload) {
+    reqPayloadCounter := 0.U
     io.req.bits := reqPayload.asTypeOf(io.req.bits)
     io.req.valid := true.B
     deliveringReqPayload := false.B
