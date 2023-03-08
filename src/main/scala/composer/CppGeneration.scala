@@ -126,7 +126,7 @@ object CppGeneration {
                   val hit = members.filter(_.channel_subidx == ch_sidx)
                   if (hit.isEmpty) {
                     // this channel does not use software addressing
-                    f.write("0xFF")
+                    f.write("(char)0xFF")
                   } else {
                     f.write(hit(0).io_idx.toString)
                   }
