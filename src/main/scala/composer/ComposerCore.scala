@@ -218,6 +218,8 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   } else None
   def composer_response_io: DecoupledIO[ComposerRoccResponse] = composer_response_io_.getOrElse { throw new Exception("Attempted to get internal response IO but core was declared as not being able to issue core commands") }
 
+
+
   private val composer_command_io_ = if (outer.composerSystemParams.canIssueCoreCommands) {
     val node = outer.externalCoreCommNodes.get
     val mod = Module(new TLClientModule(node))
