@@ -7,8 +7,10 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy.LazyModule
 
 class AXILWidget(implicit p: Parameters) extends Widget()(p) {
-  override val crFile = LazyModule(new MCRFile(8)(p))
-  crFile.node := AXI4IdIndexer(1) := node
+//  override val crFile = LazyModule(new MCRFileAXI(8)(p))
+//  crFile.node := AXI4IdIndexer(1) := node
+  override val crFile = LazyModule(new MCRFileTL(8))
+  crFile.node := AXI4ToTL() :=  AXI4UserYanker(capMaxFlight = Some(4)) := AXI4Fragmenter() := AXI4IdIndexer(1) :=  node
   override lazy val module = new AXILWidgetModule(this)
 }
 

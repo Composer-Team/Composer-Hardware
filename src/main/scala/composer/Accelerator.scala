@@ -96,8 +96,11 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
     waitingToFlush := true.B
   }
 
-  val systemSoftwareResps = outer.system_tups.zipWithIndex.filter(_._1._3.canReceiveSoftwareCommands) map { case (sys_tup, sys_idx) =>
+  val systemSoftwareResps = outer.system_tups.filter(_._3.canReceiveSoftwareCommands) map { sys_tup =>
     val sys_queue = Module(new Queue(new ComposerRoccCommand, entries = 2))
+    val params = sys_tup._3
+    val sys_idx = outer.name2Id(params.name)
+    sys_queue.suggestName(params + "_command_queue")
 
     // enqueue commands from software
     sys_queue.io.enq.valid := accCmd.valid && sys_idx.U === system_id

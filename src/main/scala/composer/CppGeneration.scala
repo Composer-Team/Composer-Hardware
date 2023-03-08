@@ -50,7 +50,7 @@ object CppGeneration {
     if (!p(HasDiscreteMemory)) f.write("#ifdef SIM\n")
     f.write("#define COMPOSER_USE_CUSTOM_ALLOC\n" +
       "#define NUM_DDR_CHANNELS " + mem.nMemoryChannels + "\n" +
-      "using composer_allocator=composer::device_allocator<" + mem.master.size + ">;\n")
+      "using composer_allocator=composer::device_allocator<" + p(PlatformPhysicalMemoryBytes) + ">;\n")
     if (!p(HasDiscreteMemory)) f.write("#endif\n")
 
     f.write(s"const uint8_t composerNumAddrBits = ${log2Up(mem.master.size)};\n")
@@ -126,7 +126,7 @@ object CppGeneration {
                   val hit = members.filter(_.channel_subidx == ch_sidx)
                   if (hit.isEmpty) {
                     // this channel does not use software addressing
-                    f.write("0xFF")
+                    f.write("(char)0xFF")
                   } else {
                     f.write(hit(0).io_idx.toString)
                   }
@@ -144,7 +144,7 @@ object CppGeneration {
         if (sys_id < num_systems - 1) f.write(", ")
       }
       f.write("};\n")
-    } else f.write(s"static const char __composer_channel_map[1][1][1][1] = {{{{-1}}}};\nenum ComposerChannels {};\n")
+    } else f.write(s"static const char __composer_channel_map[1][1][1][1] = {{{{0xFF}}}};\nenum ComposerChannels {};\n")
     f.write(
       """
         |namespace composer {

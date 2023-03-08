@@ -110,7 +110,7 @@ abstract class WidgetModule(outer: Widget) extends LazyModuleImp(outer) {
     genAndAttachReg(wire, name, Some(default), masterDriven=false)
 
   def genCRFile(): Unit = {
-    crRegistry.bindRegs(outer.crFile.module.io.mcr)
+    crRegistry.bindRegs(outer.crFile.getMCRIO)
   }
 
   // Returns a word addresses

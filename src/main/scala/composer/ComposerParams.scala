@@ -29,6 +29,7 @@ case object CXbarMaxDegree extends Field[Int]
 case object MaximumTransactionLength extends Field[Int]
 case object RequireInternalCommandRouting extends Field[Boolean]
 case object CmdRespBusWidthBytes extends Field[Int]
+case object PlatformPhysicalMemoryBytes extends Field[Long]
 
 case class ComposerCoreParams(memoryChannelParams: List[CChannelParams] = List(),
                               core_id: Int = 0, // for internal use
@@ -64,6 +65,8 @@ class WithAWSPlatform(nMemoryChannels: Int) extends Config((_, _, _) => {
     ), nMemoryChannels))
     require(1 <= nMemoryChannels && nMemoryChannels <= 4)
     q
+  // 16GB memory per DIMM
+  case PlatformPhysicalMemoryBytes => (16L << 30) * nMemoryChannels
   case HasDMA => Some(6)
   case HasAXILExternalMMIO => true
   // TODO this can be tuned
@@ -81,9 +84,10 @@ class WithKriaPlatform extends Config((_, _, _) => {
     beatBytes = 16,
     idBits = 6
   ), 1))
-  // using S_AXI_HP0_FPD - 16M segment starting at below address. See pg 211 in Ultrascale MPSoC User guide
-  case MMIOBaseAddress =>      0x0L
-  case AXILSlaveAddressMask => 0xFFFFFFFFFFL
+  // 4GB total physical memory
+  case PlatformPhysicalMemoryBytes => 4L << 30
+  case MMIOBaseAddress =>      0x2000000000L
+  case AXILSlaveAddressMask => 0xFFFFL
   case HasDMA => None
   // TODO this can be tuned
   case CXbarMaxDegree => 8
