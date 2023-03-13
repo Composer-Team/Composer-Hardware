@@ -30,6 +30,7 @@ case object MaximumTransactionLength extends Field[Int]
 case object RequireInternalCommandRouting extends Field[Boolean]
 case object CmdRespBusWidthBytes extends Field[Int]
 case object PlatformPhysicalMemoryBytes extends Field[Long]
+case object MaxInFlightMemTxsPerSource extends Field[Int]
 
 case class ComposerCoreParams(memoryChannelParams: List[CChannelParams] = List(),
                               core_id: Int = 0, // for internal use
@@ -107,9 +108,7 @@ class WithComposer(maximumTxLengthBytes: Int = 1 << 14) extends Config((site, _,
   case PgLevels => 5
   case XLen => 64 // Applies to all cores
   case CmdRespBusWidthBytes => 4
-  case MaximumTransactionLength =>
-    require(maximumTxLengthBytes <= (1 << 14), "Maximum transaction length supported by AXI is 2^14 B. ")
-    maximumTxLengthBytes
+  case MaximumTransactionLength => maximumTxLengthBytes
   case MaxHartIdBits => 1 // log2Up(site(TilesLocated(InSubsystem)).map(_.tileParams.hartId).max+1)
   // Interconnect parameters
   case SystemBusKey => SystemBusParams(
@@ -152,6 +151,7 @@ class WithComposer(maximumTxLengthBytes: Int = 1 << 14) extends Config((site, _,
   //  ))
   //  case ForceFanoutKey => ForceFanoutParams(false, false, false, false, false)
   //------------------------------------------------------
+  case MaxInFlightMemTxsPerSource => 8
 })
 
 object ComposerParams {

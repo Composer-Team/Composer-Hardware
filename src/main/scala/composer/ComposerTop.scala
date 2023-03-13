@@ -105,10 +105,9 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   acc.mem zip composer_mems foreach { case (m, x) =>
     (  x
       := AXI4Buffer()
-//      := AXI4Deinterleaver(64)
+//      := AXI4Deinterleaver()
       := AXI4Buffer()
       := TLToAXI4()
-      := TLWidthWidget(64)
       := m)
   }
   val extMemIDBits = p(ExtMem) match {
@@ -116,7 +115,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     case Some(a) => a.master.idBits
   }
   val mem_tops = if (p(HasDMA).isDefined) {
-    val dma_mem_xbar = Seq.fill(nMemChannels)(AXI4Xbar())
+    val dma_mem_xbar = Seq.fill(nMemChannels)(AXI4Xbar(maxFlightPerId = p(MaxInFlightMemTxsPerSource)))
     val dma = AXI4Xbar()
     dma := AXI4Buffer() := dma_port.get
     dma_mem_xbar zip composer_mems foreach { case (xb, cm) =>
@@ -129,7 +128,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   }
 
   mem_tops foreach { mt =>
-    AXI_MEM := AXI4Buffer() := AXI4UserYanker() := AXI4Buffer() := AXI4IdIndexer(extMemIDBits) := AXI4Buffer() := mt
+    AXI_MEM := AXI4Buffer() := AXI4UserYanker(capMaxFlight = Some(p(MaxInFlightMemTxsPerSource))) := AXI4Buffer() := AXI4IdIndexer(extMemIDBits) := AXI4Buffer() := mt
   }
 
   val cmd_resp_axilhub = LazyModule(new AXILHub()(dummyTL))

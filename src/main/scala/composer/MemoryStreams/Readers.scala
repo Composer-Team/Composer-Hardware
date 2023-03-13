@@ -123,6 +123,7 @@ class CReader(dataBytes: Int,
       val dSource = tl_out.d.bits.source
       val prefetchIdx = sourceToIdx(dSource)
       val buffer_fill_level = prefetchRowProgress(prefetchIdx)
+      prefetchRowProgress(prefetchIdx) := prefetchRowProgress(prefetchIdx) + 1.U
 
       when(buffer_fill_level === (beatsPerBlock - 1).U) {
         prefetch_buffers_valid(prefetchIdx) := true.B
@@ -206,20 +207,18 @@ class CReader(dataBytes: Int,
       prefetch_head_buffer_valid := false.B
     }
 
-    val buffer_ch_idx = data_channel_read_idx(logChannelsPerBeat - 1, 0)
-    val buffer_beat_idx = data_channel_read_idx(data_channel_read_idx.getWidth - 1, logChannelsPerBeat)
     when(prefetch_head_buffer_valid) {
-      (0 until channelsPerBeat) foreach { ch_idx =>
-        (0 until beatsPerBlock) foreach { beat_idx =>
-          (0 until vlen) foreach { vidx =>
-            when(ch_idx.U === buffer_ch_idx && beat_idx.U === buffer_beat_idx) {
-              val start = vidx * dataBytes * 8
-              val end = (vidx + 1) * dataBytes * 8 - 1
-              channel_buffer(vidx) := buffer(beat_idx)(ch_idx)(end, start)
-              channel_buffer_valid := true.B
-            }
-          }
+      channel_buffer_valid := true.B
+      for (vidx <- 0 until vlen) {
+        // gather all of the bit subsets that will ever correspond to this vector element
+        val selection = (0 until channelsPerBlock) map { c_idx =>
+          val cat = Cat(buffer.flatten.reverse)
+          val off = c_idx * maxBytes * 8
+          val start = off + vidx * dataBytes * 8
+          val end = off + (vidx + 1) * dataBytes * 8
+          cat(end - 1, start)
         }
+        channel_buffer(vidx) := VecInit(selection)(data_channel_read_idx)
       }
     }
   } else { // else no prefetch
@@ -278,7 +277,7 @@ class CReader(dataBytes: Int,
             len := 0.U
           }.otherwise {
             state := s_send_mem_request
-//            len := len - blockBytes.U
+            //            len := len - blockBytes.U
           }
         }
       }
@@ -302,18 +301,30 @@ class CReader(dataBytes: Int,
       // Vec kinda sucks in its current form. Very hard to do multidimensional arrays so we just use Seqs
       //  and `when` instead. Accomplishes the same thing but semantically has multiple-dimensions and is reasonable
       //  to read
-      (0 until channelsPerBeat) foreach { ch_idx =>
-        (0 until beatsPerBlock) foreach { beat_idx =>
-          (0 until vlen) foreach { vidx =>
-            when(ch_idx.U === buffer_ch_idx && beat_idx.U === buffer_beat_idx) {
-              val start = vidx * dataBytes * 8
-              val end = (vidx + 1) * dataBytes * 8 - 1
-              channel_buffer(vidx) := buffer(beat_idx)(ch_idx)(end, start)
-              channel_buffer_valid := true.B
-            }
-          }
+      channel_buffer_valid := true.B
+      for (vidx <- 0 until vlen) {
+        // gather all of the bit subsets that will ever correspond to this vector element
+        val selection = (0 until channelsPerBlock) map { c_idx =>
+          val cat = Cat(buffer.flatten.reverse)
+          val off = c_idx * maxBytes * 8
+          val start = off + vidx * dataBytes * 8
+          val end = off + (vidx + 1) * dataBytes * 8
+          cat(end - 1, start)
         }
+        channel_buffer(vidx) := VecInit(selection)(data_channel_read_idx)
       }
+
+//      (0 until channelsPerBeat) foreach { ch_idx =>
+//        (0 until beatsPerBlock) foreach { beat_idx =>
+//          (0 until vlen) foreach { vidx =>
+//            when(ch_idx.U === buffer_ch_idx && beat_idx.U === buffer_beat_idx) {
+//              val start = vidx * dataBytes * 8
+//              val end = (vidx + 1) * dataBytes * 8 - 1
+//              channel_buffer(vidx) := buffer(beat_idx)(ch_idx)(end, start)
+//            }
+//          }
+//        }
+//      }
     }
 
   }
