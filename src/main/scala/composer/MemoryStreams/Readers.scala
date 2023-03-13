@@ -13,21 +13,12 @@ class ReadChannelIO(dataBytes: Int, vlen: Int)(implicit p: Parameters) extends B
   val busy = Output(Bool())
 }
 
-abstract class txEmitBehavior
-
-case class txEmitAsOneTx() extends txEmitBehavior
-
-case class txEmitCacheBlock() extends txEmitBehavior
-
 class CReader(dataBytes: Int,
               vlen: Int = 1,
-              fetchBehavior: txEmitBehavior,
               tlclient: TLClientNode)(implicit p: Parameters) extends Module {
   val prefetchRows = tlclient.portParams(0).endSourceId
   require(prefetchRows > 0)
   val usesPrefetch = prefetchRows > 1
-  require(!(usesPrefetch && fetchBehavior.isInstanceOf[txEmitAsOneTx]), "Cannot prefetch and emit transactions larger than cache block." +
-    " Prefetching behavior is meant specifically to cache multiple blocks at a time")
   val blockBytes = p(CacheBlockBytes)
   val (tl_outer, tledge) = tlclient.out(0)
   val addressBits = log2Up(tledge.manager.maxAddress)
@@ -40,7 +31,6 @@ class CReader(dataBytes: Int,
   val tl_out = IO(new TLBundle(tl_outer.params))
   val beatBytes = tledge.manager.beatBytes
 
-  io.channel.finished := true.B
   val channelWidthBits = maxBytes * 8
 
   val beatsPerBlock = blockBytes / beatBytes
@@ -110,16 +100,13 @@ class CReader(dataBytes: Int,
   val atLeastOneSourceActive = sourceIdleBits.map(!_).reduce(_ || _)
   val chosenSource = PriorityEncoder(sourceIdleBits)
 
+  io.channel.in_progress := state =/= s_idle
+
   assert(!(io.req.valid && ((io.req.bits.len & (io.req.bits.len - 1.U)).asUInt =/= 0.U)))
   tl_out.a.bits := tledge.Get(
     fromSource = chosenSource,
     toAddress = blockAddr,
-    lgSize = fetchBehavior match {
-      case txEmitAsOneTx() =>
-        OHToUInt(len) // log
-      case txEmitCacheBlock() =>
-        log2Up(blockBytes).U
-    }
+    lgSize = log2Up(blockBytes).U
   )._2
   if (usesPrefetch) {
     val l_idle :: l_assign :: Nil = Enum(2)
@@ -188,18 +175,13 @@ class CReader(dataBytes: Int,
       is(s_send_mem_request) {
         tl_out.a.valid := sourceAvailable && !prefetch_buffers_valid(prefetch_writeIdx.value)
         when(tl_out.a.fire) {
-//          if (logBlockBytes > logChannelSize) {
-//            data_channel_read_idx := addr(logBlockBytes - 1, logChannelSize)
-//          } else {
-//            data_channel_read_idx := 0.U
-//          }
-          fetchBehavior match {
-            case _: txEmitCacheBlock =>
-              addr := addr + blockBytes.U
-              len := len - blockBytes.U
-            case _: txEmitAsOneTx =>
-              ;
-          }
+          //          if (logBlockBytes > logChannelSize) {
+          //            data_channel_read_idx := addr(logBlockBytes - 1, logChannelSize)
+          //          } else {
+          //            data_channel_read_idx := 0.U
+          //          }
+          addr := addr + blockBytes.U
+          len := len - blockBytes.U
 
           state := s_read_memory
           prefetchRowProgress(prefetch_writeIdx.value) := 0.U
@@ -214,9 +196,7 @@ class CReader(dataBytes: Int,
         when(len === 0.U) {
           state := s_idle
         }.otherwise {
-          if (fetchBehavior.isInstanceOf[txEmitCacheBlock]) {
-            state := s_send_mem_request
-          } // if one transaction mode then the beats just keep coming
+          state := s_send_mem_request
         }
       }
     }
@@ -247,9 +227,7 @@ class CReader(dataBytes: Int,
     // else if no prefetch
     tl_out.d.ready := buffer_fill_level < beatsPerBlock.U
     when(tl_out.d.fire) {
-      if (fetchBehavior.isInstanceOf[txEmitAsOneTx]) {
-        len := len - beatBytes.U
-      }
+      len := len - beatBytes.U
       (0 until beatsPerBlock) foreach { bufferBeatIdx =>
         // whenever we get a beat on the data bus, split it into sections and put into buffer
         when(bufferBeatIdx.U === buffer_fill_level) {
@@ -295,19 +273,12 @@ class CReader(dataBytes: Int,
       is(s_read_memory) {
         // when we get a message back store it into a buffer
         when(data_channel_read_idx === channelsPerBlock.U) {
-          fetchBehavior match {
-            case _: txEmitAsOneTx =>
-              when (len === 0.U) {
-                state := s_idle
-              }
-            case _: txEmitCacheBlock =>
-              when (len === blockBytes.U) {
-                state := s_idle
-                len := 0.U
-              }.otherwise {
-                state := s_send_mem_request
-                len := len - blockBytes.U
-              }
+          when(len === 0.U) {
+            state := s_idle
+            len := 0.U
+          }.otherwise {
+            state := s_send_mem_request
+//            len := len - blockBytes.U
           }
         }
       }
@@ -350,7 +321,7 @@ class CReader(dataBytes: Int,
   //////////////////////////////////////////////
 
   when(io.channel.data.fire) {
-//    len := len - maxBytes.U
+    //    len := len - maxBytes.U
     data_channel_read_idx := data_channel_read_idx + 1.U
     channel_buffer_valid := false.B
   }
