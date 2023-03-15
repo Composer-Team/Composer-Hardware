@@ -1,6 +1,6 @@
 package composer.MemoryStreams
 
-import chisel3.{Reg, _}
+import chisel3._
 import chisel3.util._
 import composer._
 import freechips.rocketchip.config.Parameters
@@ -295,8 +295,7 @@ class CReader(dataBytes: Int,
       }
     }
 
-    val buffer_ch_idx = data_channel_read_idx(logChannelsPerBeat - 1, 0)
-    val buffer_beat_idx = data_channel_read_idx(data_channel_read_idx.getWidth - 1, logChannelsPerBeat)
+    val buffer_beat_idx = data_channel_read_idx(data_channel_read_idx.getWidth - 1, if (channelsPerBeat == 1) 0 else logChannelsPerBeat)
     when(buffer_beat_idx < buffer_fill_level) {
       // Vec kinda sucks in its current form. Very hard to do multidimensional arrays so we just use Seqs
       //  and `when` instead. Accomplishes the same thing but semantically has multiple-dimensions and is reasonable
