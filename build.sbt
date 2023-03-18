@@ -1,5 +1,5 @@
 ThisBuild / scalaVersion := "2.13.10"
-ThisBuild / version := "0.1.15"
+ThisBuild / version := "0.1.16"
 ThisBuild / organization := "edu.duke.cs.apex"
 
 val chiselVersion = "3.5.5"
