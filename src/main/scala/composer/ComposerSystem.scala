@@ -126,7 +126,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   val respArbiter = Module(new MultiLevelArbiter(new ComposerRoccUserResponse(), outer.systemParams.nCores))
   val cores = outer.cores.map(_.module)
   val busy = IO(Output(Bool()))
-  busy := cores.map(_.io.busy).reduce(_ || _)
+  busy := cores.map(_.io_declaration.busy).reduce(_ || _)
 
   val validSrcs = Seq(sw_io, outer.internalCommandManager).filter(_.isDefined)
   // if sources can come from multiple domains (sw, other systems), then we have to remember where cmds came from
@@ -184,7 +184,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   }
 
   lazy val cmd = Queue(cmdArbiter.io.out)
-  cmd.ready := funct =/= ComposerFunc.START.U || VecInit(cores.map(_.io.req.ready))(coreSelect)
+  cmd.ready := funct =/= ComposerFunc.START.U || VecInit(cores.map(_.io_declaration.req.ready))(coreSelect)
 
   lazy val funct = cmd.bits.inst.funct
 
@@ -199,7 +199,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   }
 
 
-  respArbiter.io.in <> cores.map(_.io.resp)
+  respArbiter.io.in <> cores.map(_.io_declaration.resp)
   val resp = Wire(Decoupled(new ComposerRoccResponse()))
   resp.valid := respArbiter.io.out.valid
   resp.bits.rd := respArbiter.io.out.bits.rd
@@ -286,8 +286,8 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
 
   cores.zipWithIndex.foreach { case (core, i) =>
     val coreStart = cmd.fire && funct === ComposerFunc.START.U && coreSelect === i.U
-    core.io.req.valid := coreStart
-    core.io.req.bits := cmd.bits
+    core.io_declaration.req.valid := coreStart
+    core.io_declaration.req.bits := cmd.bits
   }
 
   // scope to separate out read channel stuff

@@ -23,28 +23,28 @@ class SimpleOutput extends Bundle {
 
 class SimpleCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
 
-  val io = getIO(new SimpleInput, new SimpleOutput)
+  val c_io = custom_io(new SimpleInput, new SimpleOutput)
 
   val s_idle :: s_working :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
-  val op = RegInit(0.U(io.req.bits.op.getWidth.W))
-  val a = RegInit(0.U(io.req.bits.a.getWidth.W))
-  val b = RegInit(0.U(io.req.bits.b.getWidth.W))
-  val result = RegInit(0.U(io.resp.bits.result.getWidth.W))
+  val op = RegInit(0.U(c_io.req.bits.op.getWidth.W))
+  val a = RegInit(0.U(c_io.req.bits.a.getWidth.W))
+  val b = RegInit(0.U(c_io.req.bits.b.getWidth.W))
+  val result = RegInit(0.U(c_io.resp.bits.result.getWidth.W))
 
-  io.req.ready := false.B
-  io.resp.valid := false.B
-  io.resp.bits.result := 0.U
-  io.busy := true.B
+  c_io.req.ready := false.B
+  c_io.resp.valid := false.B
+  c_io.resp.bits.result := 0.U
+  c_io.busy := true.B
 
   when(state === s_idle) {
-    io.busy := false.B
-    io.req.ready := true.B
-    when(io.req.fire) {
+    c_io.busy := false.B
+    c_io.req.ready := true.B
+    when(c_io.req.fire) {
       state := s_working
-      op := io.req.bits.op
-      a := io.req.bits.a
-      b := io.req.bits.b
+      op := c_io.req.bits.op
+      a := c_io.req.bits.a
+      b := c_io.req.bits.b
     }
   }.elsewhen(state === s_working) {
     switch(op) {
@@ -60,9 +60,9 @@ class SimpleCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters
     }
     state := s_finish
   }.elsewhen(state === s_finish) {
-    io.resp.bits.result := result
-    io.resp.valid := true.B
-    when(io.resp.fire) {
+    c_io.resp.bits.result := result
+    c_io.resp.valid := true.B
+    when(c_io.resp.fire) {
       state := s_idle
     }
   }

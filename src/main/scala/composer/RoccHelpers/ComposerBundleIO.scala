@@ -15,10 +15,6 @@ class ComposerBundleIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2, 
   io.req.bits.elements.foreach { case (_, data) => data := 0.U }
   cio.resp.bits.elements.foreach { case (_, data) => data := 0.U }
 
-//  //System initialized values
-//  cio.resp.bits.inst.system_id := composerCoreParams.system_id.U
-//  cio.resp.bits.core_id := composerCoreParams.core_id.U
-
   cio.busy := io.busy
 
   cio.resp.valid := io.resp.valid
@@ -42,7 +38,6 @@ class ComposerBundleIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2, 
 
   io.req.valid := cio.req.valid
   cio.req.ready := io.req.ready && !packagingPayload
-  //TODO: How do we know if the next input is continuing bundle or new bundle. Every clock cycle?
   when(cio.req.fire) {
     deliveringReqPayload := true.B
     io.req.valid := false.B
@@ -71,7 +66,7 @@ class ComposerBundleIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2, 
     val payloadLen = payload.getWidth
     val availableLen = output.getWidth
     if(availableLen < payloadLen)
-      new Exception(s"Not enough payload! Available: $availableLen. Required: $payloadLen")
+      throw new Exception(s"Not enough payload! Available: $availableLen. Required: $payloadLen")
 
     output := (if (payloadLen == availableLen) payload else Cat(0.U((availableLen - payloadLen).W), payload))
   }

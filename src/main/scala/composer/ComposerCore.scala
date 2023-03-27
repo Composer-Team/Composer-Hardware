@@ -109,7 +109,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   LazyModuleImp(composerConstructor.composerCoreWrapper) {
 
   private val outer = composerConstructor.composerCoreWrapper
-  val io = IO(new ComposerCoreIO())
+//  val io = IO(new ComposerCoreIO())
 
   var read_ios: List[((String, Int), DecoupledIO[ChannelTransactionBundle])] = List()
   var write_ios: List[((String, Int), DecoupledIO[ChannelTransactionBundle])] = List()
@@ -261,10 +261,29 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
 
   def addrBits: Int = log2Up(p(ExtMem).get.master.size)
 
-  def getIO[T1 <: Bundle, T2 <: Bundle](bundIn: T1, bundOut: T2): CustomIO[T1, T2] = {
-    val m = Module(new ComposerBundleIO(bundIn, bundOut, composerConstructor.composerCoreParams))
-    m.cio <> io
+  private object custom_usage extends Enumeration {
+    type custom_usage = Value
+    val unused, default, custom = Value
+  }
+  private var using_custom = custom_usage.unused
+  val io_declaration = IO(new ComposerCoreIO())
+
+  def custom_io[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2): CustomIO[T1, T2] = {
+    if(using_custom == custom_usage.default) {
+      throw new Exception("Cannot use custom io after using the default io")
+    }
+    using_custom = custom_usage.custom
+    val m = Module(new ComposerBundleIO(bundleIn, bundleOut, composerConstructor.composerCoreParams))
+    m.cio <> io_declaration
     m.io
+  }
+
+  def io: ComposerCoreIO = {
+    if(using_custom == custom_usage.custom) {
+      throw new Exception("Cannot use io after generating a custom io")
+    }
+    using_custom = custom_usage.default
+    io_declaration
   }
 }
 
