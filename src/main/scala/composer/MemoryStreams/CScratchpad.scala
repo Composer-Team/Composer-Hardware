@@ -12,7 +12,7 @@ import scala.annotation.tailrec
 
 class CScratchpadAccessBundle(scReqBits: Int, dataWidthBits: Int) extends Bundle {
   // note the flipped
-  val readReq = Flipped(ValidIO(UInt(scReqBits.W)))
+  val readReq = Flipped(Decoupled(UInt(scReqBits.W)))
   val readRes = ValidIO(UInt(dataWidthBits.W))
   val writeReq = Flipped(ValidIO(new Bundle() {
       val addr = UInt(scReqBits.W)
@@ -22,7 +22,7 @@ class CScratchpadAccessBundle(scReqBits: Int, dataWidthBits: Int) extends Bundle
 
 class CScratchpadInitReqIO(mem_out: TLBundle, nDatas: Int, maxTxLen: Int) extends Bundle {
   val progress = Output(UInt((log2Up(nDatas) + 1).W))
-  val request = Flipped(Decoupled(new Bundle() {
+  val request, writeback = Flipped(Decoupled(new Bundle() {
     val memAddr = UInt(mem_out.params.addressBits.W)
     val scAddr = UInt(log2Up(nDatas).W)
     val len = UInt((log2Up(maxTxLen)+1).W)
@@ -33,13 +33,12 @@ class CScratchpadInitReqIO(mem_out: TLBundle, nDatas: Int, maxTxLen: Int) extend
 /**
   * Parameters that all scratchpad subtypes should support
   *
-  * @param supportWrite   support memory writeback. If false, an implementation must tie off the TL interface
   * @param dataWidthBits  the granularity of a single scratchpad read/write in bits
   * @param nDatas         number of data items in the scratchpad. Non-zero
   * @param latency        latency of a scratchpad access from the user interface. Current implementation only supports 1 or 2.
   * @param specialization How data is loaded from memory. Choose a specialization from CScratchpadSpecialization
   */
-class CScratchpad(supportWrite: Boolean,
+class CScratchpad(supportWriteback: Boolean,
                   dataWidthBits: Int,
                   nDatas: Int,
                   latency: Int,
@@ -61,10 +60,10 @@ class CScratchpad(supportWrite: Boolean,
       supportsPutFull = TransferSizes(1, maxTxSize)
     )),
     channelBytes = TLChannelBeatBytes(maxTxSize))))
-  lazy val module = new CScratchpadImp(supportWrite, dataWidthBits, nDatas, latency, specialization, rSize, this)
+  lazy val module = new CScratchpadImp(supportWriteback, dataWidthBits, nDatas, latency, specialization, rSize, this)
 }
 
-class CScratchpadImp(supportWrite: Boolean,
+class CScratchpadImp(supportWriteback: Boolean,
                      dataWidthBits: Int,
                      nDatas: Int,
                      latency: Int,
@@ -84,31 +83,31 @@ class CScratchpadImp(supportWrite: Boolean,
 
   val access = IO(new CScratchpadAccessBundle(scReqBits, dataWidthBits))
   val req = IO(new CScratchpadInitReqIO(mem_out, nDatas, supportReadLength))
-
+  req.request.ready := true.B
 
   val mem = SyncReadMem(nDatas, UInt(dataWidthBits.W))
 
-  val loader = Module(specialization match {
+  private val loader = Module(specialization match {
     case psw: PackedSubwordScratchpadParams =>
       new CScratchpadPackedSubwordLoader(dataWidthBits, scReqBits, psw.wordSizeBits, psw.datsPerSubword, beatSize)
     case _: FlatPackScratchpadParams =>
       new CScratchpadPackedSubwordLoader(dataWidthBits, scReqBits, dataWidthBits, 1, beatSize)
   })
 
-  val read_idle :: read_send :: read_process :: Nil = Enum(3)
-  val read_state = RegInit(read_idle)
+  private val read_idle :: read_send :: read_process :: Nil = Enum(3)
+  private val mem_tx_state = RegInit(read_idle)
   access.readRes.valid := nestPipeline(access.readReq.valid, latency)
-  val rval = mem.read(access.readReq.bits, access.readReq.valid)
+  private val rval = mem.read(access.readReq.bits, access.readReq.valid)
   access.readRes.bits := nestPipeline(rval, latency - 1)
   // in-flight read tx busy bits
 
-  req.request.ready := read_state === read_idle
+  req.request.ready := mem_tx_state === read_idle
 
-  val reqIdleBits = RegInit(VecInit(Seq.fill(mem_edge.master.endSourceId)(true.B)))
-  val reqAvailable = reqIdleBits.reduce(_ || _)
-  val reqChosen = PriorityEncoder(reqIdleBits)
+  private val reqIdleBits = RegInit(VecInit(Seq.fill(mem_edge.master.endSourceId)(true.B)))
+  private val reqAvailable = reqIdleBits.reduce(_ || _)
+  private val reqChosen = PriorityEncoder(reqIdleBits)
   // only consider non-busy transactions to be the
-  val req_cache = Reg(Vec(mem_edge.master.endSourceId, new Bundle() {
+  private val req_cache = Reg(Vec(mem_edge.master.endSourceId, new Bundle() {
     val scratchpadAddress = UInt(req.request.bits.scAddr.getWidth.W)
     val memoryLength = UInt(16.W)
   }))
@@ -118,27 +117,27 @@ class CScratchpadImp(supportWrite: Boolean,
     assert(false.B)
   }
 
-  val totalTx = Reg(new Bundle {
+  private val totalTx = Reg(new Bundle {
     val memoryAddress = UInt(req.request.bits.memAddr.getWidth.W)
     val scratchpadAddress = UInt(req.request.bits.scAddr.getWidth.W)
     val memoryLength = UInt((log2Up(supportReadLength)+1).W)
   })
 
-  val txEmitLengthLg = Wire(UInt(4.W))
+  private val txEmitLengthLg = Wire(UInt(4.W))
   txEmitLengthLg := 0.U
   mem_out.a.bits := mem_edge.Get(
     fromSource = reqChosen,
     toAddress = totalTx.memoryAddress,
     lgSize = txEmitLengthLg)._2
-  mem_out.a.valid := read_state === read_send
+  mem_out.a.valid := mem_tx_state === read_send
 
-  switch(read_state) {
+  switch(mem_tx_state) {
     is(read_idle) {
       when(req.request.fire) {
         totalTx.memoryLength := req.request.bits.len
         totalTx.scratchpadAddress := req.request.bits.scAddr
         totalTx.memoryAddress := req.request.bits.memAddr
-        read_state := read_send
+        mem_tx_state := read_send
       }
     }
 
@@ -154,14 +153,14 @@ class CScratchpadImp(supportWrite: Boolean,
         totalTx.scratchpadAddress := totalTx.scratchpadAddress + (loader.spEntriesPerBeat * (1 << lgMaxTxLength) / beatSize).U
         totalTx.memoryAddress := totalTx.memoryAddress + p(MaximumTransactionLength).U
         when(isBelowLimit) {
-          read_state := read_process
+          mem_tx_state := read_process
         }
       }
     }
 
     is(read_process) {
       when(reqIdleBits.reduce(_ && _)) {
-        read_state := read_idle
+        mem_tx_state := read_idle
       }
     }
   }
@@ -221,9 +220,66 @@ class CScratchpadImp(supportWrite: Boolean,
     perSourceProgress.foreach(_ := 0.U)
   }
 
-  if (supportWrite) {
-    when(access.writeReq.valid) {
-      mem.write(access.writeReq.bits.addr, access.writeReq.bits.data)
+  when(access.writeReq.valid) {
+    mem.write(access.writeReq.bits.addr, access.writeReq.bits.data)
+  }
+  if (supportWriteback) {
+    require(specialization.isInstanceOf[FlatPackScratchpadParams] && dataWidthBits % 8 == 0)
+    val writer = Module(new SequentialWriter(nBytes = dataWidthBits / 8,
+      TLClientNode = outer.mem))
+    writer.io.req.valid := req.writeback.valid
+    req.writeback.ready := writer.io.req.ready
+    writer.io.req.bits.len := req.writeback.bits.len
+    writer.io.req.bits.addr := req.writeback.bits.memAddr
+    val channel = writer.io.channel
+    val writebackIdx, written = Reg(UInt(log2Up(nDatas).W))
+
+    val wb_idle :: wb_read :: wb_rewind :: wb_write :: Nil = Enum(3)
+    val wb_state = RegInit(wb_idle)
+    val read_valid = nestPipeline(wb_state === wb_read, latency)
+    channel.data.valid := read_valid
+    channel.data.bits := DontCare
+    switch(wb_state) {
+      is (wb_idle) {
+        when (req.writeback.fire) {
+          writebackIdx := req.writeback.bits.scAddr
+          written := req.writeback.bits.scAddr
+          wb_state := wb_read
+        }
+      }
+      is (wb_read) {
+        req.request.ready := false.B
+        val read = nestPipeline(mem.read(writebackIdx), latency - 1)
+        channel.data.bits := read
+
+        when (read_valid && channel.data.ready) {
+          written := written + 1.U
+        }
+        writebackIdx := writebackIdx + 1.U
+        when (!channel.data.ready) {
+          wb_state := wb_rewind
+        }
+        when (writer.io.req.ready) {
+          wb_state := wb_write
+        }
+      }
+      is (wb_rewind) {
+        req.request.ready := false.B
+        when (channel.data.ready) {
+          wb_state := wb_read
+          writebackIdx := written
+        }
+        when(writer.io.req.ready) {
+          wb_state := wb_write
+        }
+      }
+      is (wb_write) {
+        when (channel.channelIdle) {
+          wb_state := wb_idle
+        }
+      }
     }
+  } else {
+    req.writeback.ready := false.B
   }
 }

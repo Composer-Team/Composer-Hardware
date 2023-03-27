@@ -26,8 +26,7 @@ class ComposerCoreIO(implicit p: Parameters) extends ParameterizedBundle()(p) {
 
 class DataChannelIO(dataBytes: Int, vlen: Int = 1) extends Bundle {
   val data = Decoupled(Vec(vlen, UInt((dataBytes * 8).W)))
-  val stop = Input(Bool())
-  val finished = Output(Bool())
+  val in_progress = Output(Bool())
 }
 
 class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val core_id: Int, system_id: Int)(implicit p: Parameters) extends LazyModule {
@@ -145,13 +144,12 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
                        useSoftwareAddressing: Boolean,
                        dataBytes: Int,
                        vlen: Int,
-                       idx: Option[Int] = None,
-                       transactionEmitBehavior: txEmitBehavior = txEmitCacheBlock()): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
+                       idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
     val mod = idx match {
       case Some(id_unpack) =>
         val clients = getTLClients(name, outer.readerNodes)
-        List(Module(new CReader(dataBytes, vlen, transactionEmitBehavior, clients(id_unpack))))
-      case None => getTLClients(name, outer.readerNodes).map(tab_id => Module(new CReader(dataBytes, vlen, transactionEmitBehavior, tab_id)))
+        List(Module(new CReader(dataBytes, vlen, clients(id_unpack))))
+      case None => getTLClients(name, outer.readerNodes).map(tab_id => Module(new CReader(dataBytes, vlen, tab_id)))
     }
     //noinspection DuplicatedCode
     mod.zipWithIndex foreach { case (m, m_idx) =>
@@ -172,9 +170,8 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
                       useSoftwareAddressing: Boolean,
                       dataBytes: Int,
                       vlen: Int,
-                      idx: Int,
-                      transactionEmitBehavior: txEmitBehavior = txEmitCacheBlock()): (DecoupledIO[ChannelTransactionBundle], DataChannelIO) = {
-    val a = getReaderModules(name, useSoftwareAddressing, dataBytes, vlen, Some(idx), transactionEmitBehavior)
+                      idx: Int): (DecoupledIO[ChannelTransactionBundle], DataChannelIO) = {
+    val a = getReaderModules(name, useSoftwareAddressing, dataBytes, vlen, Some(idx))
     (a._1(0), a._2(0))
   }
 
@@ -223,6 +220,8 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     Some(IO(Flipped(Decoupled(new ComposerRoccResponse()))))
   } else None
   def composer_response_io: DecoupledIO[ComposerRoccResponse] = composer_response_io_.getOrElse { throw new Exception("Attempted to get internal response IO but core was declared as not being able to issue core commands") }
+
+
 
   private val composer_command_io_ = if (outer.composerSystemParams.canIssueCoreCommands) {
     val node = outer.externalCoreCommNodes.get

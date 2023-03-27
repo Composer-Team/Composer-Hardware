@@ -34,6 +34,12 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
     def recursivelyReduceXBar(grp: Seq[TLNode]): Seq[TLIdentityNode] = {
       def help(a: Seq[Seq[TLNode]]): Seq[TLNode] = {
         a.map { r =>
+//          val memory_xbar = LazyModule(new TLXbar())
+//
+//          r.foreach(memory_xbar.node := _)
+//          val memory_xbar_buffer = TLBuffer()
+//          memory_xbar_buffer := memory_xbar.node
+//          memory_xbar_buffer
           val memory_xbar = LazyModule(new TLXbar())
 
           r.foreach(memory_xbar.node := _)

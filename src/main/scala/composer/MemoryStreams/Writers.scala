@@ -9,7 +9,6 @@ import freechips.rocketchip.tilelink._
 class WriterDataChannelIO(val dWidth: Int) extends Bundle {
   val data = Flipped(Decoupled(UInt(dWidth.W)))
   val channelIdle = Output(Bool())
-  val finishEarly = Input(Bool())
 }
 
 class SequentialWriteChannelIO(maxBytes: Int)(implicit p: Parameters) extends Bundle {
@@ -103,10 +102,6 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
       }
     }
     is(s_data) {
-      when(io.channel.finishEarly) {
-        earlyFinish := true.B
-        state := s_allocate
-      }
       // when the core data channel fires, put the data in the write
       // buffer and update buffer maintance state
       when(io.channel.data.fire) {
