@@ -196,10 +196,7 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
   myWriter.data.bits := Cat(dArray.reverse)
   // the writer module will cache lines until a line has been completely written
   // set finishEarly when you want to flush the current transaction
-  myWriter.finishEarly := state === s_idle
   myWriter.data.valid := false.B
-  // stop a reader if you want to finish the transaction prematurely
-  myReader.stop := false.B
   myReader.data.ready := false.B
 
   when(state === s_idle) {
