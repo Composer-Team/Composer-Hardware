@@ -11,7 +11,7 @@ lazy val composer = (project in file(".")).enablePlugins(BuildInfoPlugin).settin
     "edu.berkeley.cs" %% "chisel3" % "3.5.5",
     "edu.duke.cs.apex" %% "rocketchip-composer-fork" % "0.1.2"
   ),
-  resolvers += "reposilite-repository-releases" at "http://oak.cs.duke.edu:8080/releases",
+  resolvers += ("reposilite-repository-releases" at "http://oak.cs.duke.edu:8080/releases").withAllowInsecureProtocol(true),
   publishTo := Some(("reposilite-repository" at "http://oak.cs.duke.edu:8080/releases/").withAllowInsecureProtocol(true)),
   credentials += Credentials(Path.userHome / ".sbt" / ".credentials"),
   addCompilerPlugin("edu.berkeley.cs" % "chisel3-plugin" % chiselVersion cross CrossVersion.full)
