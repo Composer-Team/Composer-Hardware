@@ -31,5 +31,16 @@ object TestDriver {
 //        "--repl-seq-mem", s"-c:ComposerTop:-o:$hw_idr/ComposerTop.conf"
         ),
       annotations = Seq(PrintFullStackTraceAnnotation))
+
+    // make sure that any generated FPUs get copied to the composer hardware generated src directory
+
+    val fpu_cache = os.pwd / ".fpnew_cache"
+    if (os.exists(fpu_cache)) {
+      os.walk(fpu_cache).filter(_.toString().contains(".v")).foreach { path =>
+        val to = gsrc_dir / path.toString().split("/").takeRight(1)(0)
+        if (!os.exists(to))
+          os.copy(path, to)
+      }
+    }
   }
 }
