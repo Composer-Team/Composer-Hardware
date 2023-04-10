@@ -13,9 +13,11 @@ import java.io.FileWriter
 object CppGeneration {
 
   private case class CppDefinition(ty: String, name: String, value: String)
+  private case class PreprocessorDefinition(ty: String, value: String)
 
   private var user_enums: List[EnumFactory] = List()
   private var user_defs: List[CppDefinition] = List()
+  private var user_cpp_defs: List[PreprocessorDefinition] = List()
 
   def addUserCppDefinition[t](ty: String, name: String, value: t): Unit = {
     val ty_f = ty.trim
@@ -23,6 +25,13 @@ object CppGeneration {
     val existingDefs = user_defs.filter(_.name == name_f)
     existingDefs.foreach(a => require(a.ty == ty_f && a.value == value.toString, s"Redefining ${a.name} from (${a.ty}, ${a.value}) to ($ty, $value)"))
     if (existingDefs.isEmpty) user_defs = CppDefinition(ty_f, name_f, value.toString) :: user_defs
+  }
+
+  def addPreprocessorDefinition(name: String, value: String): Unit = {
+    val ppd = PreprocessorDefinition(name, value)
+    if (!user_cpp_defs.contains(ppd)) {
+      user_cpp_defs = ppd :: user_cpp_defs
+    }
   }
 
   def addUserCppDefinition[t](elems: Seq[(String, String, t)]): Unit = {
@@ -73,6 +82,10 @@ object CppGeneration {
         f.write(s"\t$name = $value ,\n")
       }
       f.write("};\n")
+    }
+
+    user_cpp_defs foreach { ppd =>
+      f.write(s"#define ${ppd.ty} (${ppd.value})\n")
     }
 
     cr.printCRs(Some(f))
