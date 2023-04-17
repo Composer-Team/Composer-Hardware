@@ -2,7 +2,7 @@ package composer
 
 import chipsalliance.rocketchip.config._
 
-import chisel3.experimental.EnumFactory
+import chisel3.experimental.{ChiselEnum, EnumFactory}
 import chisel3.util.log2Up
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import composer.RoccHelpers.MCRFileMap
