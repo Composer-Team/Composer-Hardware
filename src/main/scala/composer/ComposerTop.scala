@@ -6,7 +6,8 @@ import composer.ComposerTop._
 import composer.CppGeneration.genCPPHeader
 import composer.RoccHelpers.{AXI4Compat, AXILHub, RDReserves}
 import freechips.rocketchip.amba.axi4._
-import freechips.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
+
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._

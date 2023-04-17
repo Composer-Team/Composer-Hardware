@@ -3,7 +3,8 @@ package composer.MemoryStreams
 import chisel3._
 import chisel3.util._
 import composer._
-import freechips.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
+
 import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.tilelink._
 

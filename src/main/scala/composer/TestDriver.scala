@@ -1,6 +1,6 @@
 package composer
 
-import chipsalliance.rocketchip.config.Config
+import chipsalliance.rocketchip.config._
 import chisel3.stage.PrintFullStackTraceAnnotation
 import freechips.rocketchip.system._
 import firrtl.stage.FirrtlMain

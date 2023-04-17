@@ -1,7 +1,7 @@
 package composer
 
+import chipsalliance.rocketchip.config._
 import composer.MemoryStreams._
-import freechips.rocketchip.config._
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
@@ -26,11 +26,11 @@ case object SystemName2IdMapKey extends Field[Map[String, Int]]
 case object TLInterconnectWidthBytes extends Field[Int]
 // if we support a dedicated DMA port, provide the number of ID bits
 case object CXbarMaxDegree extends Field[Int]
-case object MaximumTransactionLength extends Field[Int]
 case object RequireInternalCommandRouting extends Field[Boolean]
 case object CmdRespBusWidthBytes extends Field[Int]
 case object PlatformPhysicalMemoryBytes extends Field[Long]
 case object MaxInFlightMemTxsPerSource extends Field[Int]
+case object CoreCommandLatency extends Field[Int] // this might need to be high to expand beyond one slr
 
 case class ComposerCoreParams(memoryChannelParams: List[CChannelParams] = List(),
                               core_id: Int = 0, // for internal use
@@ -76,6 +76,7 @@ class WithAWSPlatform(nMemoryChannels: Int) extends Config((_, _, _) => {
   case AXILSlaveAddressMask => 0xFFFFL
   case MMIOBaseAddress => 0L
   case AXILSlaveBeatBytes => 4
+  case CoreCommandLatency => 4
 })
 
 class WithKriaPlatform extends Config((_, _, _) => {
@@ -95,9 +96,10 @@ class WithKriaPlatform extends Config((_, _, _) => {
   case HasAXILExternalMMIO => false // use full AXI4
   case HasDiscreteMemory => false
   case AXILSlaveBeatBytes => 4
+  case CoreCommandLatency => 0
 })
 
-class WithComposer(maximumTxLengthBytes: Int = 1 << 14) extends Config((site, _, _) => {
+class WithComposer() extends Config((site, _, _) => {
   case ComposerSystemsKey => Seq()
   case TLInterconnectWidthBytes => 16
 //  case MaxChannelTransactionLenKey => 1 << 30
@@ -108,7 +110,6 @@ class WithComposer(maximumTxLengthBytes: Int = 1 << 14) extends Config((site, _,
   case PgLevels => 5
   case XLen => 64 // Applies to all cores
   case CmdRespBusWidthBytes => 4
-  case MaximumTransactionLength => maximumTxLengthBytes
   case MaxHartIdBits => 1 // log2Up(site(TilesLocated(InSubsystem)).map(_.tileParams.hartId).max+1)
   // Interconnect parameters
   case SystemBusKey => SystemBusParams(

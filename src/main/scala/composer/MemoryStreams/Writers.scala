@@ -2,8 +2,8 @@ package composer.MemoryStreams
 
 import chisel3._
 import chisel3.util._
-import composer._
-import freechips.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
+
 import freechips.rocketchip.tilelink._
 
 class WriterDataChannelIO(val dWidth: Int) extends Bundle {
@@ -27,24 +27,24 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
   val (tl_outer, edge) = TLClientNode.out(0)
   private val nBits = nBytes * 8
   // get TL parameters from edge
-  val beatBytes = edge.manager.beatBytes
-  val addressBits = log2Up(edge.manager.maxAddress)
-  val addressBitsChop = addressBits - log2Up(beatBytes)
+  private val beatBytes = edge.manager.beatBytes
+  private val addressBits = log2Up(edge.manager.maxAddress)
+  private val addressBitsChop = addressBits - log2Up(beatBytes)
   val io = IO(new SequentialWriteChannelIO(nBytes))
   val tl_out = IO(new TLBundle(tl_outer.params))
 
-  val s_idle :: s_data :: s_allocate :: s_mem :: Nil = Enum(4)
-  val state = RegInit(s_idle)
+  private val s_idle :: s_data :: s_allocate :: s_mem :: Nil = Enum(4)
+  private val state = RegInit(s_idle)
 
-  val tx_inactive :: tx_inProgress :: Nil = Enum(2)
-  val nSources = edge.master.endSourceId
+  private val tx_inactive :: tx_inProgress :: Nil = Enum(2)
+  private val nSources = edge.master.endSourceId
 //  println(nSources)
-  val txIDBits = log2Up(nSources)
-  val txStates = RegInit(VecInit(Seq.fill(nSources)(tx_inactive)))
-  val txPriority = PriorityEncoderOH(txStates map (_ === tx_inactive))
+  private val txIDBits = log2Up(nSources)
+  private val txStates = RegInit(VecInit(Seq.fill(nSources)(tx_inactive)))
+  private val txPriority = PriorityEncoderOH(txStates map (_ === tx_inactive))
 
-  val haveTransactionToDo = txStates.map(_ === tx_inProgress).reduce(_ || _)
-  val haveAvailableTxSlot = txStates.map(_ === tx_inactive).reduce(_ || _)
+  private val haveTransactionToDo = txStates.map(_ === tx_inProgress).reduce(_ || _)
+  private val haveAvailableTxSlot = txStates.map(_ === tx_inactive).reduce(_ || _)
 
 //  val isReallyIdle = state === s_idle && !haveTransactionToDo
   io.channel.channelIdle := !haveTransactionToDo
@@ -53,25 +53,27 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
   require(nBytes <= beatBytes)
   require(isPow2(nBytes))
 
-  val wordsPerBeat = beatBytes / nBytes
+  private val wordsPerBeat = beatBytes / nBytes
 
-  val addr = Reg(UInt(addressBitsChop.W))
-  val req_tx_max_length_beats = p(MaximumTransactionLength) / nBytes
-  val req_tx_mlb_bits = log2Up(req_tx_max_length_beats)
-  val req_len = Reg(UInt(req_tx_mlb_bits.W))
+  private val addr = Reg(UInt(addressBitsChop.W))
+  private val req_tx_max_length_beats = (1L << addressBits) / nBytes
+  private val req_tx_mlb_bits = log2Up(req_tx_max_length_beats)
+  private val req_len = Reg(UInt(req_tx_mlb_bits.W))
+  println("address bits: " + addressBits)
+  println("rtmb: " + req_tx_mlb_bits)
 
-  val nextAddr = addr + 1.U
+  private val nextAddr = addr + 1.U
 
-  val idx = Reg(UInt(log2Ceil(wordsPerBeat).W))
+  private val idx = Reg(UInt(log2Ceil(wordsPerBeat).W))
 
-  val dataBuf = Reg(Vec(wordsPerBeat, UInt(nBits.W)))
-  val dataValid = Reg(UInt(wordsPerBeat.W))
+  private val dataBuf = Reg(Vec(wordsPerBeat, UInt(nBits.W)))
+  private val dataValid = Reg(UInt(wordsPerBeat.W))
 
-  val wdata = dataBuf.asUInt
-  val wmask = FillInterleaved(nBytes, dataValid)
+  private val wdata = dataBuf.asUInt
+  private val wmask = FillInterleaved(nBytes, dataValid)
 
-  val allocatedTransaction = RegInit(0.U(txIDBits.W))
-  val earlyFinish = RegInit(false.B)
+  private val allocatedTransaction = RegInit(0.U(txIDBits.W))
+  private val earlyFinish = RegInit(false.B)
 
   tl_out.a.bits := DontCare
   tl_out.a.valid := false.B

@@ -1,5 +1,6 @@
 package composer
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
@@ -7,7 +8,6 @@ import composer.TLManagement.makeTLMultilayerXbar
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tile._
-import freechips.rocketchip.config.Parameters
 import composer.common._
 import freechips.rocketchip.subsystem.ExtMem
 

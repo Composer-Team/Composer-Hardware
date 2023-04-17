@@ -6,11 +6,11 @@ import composer.MemoryStreams._
 import composer.RoccHelpers.{ComposerConsts, ComposerFunc, ComposerOpcode}
 import composer.TLManagement.TLClientModule
 import freechips.rocketchip.util._
-import freechips.rocketchip.config._
 import composer.common._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
+import chipsalliance.rocketchip.config._
 
 class ComposerCoreIO(implicit p: Parameters) extends ParameterizedBundle()(p) {
   val req = Flipped(DecoupledIO(new ComposerRoccCommand))
@@ -26,7 +26,6 @@ class DataChannelIO(dataBytes: Int, vlen: Int = 1) extends Bundle {
 class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val core_id: Int, system_id: Int)(implicit p: Parameters) extends LazyModule {
   val coreParams = composerSystemParams.coreParams.copy(core_id = core_id, system_id = system_id)
   val blockBytes = p(CacheBlockBytes)
-  val maxTxLength = p(MaximumTransactionLength)
 
   val CacheNodes = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.CacheChannel) map (_.asInstanceOf[CCachedReadChannelParams]) map {
     par =>
@@ -38,8 +37,8 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
       val rnodes = List.tabulate(par.nChannels)(i => TLClientNode(List(TLMasterPortParameters.v1(
         clients = List(TLMasterParameters.v1(
           name = s"CachedReadChannel_sys${system_id}_core${core_id}_${par.name}$i",
-          supportsGet = TransferSizes(1, maxTxLength),
-          supportsProbe = TransferSizes(1, maxTxLength)
+          supportsGet = TransferSizes(1, p(CacheBlockBytes)),
+          supportsProbe = TransferSizes(1, p(CacheBlockBytes))
         ))))))
 
       rnodes foreach (req_xbar.node := _)
@@ -54,22 +53,22 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
       TLClientNode(List(TLMasterPortParameters.v1(
         clients = List(TLMasterParameters.v1(
           name = s"ReadChannel_sys${system_id}_core${core_id}_${para.name}$i",
-          supportsGet = TransferSizes(1, maxTxLength),
-          supportsProbe = TransferSizes(1, maxTxLength),
+          supportsGet = TransferSizes(1, p(CacheBlockBytes)),
+          supportsProbe = TransferSizes(1, p(CacheBlockBytes)),
           sourceId = IdRange(0, param.maxInFlightTxs)
         )))))
     })
   }
-  val writers = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.WriteChannel).map { p =>
-    val para = p.asInstanceOf[CWriteChannelParams]
+  val writers = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.WriteChannel).map { mcp =>
+    val para = mcp.asInstanceOf[CWriteChannelParams]
     (para.name, List.tabulate(para.nChannels) { i =>
       TLClientNode(List(TLMasterPortParameters.v1(
         List(TLMasterParameters.v1(
           name = s"WriteChannel_sys${system_id}_core${core_id}_${para.name}$i",
           sourceId = IdRange(0, para.maxInFlightTxs),
-          supportsPutFull = TransferSizes(1, maxTxLength),
-          supportsPutPartial = TransferSizes(1, maxTxLength),
-          supportsProbe = TransferSizes(1, maxTxLength))))))
+          supportsPutFull = TransferSizes(1, p(CacheBlockBytes)),
+          supportsPutPartial = TransferSizes(1, p(CacheBlockBytes)),
+          supportsProbe = TransferSizes(1, p(CacheBlockBytes)))))))
     })
   }
   val scratch_mod = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.Scratchpad).map(_.asInstanceOf[CScratchpadChannelParams]).map {
@@ -92,7 +91,8 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
     CacheNodes.map(i => (i._1, i._2._2)) ++
       unCachedReaders ++
       writers ++
-      scratch_mod.map(i => (i._1, List(i._2.mem)))
+      scratch_mod.map(i => (i._1, List(i._2.mem))) ++
+      scratch_mod.filter(_._2.writerNode.isDefined).map(i => (i._1 + "_writeback", List(i._2.writerNode.get)))
     ).flatMap(_._2)
 
   lazy val module = composerSystemParams.buildCore(ComposerConstructor(composerSystemParams.coreParams, this), p)
@@ -110,6 +110,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   val cache_invalidate_ios = composerConstructor.composerCoreWrapper.CacheNodes.map(_._2._1.module.io_invalidate)
 
   def getCoreID: Int = composerConstructor.composerCoreWrapper.core_id
+
   private def getTLClients(name: String, listList: List[(String, List[TLClientNode])]): List[TLClientNode] = {
     listList.filter(_._1 == name) match {
       case first :: rst =>
@@ -122,18 +123,18 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   }
 
   /**
-    * Declare reader module implementations associated with a certain channel name.
-    * Data channel will read out a vector of UInts of dimension (vlen, dataBytes*8 bits)
-    *
-    * @param name      name of channel to instantiate readers for
-    * @param dataBytes width of the data channel to the user module
-    * @param vlen      dimension of the data channel
-    * @param idx       optionally instantiate an implementation for only a single channel in the name group. This may be useful
-    *                  when different channels need to be parameterized differently
-    * @return List of transaction information bundles (address and length in bytes) and then a data channel. For
-    *         sparse readers, we give back both interfaces and for non-sparse, addresses are provided through separate address
-    *         commands in software.
-    */
+   * Declare reader module implementations associated with a certain channel name.
+   * Data channel will read out a vector of UInts of dimension (vlen, dataBytes*8 bits)
+   *
+   * @param name      name of channel to instantiate readers for
+   * @param dataBytes width of the data channel to the user module
+   * @param vlen      dimension of the data channel
+   * @param idx       optionally instantiate an implementation for only a single channel in the name group. This may be useful
+   *                  when different channels need to be parameterized differently
+   * @return List of transaction information bundles (address and length in bytes) and then a data channel. For
+   *         sparse readers, we give back both interfaces and for non-sparse, addresses are provided through separate address
+   *         commands in software.
+   */
   def getReaderModules(name: String,
                        useSoftwareAddressing: Boolean,
                        dataBytes: Int,
@@ -155,9 +156,18 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
         read_ios = List(((name, idx.getOrElse(m_idx)), newio)) ++ read_ios
       }
     }
-    (if (useSoftwareAddressing) List()
+    val ret = (if (useSoftwareAddressing) List()
     else mod.map(_.io.req),
       mod.map(_.io.channel))
+    // initially tie off everything to false and DontCare. Saves some pain down the line
+    ret._2.foreach { dat =>
+      dat.data.ready := false.B
+    }
+    ret._1.foreach { dat =>
+      dat.bits := DontCare
+      dat.valid := false.B
+    }
+    ret
   }
 
   def getReaderModule(name: String,
@@ -173,6 +183,11 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
                        useSoftwareAddressing: Boolean,
                        dataBytes: Int,
                        idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[WriterDataChannelIO]) = {
+
+    val params = outer.coreParams.memoryChannelParams.filter(_.name == name)
+    require(params.length == 1, "Found writer descriptions (" + params.length + "). If > 1, then you have defined the" +
+      " same group multiple times. If =0, then you have not described this writer group.")
+    val param = params(0).asInstanceOf[CWriteChannelParams]
     val mod = idx match {
       case Some(id) => List(Module(new SequentialWriter(dataBytes, getTLClients(name, outer.writers)(id))))
       case None => getTLClients(name, outer.writers).map(tab_id => Module(new SequentialWriter(dataBytes, tab_id)))
@@ -188,8 +203,17 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       }
     }
 
-    (if (useSoftwareAddressing) List() else mod.map(_.io.req),
+    val ret = (if (useSoftwareAddressing) List() else mod.map(_.io.req),
       mod.map(_.io.channel))
+    ret._2.foreach { dat =>
+      dat.data.valid := false.B
+      dat.data.bits := DontCare
+    }
+    ret._1.foreach { req =>
+      req.valid := false.B
+      req.bits := DontCare
+    }
+    ret
   }
 
   def getWriterModule(name: String,
@@ -213,8 +237,10 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   private val composer_response_io_ = if (outer.composerSystemParams.canIssueCoreCommands) {
     Some(IO(Flipped(Decoupled(new ComposerRoccResponse()))))
   } else None
-  def composer_response_io: DecoupledIO[ComposerRoccResponse] = composer_response_io_.getOrElse { throw new Exception("Attempted to get internal response IO but core was declared as not being able to issue core commands") }
 
+  def composer_response_io: DecoupledIO[ComposerRoccResponse] = composer_response_io_.getOrElse {
+    throw new Exception("Attempted to get internal response IO but core was declared as not being able to issue core commands")
+  }
 
 
   private val composer_command_io_ = if (outer.composerSystemParams.canIssueCoreCommands) {
@@ -228,6 +254,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     mod.io.bits.addr := ComposerConsts.getInternalCmdRoutingAddress(wire.bits.inst.system_id)
     Some(wire)
   } else None
+
   def composer_command_io: DecoupledIO[ComposerRoccCommand] = composer_command_io_.get
 
   def getSystemID(name: String): UInt = p(SystemName2IdMapKey)(name).U

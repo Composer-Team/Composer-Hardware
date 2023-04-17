@@ -1,6 +1,7 @@
 package composer
 
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
+
 import chisel3.experimental.{ChiselEnum, EnumFactory}
 import chisel3.util.log2Up
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
@@ -27,7 +28,7 @@ object CppGeneration {
     if (existingDefs.isEmpty) user_defs = CppDefinition(ty_f, name_f, value.toString) :: user_defs
   }
 
-  def addPreprocessorDefinition(name: String, value: String): Unit = {
+  def addPreprocessorDefinition(name: String, value: String = ""): Unit = {
     val ppd = PreprocessorDefinition(name, value)
     if (!user_cpp_defs.contains(ppd)) {
       user_cpp_defs = ppd :: user_cpp_defs

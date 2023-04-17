@@ -1,6 +1,7 @@
 package composer
 
 import chipsalliance.rocketchip.config._
+
 import chisel3.util._
 import chisel3._
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
@@ -204,8 +205,18 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     case _ => 0
   }
 
+  val coreResps = cores.map { core =>
+    if (p(CoreCommandLatency) == 0) {
+      core.io.resp
+    } else {
+      val rq = Module(new Queue[ComposerRoccUserResponse](new ComposerRoccUserResponse(), p(CoreCommandLatency), false, false, true, false))
+      rq.io.enq <> core.io.resp
+      rq.io.deq
+    }
+  }
 
-  respArbiter.io.in <> cores.map(_.io.resp)
+
+  respArbiter.io.in <> coreResps
   val resp = Wire(Decoupled(new ComposerRoccResponse()))
   resp.valid := respArbiter.io.out.valid
   resp.bits.rd := respArbiter.io.out.bits.rd
@@ -286,14 +297,25 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
 
     responseManager.io.ready := VecInit(cores.map(_.composer_response_io.ready))(response.core_id)
   }
-  val lenBits = log2Up(p(MaximumTransactionLength))
 
   val channelSelect = Cat(cmd.bits.inst.rs2(2, 0), cmd.bits.inst.rs1)
 
   cores.zipWithIndex.foreach { case (core, i) =>
     val coreStart = cmd.fire && funct === ComposerFunc.START.U && coreSelect === i.U
-    core.io.req.valid := coreStart
-    core.io.req.bits := cmd.bits
+    if (p(CoreCommandLatency) > 0) {
+      val pipeIn = Wire(new Bundle() {
+        val start = Bool()
+        val cmdP = cmd.bits.cloneType
+      })
+      val cmdPipe = Pipe(true.B, pipeIn, latency = p(CoreCommandLatency))
+      pipeIn.start := coreStart
+      pipeIn.cmdP := cmd.bits
+      core.io.req.valid := cmdPipe.bits.start && cmdPipe.valid
+      core.io.req.bits := cmdPipe.bits.cmdP
+    } else {
+      core.io.req.valid := coreStart
+      core.io.req.bits := cmd.bits
+    }
   }
 
   // scope to separate out read channel stuff
@@ -308,7 +330,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     cores(0).read_ios(0)._2.valid := false.B
     cores(0).write_ios(0)._2.valid := true.B
   }
-  val txLenFromCmd = cmd.bits.payload1(lenBits - 1, 0)
+  val txLenFromCmd = cmd.bits.payload1(addressBits - 1, 0)
 
   @tailrec
   private def assign_channel_addresses(coreId: Int, channelList: List[((String, Int), DecoupledIO[ChannelTransactionBundle])],
@@ -317,7 +339,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
                                        io_map: List[CChannelIdentifier] = List()): List[CChannelIdentifier] = {
     channelList match {
       case (channel_identifier, txio) :: rst =>
-        val tx_len = Reg(UInt(log2Up(p(MaximumTransactionLength)).W))
+        val tx_len = Reg(UInt(addressBits.W))
         val tx_addr_start = Reg(UInt(addressBits.W))
         when(addr_func_live && coreSelect === coreId.U && channelSelect === assignment.U) {
           tx_len := txLenFromCmd

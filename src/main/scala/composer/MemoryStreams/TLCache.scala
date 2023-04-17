@@ -1,6 +1,8 @@
 package composer.MemoryStreams
 
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
+
+
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import chisel3._

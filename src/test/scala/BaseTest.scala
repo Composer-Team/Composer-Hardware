@@ -1,4 +1,6 @@
-import chipsalliance.rocketchip.config.{Config, Field, Parameters}
+import chipsalliance.rocketchip.config._
+
+
 import chisel3._
 import chisel3.util._
 import composer.MemoryStreams._

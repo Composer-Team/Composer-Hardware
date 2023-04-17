@@ -1,6 +1,8 @@
 package composer.MemoryStreams.Loaders
 
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
+
+
 import chisel3.util._
 import chisel3._
 

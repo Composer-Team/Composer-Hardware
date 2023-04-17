@@ -1,11 +1,13 @@
 package composer.MemoryStreams
 
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
+
+
 import chisel3._
 import chisel3.util._
-import composer.MaximumTransactionLength
 import composer.MemoryStreams.Loaders.CScratchpadPackedSubwordLoader
 import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.tilelink._
 
 import scala.annotation.tailrec
@@ -20,12 +22,12 @@ class CScratchpadAccessBundle(scReqBits: Int, dataWidthBits: Int) extends Bundle
     }))
 }
 
-class CScratchpadInitReqIO(mem_out: TLBundle, nDatas: Int, maxTxLen: Int) extends Bundle {
+class CScratchpadInitReqIO(mem_out: TLBundle, nDatas: Int) extends Bundle {
   val progress = Output(UInt((log2Up(nDatas) + 1).W))
   val request, writeback = Flipped(Decoupled(new Bundle() {
     val memAddr = UInt(mem_out.params.addressBits.W)
     val scAddr = UInt(log2Up(nDatas).W)
-    val len = UInt((log2Up(maxTxLen)+1).W)
+    val len = UInt(mem_out.params.addressBits.W)
   }))
 }
 
@@ -42,25 +44,29 @@ class CScratchpad(supportWriteback: Boolean,
                   dataWidthBits: Int,
                   nDatas: Int,
                   latency: Int,
-                  supportReadLength: Int,
                   specialization: CScratchpadSpecialization)(implicit p: Parameters) extends LazyModule {
-  val maxTxSize = p(MaximumTransactionLength)
   require(1 <= latency && latency <= 3)
   require(dataWidthBits > 0)
   require(nDatas > 0)
-  val rSize = Seq(supportReadLength, maxTxSize).max
-  require(isPow2(supportReadLength))
 
   val mem = TLClientNode(Seq(TLMasterPortParameters.v2(
     masters = Seq(TLMasterParameters.v1(
       name = "ScratchpadToMemory",
-      sourceId = IdRange(0, rSize >> log2Up(maxTxSize)),
-      supportsProbe = TransferSizes(1, maxTxSize),
-      supportsGet = TransferSizes(1, maxTxSize),
-      supportsPutFull = TransferSizes(1, maxTxSize)
+      sourceId = IdRange(0, 16),
+      supportsProbe = TransferSizes(1, p(CacheBlockBytes)),
+      supportsGet = TransferSizes(1, p(CacheBlockBytes)),
+      supportsPutFull = TransferSizes(1, p(CacheBlockBytes))
     )),
-    channelBytes = TLChannelBeatBytes(maxTxSize))))
-  lazy val module = new CScratchpadImp(supportWriteback, dataWidthBits, nDatas, latency, specialization, rSize, this)
+    channelBytes = TLChannelBeatBytes(p(CacheBlockBytes)))))
+  val writerNode = if (supportWriteback) Some(TLClientNode(Seq(TLMasterPortParameters.v2(
+    masters = Seq(TLMasterParameters.v1(
+      name = "ScratchpadWriteback",
+      sourceId = IdRange(0, 4),
+      supportsPutFull = TransferSizes(1, p(CacheBlockBytes)),
+      supportsProbe = TransferSizes(1, p(CacheBlockBytes))
+    ))
+  )))) else None
+  lazy val module = new CScratchpadImp(supportWriteback, dataWidthBits, nDatas, latency, specialization, this)
 }
 
 class CScratchpadImp(supportWriteback: Boolean,
@@ -68,12 +74,11 @@ class CScratchpadImp(supportWriteback: Boolean,
                      nDatas: Int,
                      latency: Int,
                      specialization: CScratchpadSpecialization,
-                     supportReadLength: Int,
                      outer: CScratchpad) extends LazyModuleImp(outer) {
   val (mem_out, mem_edge) = outer.mem.out(0)
   val beatSize = mem_edge.manager.beatBytes
   val scReqBits = log2Up(nDatas)
-  val lgMaxTxLength = log2Up(p(MaximumTransactionLength))
+  val lgMaxTxLength = log2Up(p(CacheBlockBytes))
 
   @tailrec
   private def nestPipeline[T <: Data](a: T, depth: Int): T = {
@@ -82,7 +87,7 @@ class CScratchpadImp(supportWriteback: Boolean,
   }
 
   val access = IO(new CScratchpadAccessBundle(scReqBits, dataWidthBits))
-  val req = IO(new CScratchpadInitReqIO(mem_out, nDatas, supportReadLength))
+  val req = IO(new CScratchpadInitReqIO(mem_out, nDatas))
   req.request.ready := true.B
 
   val mem = SyncReadMem(nDatas, UInt(dataWidthBits.W))
@@ -120,7 +125,7 @@ class CScratchpadImp(supportWriteback: Boolean,
   private val totalTx = Reg(new Bundle {
     val memoryAddress = UInt(req.request.bits.memAddr.getWidth.W)
     val scratchpadAddress = UInt(req.request.bits.scAddr.getWidth.W)
-    val memoryLength = UInt((log2Up(supportReadLength)+1).W)
+    val memoryLength = UInt(mem_out.params.addressBits.W)
   })
 
   private val txEmitLengthLg = Wire(UInt(4.W))
@@ -142,7 +147,7 @@ class CScratchpadImp(supportWriteback: Boolean,
     }
 
     is(read_send) {
-      val isBelowLimit = totalTx.memoryLength <= p(MaximumTransactionLength).U
+      val isBelowLimit = totalTx.memoryLength <= p(CacheBlockBytes).U
       txEmitLengthLg := Mux(isBelowLimit, OHToUInt(totalTx.memoryLength), lgMaxTxLength.U)
       mem_out.a.valid := reqAvailable
       when(mem_out.a.fire) {
@@ -151,7 +156,7 @@ class CScratchpadImp(supportWriteback: Boolean,
         req_cache(reqChosen).memoryLength := Mux(isBelowLimit, totalTx.memoryLength, (1 << lgMaxTxLength).U)
         totalTx.memoryLength := totalTx.memoryLength - (1 << lgMaxTxLength).U
         totalTx.scratchpadAddress := totalTx.scratchpadAddress + (loader.spEntriesPerBeat * (1 << lgMaxTxLength) / beatSize).U
-        totalTx.memoryAddress := totalTx.memoryAddress + p(MaximumTransactionLength).U
+        totalTx.memoryAddress := totalTx.memoryAddress + p(CacheBlockBytes).U
         when(isBelowLimit) {
           mem_tx_state := read_process
         }
@@ -226,7 +231,8 @@ class CScratchpadImp(supportWriteback: Boolean,
   if (supportWriteback) {
     require(specialization.isInstanceOf[FlatPackScratchpadParams] && dataWidthBits % 8 == 0)
     val writer = Module(new SequentialWriter(nBytes = dataWidthBits / 8,
-      TLClientNode = outer.mem))
+      TLClientNode = outer.writerNode.get))
+    writer.tl_out <> outer.writerNode.get.out(0)._1
     writer.io.req.valid := req.writeback.valid
     req.writeback.ready := writer.io.req.ready
     writer.io.req.bits.len := req.writeback.bits.len
@@ -234,7 +240,7 @@ class CScratchpadImp(supportWriteback: Boolean,
     val channel = writer.io.channel
     val writebackIdx, written = Reg(UInt(log2Up(nDatas).W))
 
-    val wb_idle :: wb_read :: wb_rewind :: wb_write :: Nil = Enum(3)
+    val wb_idle :: wb_read :: wb_rewind :: wb_write :: Nil = Enum(4)
     val wb_state = RegInit(wb_idle)
     val read_valid = nestPipeline(wb_state === wb_read, latency)
     channel.data.valid := read_valid
