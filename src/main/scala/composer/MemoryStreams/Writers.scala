@@ -3,7 +3,7 @@ package composer.MemoryStreams
 import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config._
-
+import composer.common.CLog2Up
 import freechips.rocketchip.tilelink._
 
 class WriterDataChannelIO(val dWidth: Int) extends Bundle {
@@ -30,6 +30,7 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
   private val beatBytes = edge.manager.beatBytes
   private val addressBits = log2Up(edge.manager.maxAddress)
   private val addressBitsChop = addressBits - log2Up(beatBytes)
+  private val logNBytes = CLog2Up(nBytes)
   val io = IO(new SequentialWriteChannelIO(nBytes))
   val tl_out = IO(new TLBundle(tl_outer.params))
 
@@ -89,9 +90,9 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
         if (nBytes == beatBytes) {
           idx := 0.U
         } else {
-          idx := io.req.bits.addr(log2Ceil(beatBytes), log2Ceil(nBytes))
+          idx := io.req.bits.addr(log2Ceil(beatBytes), logNBytes)
         }
-        req_len := io.req.bits.len >> log2Up(nBytes)
+        req_len := io.req.bits.len >> logNBytes
         addr := io.req.bits.addr >> log2Up(beatBytes)
         dataValid := 0.U
 
