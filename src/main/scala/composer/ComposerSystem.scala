@@ -18,29 +18,37 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
   val nCores = systemParams.nCores
   val coreParams = systemParams.coreParams
 
-  val cores = List.tabulate(nCores) { idx: Int =>
-    LazyModule(new ComposerCoreWrapper(systemParams, idx, system_id))
+  val distributeCores = p(ConstraintHintsKey).contains(ComposerConstraintHint.DistributeCoresAcrossSLRs)
+
+  val cores = List.tabulate(nCores) { idx: Int => (
+    if (distributeCores) idx % p(PlatformNumSLRs) else 0,
+    LazyModule(new ComposerCoreWrapper(systemParams, idx, system_id)))
   }
 
   // we want to avoid high-degree xbars. Recursively make multi-stage xbar network
+  // add an extra buffer for cores off the main SLR
   val memory_nodes = {
-    val core_mems = cores.flatMap(_.mem_nodes).map { mn =>
-      val tli = TLIdentityNode()
-      tli := mn
-      tli
+    val core_mems = cores.flatMap { case (slr, core) =>
+      core.mem_nodes map { mn =>
+        val tli = TLIdentityNode()
+        if (slr != 0)
+          tli := TLBuffer() := mn
+        else
+          tli := mn
+      }
     }
+
+//      .map { case (slr, mn) =>
+//      val tli = TLIdentityNode()
+//      tli := mn
+//      tli
+//    }
 
     println("Core Mems size: " + core_mems.size)
 
     def recursivelyReduceXBar(grp: Seq[TLNode]): Seq[TLIdentityNode] = {
       def help(a: Seq[Seq[TLNode]]): Seq[TLNode] = {
         a.map { r =>
-//          val memory_xbar = LazyModule(new TLXbar())
-//
-//          r.foreach(memory_xbar.node := _)
-//          val memory_xbar_buffer = TLBuffer()
-//          memory_xbar_buffer := memory_xbar.node
-//          memory_xbar_buffer
           val memory_xbar = LazyModule(new TLXbar())
 
           r.foreach(memory_xbar.node := _)
@@ -71,7 +79,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
   // ROUTE OUTGOING COMMANDS THROUGH HERE
   val outgoingCommandXbar = if (systemParams.canIssueCoreCommands) {
     val xbar = LazyModule(new TLXbar())
-    cores.foreach(xbar.node := TLBuffer() := _.externalCoreCommNodes.get)
+    cores.foreach(xbar.node := TLBuffer() := _._2.externalCoreCommNodes.get)
     Some(xbar.node)
   } else None
   // cores have their own independent command client nodes
@@ -131,7 +139,7 @@ case class CChannelIdentifier(system_name: String, core_idx: Int, channel_name: 
 class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) {
   val sw_io = if (outer.systemParams.canReceiveSoftwareCommands) Some(IO(new ComposerSystemIO())) else None
   val respArbiter = Module(new MultiLevelArbiter(new ComposerRoccUserResponse(), outer.systemParams.nCores))
-  val cores = outer.cores.map(_.module)
+  val cores = outer.cores.map(_._2.module)
   val busy = IO(Output(Bool()))
   busy := cores.map(_.io.busy).reduce(_ || _)
 

@@ -280,6 +280,9 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   }
 
   def addrBits: Int = log2Up(p(ExtMem).get.master.size)
+
+  // generate SLR
+
 }
 
 class ComposerSystemIO(implicit p: Parameters) extends Bundle {
