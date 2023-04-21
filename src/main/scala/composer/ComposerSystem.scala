@@ -338,7 +338,8 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     cores(0).read_ios(0)._2.valid := false.B
     cores(0).write_ios(0)._2.valid := true.B
   }
-  val txLenFromCmd = cmd.bits.payload1(addressBits - 1, 0)
+  println("address bits is " + addressBits)
+  val txLenFromCmd = if (addressBits > 0) cmd.bits.payload1(addressBits - 1, 0) else 0.U
 
   @tailrec
   private def assign_channel_addresses(coreId: Int, channelList: List[((String, Int), DecoupledIO[ChannelTransactionBundle])],
