@@ -1,6 +1,7 @@
 package composer
 
 import chipsalliance.rocketchip.config._
+import composer.ComposerConstraintHint.ComposerConstraintHint
 import composer.MemoryStreams._
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.devices.tilelink._
@@ -46,12 +47,12 @@ case class ComposerSystemParams(nCores: Int,
 
 object ComposerConstraintHint extends Enumeration {
   val DistributeCoresAcrossSLRs = Value
-  type ConstraintHints = Value
+  type ComposerConstraintHint = Value
 }
 
 case object ConstraintHintsKey extends Field[List[ComposerConstraintHint.type]]
 
-class WithComposer(constraintHints: List[ComposerConstraintHint.type] = List.empty) extends Config((site, _, _) => {
+class WithComposer(constraintHints: List[ComposerConstraintHint] = List.empty) extends Config((site, _, _) => {
   case ComposerSystemsKey => Seq()
   case TLInterconnectWidthBytes => 16
 //  case MaxChannelTransactionLenKey => 1 << 30

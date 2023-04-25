@@ -60,8 +60,6 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
   private val req_tx_max_length_beats = (1L << addressBits) / nBytes
   private val req_tx_mlb_bits = log2Up(req_tx_max_length_beats)
   private val req_len = Reg(UInt(req_tx_mlb_bits.W))
-  println("address bits: " + addressBits)
-  println("rtmb: " + req_tx_mlb_bits)
 
   private val nextAddr = addr + 1.U
 

@@ -2,7 +2,7 @@ package composer
 
 import chipsalliance.rocketchip.config._
 
-import chisel3.experimental.{ChiselEnum, EnumFactory}
+import chisel3.experimental._
 import chisel3.util.log2Up
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import composer.RoccHelpers.MCRFileMap
@@ -95,7 +95,6 @@ object CppGeneration {
     val max_core_per_system = acc.systems.map(_.nCores).max
     val max_channels_per_channelGroup = {
       val g = acc.systems.flatMap(_.module.core_io_mappings.flatMap(_.map(_.channel_subidx)))
-      println(g)
       if (g.isEmpty) -1
       else g.max + 1
     }

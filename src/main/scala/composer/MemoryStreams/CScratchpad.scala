@@ -101,9 +101,12 @@ class CScratchpadImp(supportWriteback: Boolean,
 
   private val read_idle :: read_send :: read_process :: Nil = Enum(3)
   private val mem_tx_state = RegInit(read_idle)
+
   access.readRes.valid := nestPipeline(access.readReq.valid, latency)
-  private val rval = mem.read(access.readReq.bits, access.readReq.valid)
-  access.readRes.bits := nestPipeline(rval, latency - 1)
+  private val r_valid = if (latency >= 2) RegNext(access.readReq.valid) else access.readReq.valid
+  private val r_addr = if (latency >= 2) RegNext(access.readReq.bits) else access.readReq.bits
+  private val rval = mem.read(r_addr, r_valid)
+  access.readRes.bits := (if (latency > 2) nestPipeline(rval, latency - 2) else rval)
   // in-flight read tx busy bits
 
   req.request.ready := mem_tx_state === read_idle
@@ -136,39 +139,34 @@ class CScratchpadImp(supportWriteback: Boolean,
     lgSize = txEmitLengthLg)._2
   mem_out.a.valid := mem_tx_state === read_send
 
-  switch(mem_tx_state) {
-    is(read_idle) {
-      when(req.request.fire) {
-        totalTx.memoryLength := req.request.bits.len
-        totalTx.scratchpadAddress := req.request.bits.scAddr
-        totalTx.memoryAddress := req.request.bits.memAddr
-        mem_tx_state := read_send
+  when (mem_tx_state === read_idle) {
+    when(req.request.fire) {
+      totalTx.memoryLength := req.request.bits.len
+      totalTx.scratchpadAddress := req.request.bits.scAddr
+      totalTx.memoryAddress := req.request.bits.memAddr
+      mem_tx_state := read_send
+    }
+  }.elsewhen (mem_tx_state === read_send) {
+    val isBelowLimit = totalTx.memoryLength <= p(CacheBlockBytes).U
+    txEmitLengthLg := Mux(isBelowLimit, OHToUInt(totalTx.memoryLength), lgMaxTxLength.U)
+    mem_out.a.valid := reqAvailable
+    when(mem_out.a.fire) {
+      reqIdleBits(reqChosen) := false.B
+      req_cache(reqChosen).scratchpadAddress := totalTx.scratchpadAddress
+      req_cache(reqChosen).memoryLength := Mux(isBelowLimit, totalTx.memoryLength, (1 << lgMaxTxLength).U)
+      totalTx.memoryLength := totalTx.memoryLength - (1 << lgMaxTxLength).U
+      totalTx.scratchpadAddress := totalTx.scratchpadAddress + (loader.spEntriesPerBeat * (1 << lgMaxTxLength) / beatSize).U
+      totalTx.memoryAddress := totalTx.memoryAddress + p(CacheBlockBytes).U
+      when(isBelowLimit) {
+        mem_tx_state := read_process
       }
     }
-
-    is(read_send) {
-      val isBelowLimit = totalTx.memoryLength <= p(CacheBlockBytes).U
-      txEmitLengthLg := Mux(isBelowLimit, OHToUInt(totalTx.memoryLength), lgMaxTxLength.U)
-      mem_out.a.valid := reqAvailable
-      when(mem_out.a.fire) {
-        reqIdleBits(reqChosen) := false.B
-        req_cache(reqChosen).scratchpadAddress := totalTx.scratchpadAddress
-        req_cache(reqChosen).memoryLength := Mux(isBelowLimit, totalTx.memoryLength, (1 << lgMaxTxLength).U)
-        totalTx.memoryLength := totalTx.memoryLength - (1 << lgMaxTxLength).U
-        totalTx.scratchpadAddress := totalTx.scratchpadAddress + (loader.spEntriesPerBeat * (1 << lgMaxTxLength) / beatSize).U
-        totalTx.memoryAddress := totalTx.memoryAddress + p(CacheBlockBytes).U
-        when(isBelowLimit) {
-          mem_tx_state := read_process
-        }
-      }
-    }
-
-    is(read_process) {
-      when(reqIdleBits.reduce(_ && _)) {
-        mem_tx_state := read_idle
-      }
+  }.otherwise {
+    when(reqIdleBits.reduce(_ && _)) {
+      mem_tx_state := read_idle
     }
   }
+
   loader.io.cache_block_in.valid := mem_out.d.valid
   loader.io.cache_block_in.bits.dat := mem_out.d.bits.data
   val rsource = mem_out.d.bits.source
@@ -255,7 +253,7 @@ class CScratchpadImp(supportWriteback: Boolean,
       }
       is (wb_read) {
         req.request.ready := false.B
-        val read = nestPipeline(mem.read(writebackIdx), latency - 1)
+        val read = if (latency > 1) nestPipeline(mem.read(writebackIdx), latency - 1) else mem.read(writebackIdx)
         channel.data.bits := read
 
         when (read_valid && channel.data.ready) {

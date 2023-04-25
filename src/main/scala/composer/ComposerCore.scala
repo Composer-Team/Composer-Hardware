@@ -107,7 +107,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   var read_ios: List[((String, Int), DecoupledIO[ChannelTransactionBundle])] = List()
   var write_ios: List[((String, Int), DecoupledIO[ChannelTransactionBundle])] = List()
 
-  val cache_invalidate_ios = composerConstructor.composerCoreWrapper.CacheNodes.map(_._2._1.module.io_invalidate)
+//  val cache_invalidate_ios = composerConstructor.composerCoreWrapper.CacheNodes.map(_._2._1.module.io_invalidate)
 
   def getCoreID: Int = composerConstructor.composerCoreWrapper.core_id
 
@@ -187,7 +187,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     val params = outer.coreParams.memoryChannelParams.filter(_.name == name)
     require(params.length == 1, "Found writer descriptions (" + params.length + "). If > 1, then you have defined the" +
       " same group multiple times. If =0, then you have not described this writer group.")
-    val param = params(0).asInstanceOf[CWriteChannelParams]
+//    val param = params(0).asInstanceOf[CWriteChannelParams]
     val mod = idx match {
       case Some(id) => List(Module(new SequentialWriter(dataBytes, getTLClients(name, outer.writers)(id))))
       case None => getTLClients(name, outer.writers).map(tab_id => Module(new SequentialWriter(dataBytes, tab_id)))
@@ -280,8 +280,6 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   }
 
   def addrBits: Int = log2Up(p(ExtMem).get.master.size)
-
-  // generate SLR
 
 }
 

@@ -227,5 +227,6 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   }
 
   // try to make this the last thing we do
-  genCPPHeader(outer.cmd_resp_axilhub.axil_widget.module.crRegistry, acc.acc)
+  CppGeneration.genCPPHeader(outer.cmd_resp_axilhub.axil_widget.module.crRegistry, acc.acc)
+  ConstraintGeneration.writeConstraints()
 }

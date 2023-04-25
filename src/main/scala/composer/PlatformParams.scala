@@ -14,7 +14,12 @@ case object AXILSlaveAddressMask extends Field[Long]
 case object AXILSlaveBeatBytes extends Field[Int]
 
 // implementation specifics
+case object PlatformSLRs extends Field[Option[Seq[SLRName]]]
 case object PlatformNumSLRs extends Field[Int]
+
+case object IsAWS extends Field[Boolean]
+
+case class SLRName(name: String, default: Boolean = false)
 
 sealed class WithAWSPlatform(nMemoryChannels: Int) extends Config((_, _, _) => {
   // why did this ever become 128? It's 2X the bus width... That doesn't seem to make much sense...
@@ -39,7 +44,10 @@ sealed class WithAWSPlatform(nMemoryChannels: Int) extends Config((_, _, _) => {
   case MMIOBaseAddress => 0L
   case AXILSlaveBeatBytes => 4
   case CoreCommandLatency => 4
+
   case PlatformNumSLRs => 3
+  case PlatformSLRs => Some(Seq(SLRName("pblock_CL_bot"), SLRName("pblock_CL_mid", default = true), SLRName("pblock_CL_top")))
+  case IsAWS => true
 })
 
 sealed class WithKriaPlatform extends Config((_, _, _) => {
@@ -60,5 +68,12 @@ sealed class WithKriaPlatform extends Config((_, _, _) => {
   case HasDiscreteMemory => false
   case AXILSlaveBeatBytes => 4
   case CoreCommandLatency => 0
+
   case PlatformNumSLRs => 1
+  case PlatformSLRs => None
+  case IsAWS => false
 })
+
+object SLRConstants {
+  final val DEFAULT_SLR = 0
+}

@@ -298,7 +298,6 @@ class MCRFileModuleTL(outer: MCRFileTL, numRegs: Int)(implicit p: Parameters) ex
         param := in.a.bits.size
         val start = log2Up(p(AXILSlaveBeatBytes))
         val end = start + log2Up(numRegs) - 1
-        println(p(AXILSlaveBeatBytes))
         address := in.a.bits.address(end, start)
         when (in.a.bits.opcode === TLMessages.PutFullData || in.a.bits.opcode === TLMessages.PutPartialData) {
           state := s_write

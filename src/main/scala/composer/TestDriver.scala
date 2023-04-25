@@ -8,12 +8,15 @@ import os.Path
 
 object TestDriver {
   def buildConfig(config: Config): Unit = {
+    if (System.getenv("COMPOSER_ROOT") == null) {
+      System.err.println("Environment variables 'COMPOSER_ROOT' is not visible. Please define or configure IDE to see this enviornment variable")
+      throw new Exception
+    }
     val gsrc_dir = Path(System.getenv("COMPOSER_ROOT")) / "Composer-Hardware" / "vsim" / "generated-src"
-    println("Writing to " + gsrc_dir.toString())
     os.makeDir.all(gsrc_dir)
     val full_name = config.getClass.getCanonicalName
     val short_name = full_name.split('.').last
-    println(full_name + " " + short_name)
+    println("Elaborating config: " + short_name)
     new RocketChipStage().execute(
       args = Array("-td", gsrc_dir.toString(),
         "-T", "composer.ComposerTop",

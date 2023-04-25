@@ -1,140 +1,16 @@
-package composer
-
-import chipsalliance.rocketchip.config._
+package composer.Systems
 
 import chisel3.util._
 import chisel3._
-import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
-import composer.MemoryStreams._
-import composer.RoccHelpers.{ComposerConsts, ComposerFunc}
-import composer.TLManagement.{TLClientModule, TLManagerModule}
+import composer.ComposerParams._
+import composer.MemoryStreams.ChannelTransactionBundle
+import composer._
+import composer.RoccHelpers._
+import composer.TLManagement._
 import composer.common._
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.tilelink._
+import freechips.rocketchip.diplomacy.LazyModuleImp
 
 import scala.annotation.tailrec
-
-class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)(implicit p: Parameters) extends LazyModule {
-  val nCores = systemParams.nCores
-  val coreParams = systemParams.coreParams
-
-  val distributeCores = p(ConstraintHintsKey).contains(ComposerConstraintHint.DistributeCoresAcrossSLRs)
-
-  val cores = List.tabulate(nCores) { idx: Int => (
-    if (distributeCores) idx % p(PlatformNumSLRs) else 0,
-    LazyModule(new ComposerCoreWrapper(systemParams, idx, system_id)))
-  }
-
-  // we want to avoid high-degree xbars. Recursively make multi-stage xbar network
-  // add an extra buffer for cores off the main SLR
-  val memory_nodes = {
-    val core_mems = cores.flatMap { case (slr, core) =>
-      core.mem_nodes map { mn =>
-        val tli = TLIdentityNode()
-        if (slr != 0)
-          tli := TLBuffer() := mn
-        else
-          tli := mn
-      }
-    }
-
-//      .map { case (slr, mn) =>
-//      val tli = TLIdentityNode()
-//      tli := mn
-//      tli
-//    }
-
-    println("Core Mems size: " + core_mems.size)
-
-    def recursivelyReduceXBar(grp: Seq[TLNode]): Seq[TLIdentityNode] = {
-      def help(a: Seq[Seq[TLNode]]): Seq[TLNode] = {
-        a.map { r =>
-          val memory_xbar = LazyModule(new TLXbar())
-
-          r.foreach(memory_xbar.node := _)
-          val memory_xbar_buffer = TLBuffer()
-          memory_xbar_buffer := memory_xbar.node
-          memory_xbar_buffer
-        }
-      }
-
-      def mapToEndpoint(x: TLNode): TLIdentityNode = {
-        val memory_endpoint_identity = TLIdentityNode()
-        memory_endpoint_identity := x
-        memory_endpoint_identity
-      }
-
-      if (grp.length <= p(CXbarMaxDegree)) grp.map(mapToEndpoint)
-      else {
-        val groups = grp.grouped(p(CXbarMaxDegree))
-        recursivelyReduceXBar(help(groups.toSeq)).map(mapToEndpoint)
-      }
-    }
-
-    recursivelyReduceXBar(core_mems)
-  }
-
-  /* SEND OUT STUFF*/
-
-  // ROUTE OUTGOING COMMANDS THROUGH HERE
-  val outgoingCommandXbar = if (systemParams.canIssueCoreCommands) {
-    val xbar = LazyModule(new TLXbar())
-    cores.foreach(xbar.node := TLBuffer() := _._2.externalCoreCommNodes.get)
-    Some(xbar.node)
-  } else None
-  // cores have their own independent command client nodes
-
-  // SEND OUT COMMAND RESPONSES FROM A SYSTEM HERE
-  val (outgoingInternalResponseClient, outgoingInternalResponseXbar) = if (p(RequireInternalCommandRouting)) {
-    val client = TLClientNode(Seq(TLMasterPortParameters.v1(
-      clients = Seq(TLMasterParameters.v1(
-        name = s"InternalReponseNode_${systemParams.name}",
-        sourceId = IdRange(0, 1),
-        // TODO this only needs 20B but we ask for 32 - wasteful?
-        supportsProbe = TransferSizes(1 << log2Up(ComposerRoccResponse.getWidthBytes)),
-        supportsPutFull = TransferSizes(1 << log2Up(ComposerRoccResponse.getWidthBytes))
-      )))))
-    val xbar = LazyModule(new TLXbar())
-    xbar.node := client
-    (Some(client), Some(xbar.node))
-  } else (None, None)
-
-  /* RECIEVE STUFF */
-
-  // INTERNAL COMMAND MANAGER NODE
-  val (internalCommandManager, incomingInternalCommandXbar) = if (p(RequireInternalCommandRouting)) {
-    val l2u_crc = 1 << log2Up(ComposerRoccCommand.packLengthBytes)
-
-    val manager = TLManagerNode(Seq(TLSlavePortParameters.v1(
-      managers = Seq(TLSlaveParameters.v2(
-        address = Seq(ComposerConsts.getInternalCmdRoutingAddressSet(system_id)),
-        supports = TLMasterToSlaveTransferSizes(
-          putFull = TransferSizes(l2u_crc)
-        ))),
-      beatBytes = l2u_crc)))
-    val xbar = LazyModule(new TLXbar())
-    manager := TLBuffer() := xbar.node
-
-    (Some(manager), Some(xbar.node))
-  } else (None, None)
-
-  val (incomingInternalResponseManager, incomingInternalResponseXBar) = if (systemParams.canIssueCoreCommands) {
-    val manager = TLManagerNode(
-      Seq(TLSlavePortParameters.v1(
-        managers = Seq(TLSlaveParameters.v1(
-          Seq(ComposerConsts.getInternalCmdRoutingAddressSet(system_id)),
-          supportsPutFull = TransferSizes(ComposerRoccResponse.getWidthBytes)
-        )), beatBytes = ComposerRoccResponse.getWidthBytes
-      )))
-    val xbar = LazyModule(new TLXbar())
-    manager := xbar.node
-    (Some(manager), Some(xbar.node))
-  } else (None, None)
-
-  lazy val module = new ComposerSystemImp(this)
-}
-
-case class CChannelIdentifier(system_name: String, core_idx: Int, channel_name: String, channel_subidx: Int, io_idx: Int)
 
 class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) {
   val sw_io = if (outer.systemParams.canReceiveSoftwareCommands) Some(IO(new ComposerSystemIO())) else None
@@ -142,6 +18,26 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   val cores = outer.cores.map(_._2.module)
   val busy = IO(Output(Bool()))
   busy := cores.map(_.io.busy).reduce(_ || _)
+
+  if (ConstraintGeneration.canDistributeOverSLRs()) {
+    // need to generate clock signals on secondary SLRs to ease routing
+    val slr_ctrls: Map[Int, Clock] = Map.from((0 until p(PlatformNumSLRs)).filter(_ != SLRConstants.DEFAULT_SLR).map { slr =>
+      val CLmodName = f"System${outer.systemParams.name}_SLRClockCrossing_${slr}_clock"
+      val cl_mod = Module(new BUFG)
+      cl_mod.suggestName(CLmodName)
+      cl_mod.io.I := clock.asBool
+      ConstraintGeneration.addToSLR(CLmodName, slr)
+      (slr, cl_mod.io.O.asClock)
+    } ++ Seq((SLRConstants.DEFAULT_SLR, clock)))
+    outer.cores.foreach { case (slr_id, core) =>
+      core.module.clock := slr_ctrls(slr_id)
+    }
+
+    outer.flagAlternativeSLR.foreach { case (lm, slr) =>
+      val imp = lm.module.asInstanceOf[LazyModuleImp]
+      imp.clock := slr_ctrls(slr)
+    }
+  }
 
   val validSrcs = Seq(sw_io, outer.internalCommandManager).filter(_.isDefined)
   // if sources can come from multiple domains (sw, other systems), then we have to remember where cmds came from
@@ -338,9 +234,9 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     cores(0).read_ios(0)._2.valid := false.B
     cores(0).write_ios(0)._2.valid := true.B
   }
-  println("address bits is " + addressBits)
   val txLenFromCmd = if (addressBits > 0) cmd.bits.payload1(addressBits - 1, 0) else 0.U
 
+  case class CChannelIdentifier(system_name: String, core_idx: Int, channel_name: String, channel_subidx: Int, io_idx: Int)
   @tailrec
   private def assign_channel_addresses(coreId: Int, channelList: List[((String, Int), DecoupledIO[ChannelTransactionBundle])],
                                        assignment: Int = 0,
