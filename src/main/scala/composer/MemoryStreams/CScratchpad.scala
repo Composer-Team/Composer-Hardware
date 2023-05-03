@@ -1,13 +1,13 @@
 package composer.MemoryStreams
 
 import chipsalliance.rocketchip.config._
-
-
 import chisel3._
 import chisel3.util._
+import composer.DRAMBankBytes
 import composer.MemoryStreams.Loaders.CScratchpadPackedSubwordLoader
+import composer.common.CLog2Up
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.subsystem.CacheBlockBytes
+import freechips.rocketchip.subsystem.{CacheBlockBytes, ExtMem}
 import freechips.rocketchip.tilelink._
 
 import scala.annotation.tailrec
@@ -49,23 +49,17 @@ class CScratchpad(supportWriteback: Boolean,
   require(dataWidthBits > 0)
   require(nDatas > 0)
 
+  val channelWidthBytes = p(ExtMem).get.master.beatBytes
+
   val mem = TLClientNode(Seq(TLMasterPortParameters.v2(
     masters = Seq(TLMasterParameters.v1(
       name = "ScratchpadToMemory",
       sourceId = IdRange(0, 16),
-      supportsProbe = TransferSizes(1, p(CacheBlockBytes)),
-      supportsGet = TransferSizes(1, p(CacheBlockBytes)),
-      supportsPutFull = TransferSizes(1, p(CacheBlockBytes))
+      supportsProbe = TransferSizes(1, channelWidthBytes),
+      supportsGet = TransferSizes(1, channelWidthBytes),
+      supportsPutFull = TransferSizes(1, channelWidthBytes)
     )),
-    channelBytes = TLChannelBeatBytes(p(CacheBlockBytes)))))
-  val writerNode = if (supportWriteback) Some(TLClientNode(Seq(TLMasterPortParameters.v2(
-    masters = Seq(TLMasterParameters.v1(
-      name = "ScratchpadWriteback",
-      sourceId = IdRange(0, 4),
-      supportsPutFull = TransferSizes(1, p(CacheBlockBytes)),
-      supportsProbe = TransferSizes(1, p(CacheBlockBytes))
-    ))
-  )))) else None
+    channelBytes = TLChannelBeatBytes(channelWidthBytes))))
   lazy val module = new CScratchpadImp(supportWriteback, dataWidthBits, nDatas, latency, specialization, this)
 }
 
@@ -76,9 +70,12 @@ class CScratchpadImp(supportWriteback: Boolean,
                      specialization: CScratchpadSpecialization,
                      outer: CScratchpad) extends LazyModuleImp(outer) {
   val (mem_out, mem_edge) = outer.mem.out(0)
-  val beatSize = mem_edge.manager.beatBytes
   val scReqBits = log2Up(nDatas)
-  val lgMaxTxLength = log2Up(p(CacheBlockBytes))
+
+  val maxTxLength = outer.channelWidthBytes
+  val lgMaxTxLength = log2Up(maxTxLength)
+
+  val pageLength = p(DRAMBankBytes)
 
   @tailrec
   private def nestPipeline[T <: Data](a: T, depth: Int): T = {
@@ -94,9 +91,9 @@ class CScratchpadImp(supportWriteback: Boolean,
 
   private val loader = Module(specialization match {
     case psw: PackedSubwordScratchpadParams =>
-      new CScratchpadPackedSubwordLoader(dataWidthBits, scReqBits, psw.wordSizeBits, psw.datsPerSubword, beatSize)
+      new CScratchpadPackedSubwordLoader(dataWidthBits, scReqBits, psw.wordSizeBits, psw.datsPerSubword, maxTxLength)
     case _: FlatPackScratchpadParams =>
-      new CScratchpadPackedSubwordLoader(dataWidthBits, scReqBits, dataWidthBits, 1, beatSize)
+      new CScratchpadPackedSubwordLoader(dataWidthBits, scReqBits, dataWidthBits, 1, maxTxLength)
   })
 
   private val read_idle :: read_send :: read_process :: Nil = Enum(3)
@@ -117,13 +114,19 @@ class CScratchpadImp(supportWriteback: Boolean,
   // only consider non-busy transactions to be the
   private val req_cache = Reg(Vec(mem_edge.master.endSourceId, new Bundle() {
     val scratchpadAddress = UInt(req.request.bits.scAddr.getWidth.W)
-    val memoryLength = UInt(16.W)
+    val memoryLength = UInt(mem_out.params.addressBits.W)
+    val memAddr = UInt(mem_out.params.addressBits.W)
   }))
+  /* handle progress monitoring */
 
-  when(req.request.valid && ((req.request.bits.len & (req.request.bits.len - 1.U)) =/= 0.U)) {
-    printf("Len is not pow2: %d\n", req.request.bits.len)
-    assert(false.B)
+  class ProgressStat extends Bundle {
+    val progress = UInt((1 + scReqBits).W)
+    val valid = Bool()
+    val complete = Bool()
   }
+
+  val perSourceProgress = Reg(Vec(mem_edge.master.endSourceId, new ProgressStat()))
+  val loaderSource = Reg(UInt(mem_out.params.sourceBits.W))
 
   private val totalTx = Reg(new Bundle {
     val memoryAddress = UInt(req.request.bits.memAddr.getWidth.W)
@@ -133,11 +136,34 @@ class CScratchpadImp(supportWriteback: Boolean,
 
   private val txEmitLengthLg = Wire(UInt(4.W))
   txEmitLengthLg := 0.U
-  mem_out.a.bits := mem_edge.Get(
-    fromSource = reqChosen,
-    toAddress = totalTx.memoryAddress,
-    lgSize = txEmitLengthLg)._2
-  mem_out.a.valid := mem_tx_state === read_send
+
+  // relaunch transactions at bank granularity
+  val rsource = mem_out.d.bits.source
+  val prevProcessed = Reg(rsource.cloneType)
+  val prevDone = Reg(Bool())
+  val relaunch_queue = Module(new Queue[UInt](reqChosen.cloneType, mem_edge.master.endSourceId))
+  relaunch_queue.io.enq.valid := false.B
+  relaunch_queue.io.enq.bits := rsource
+  relaunch_queue.io.deq.ready := false.B
+  when(relaunch_queue.io.deq.valid) {
+    mem_out.a.valid := true.B
+    val rl_id = relaunch_queue.io.deq.bits
+    val mem_length = req_cache(rl_id).memoryLength
+    val tx_size = Mux(mem_length < maxTxLength.U, OHToUInt(mem_length), lgMaxTxLength.U)
+    mem_out.a.bits := mem_edge.Get(
+      fromSource = rl_id,
+      toAddress = req_cache(rl_id).memAddr,
+      lgSize = tx_size
+    )._2
+    relaunch_queue.io.deq.ready := mem_out.a.ready
+  }.otherwise {
+    mem_out.a.valid := mem_tx_state === read_send
+    mem_out.a.bits := mem_edge.Get(
+      fromSource = reqChosen,
+      toAddress = totalTx.memoryAddress,
+      lgSize = txEmitLengthLg)._2
+  }
+
 
   when (mem_tx_state === read_idle) {
     when(req.request.fire) {
@@ -145,20 +171,55 @@ class CScratchpadImp(supportWriteback: Boolean,
       totalTx.scratchpadAddress := req.request.bits.scAddr
       totalTx.memoryAddress := req.request.bits.memAddr
       mem_tx_state := read_send
+      prevDone := false.B
+      perSourceProgress foreach { pss =>
+        pss.valid := false.B
+        pss.complete := false.B
+      }
+
+      // sanity check
+      val low_order = req.request.bits.len(lgMaxTxLength - 1, 0)
+      val low_order_is_pow_2 = !(low_order & (low_order - 1.U)).orR
+      assert(low_order_is_pow_2,
+        "Transaction length must be approximately a multiple of the cache block size.\n" +
+          "Length detected: %d\n" +
+          "Length %% " + maxTxLength + " must be a power of two\n" +
+          "Low order bits found: %x\n", req.request.bits.len, low_order)
+
+      val alignment = Mux(req.request.bits.len < maxTxLength.U, req.request.bits.len, maxTxLength.U)
+      val alignment_is_power_2 = ((alignment - 1.U) & alignment) === 0.U
+      assert(alignment_is_power_2, "Alignment must be a power of two. Found %d\n", alignment)
+      val alignmentSubsets = VecInit((0 until req.request.bits.memAddr.getWidth).map(width => req.request.bits.memAddr(width, 0)))
+      assert(alignmentSubsets(OHToUInt(alignment)-1.U) === 0.U, "\nAlignment not met!\n Alignment required: %x, Low order bits of address(%x): %x\n",
+        alignment,
+        req.request.bits.memAddr,
+        alignmentSubsets(OHToUInt(alignment)))
+
     }
   }.elsewhen (mem_tx_state === read_send) {
-    val isBelowLimit = totalTx.memoryLength <= p(CacheBlockBytes).U
-    txEmitLengthLg := Mux(isBelowLimit, OHToUInt(totalTx.memoryLength), lgMaxTxLength.U)
-    mem_out.a.valid := reqAvailable
-    when(mem_out.a.fire) {
-      reqIdleBits(reqChosen) := false.B
-      req_cache(reqChosen).scratchpadAddress := totalTx.scratchpadAddress
-      req_cache(reqChosen).memoryLength := Mux(isBelowLimit, totalTx.memoryLength, (1 << lgMaxTxLength).U)
-      totalTx.memoryLength := totalTx.memoryLength - (1 << lgMaxTxLength).U
-      totalTx.scratchpadAddress := totalTx.scratchpadAddress + (loader.spEntriesPerBeat * (1 << lgMaxTxLength) / beatSize).U
-      totalTx.memoryAddress := totalTx.memoryAddress + p(CacheBlockBytes).U
-      when(isBelowLimit) {
-        mem_tx_state := read_process
+    when (!relaunch_queue.io.deq.valid) { // whenever relaunch is ongoing, we need to launch txs from elsewhere.
+                                          // They have precedence
+      val isBelowLimit = totalTx.memoryLength <= maxTxLength.U
+      txEmitLengthLg := Mux(isBelowLimit, OHToUInt(totalTx.memoryLength), lgMaxTxLength.U)
+      mem_out.a.valid := reqAvailable
+      val isBelowPage = totalTx.memoryLength <= pageLength.U
+      when(mem_out.a.fire) {
+        reqIdleBits(reqChosen) := false.B
+        req_cache(reqChosen).scratchpadAddress := totalTx.scratchpadAddress
+        req_cache(reqChosen).memoryLength := Mux(isBelowPage, totalTx.memoryLength, pageLength.U)
+        req_cache(reqChosen).memAddr := totalTx.memoryAddress
+
+        totalTx.memoryLength := Mux(isBelowPage, 0.U, totalTx.memoryLength - pageLength.U)
+        totalTx.scratchpadAddress := totalTx.scratchpadAddress + (loader.spEntriesPerBeat * pageLength / maxTxLength).U
+        totalTx.memoryAddress := totalTx.memoryAddress + pageLength.U
+
+        perSourceProgress(reqChosen).progress := totalTx.scratchpadAddress
+        perSourceProgress(reqChosen).complete := false.B
+        perSourceProgress(reqChosen).valid := true.B
+
+        when(isBelowPage) {
+          mem_tx_state := read_process
+        }
       }
     }
   }.otherwise {
@@ -169,58 +230,91 @@ class CScratchpadImp(supportWriteback: Boolean,
 
   loader.io.cache_block_in.valid := mem_out.d.valid
   loader.io.cache_block_in.bits.dat := mem_out.d.bits.data
-  val rsource = mem_out.d.bits.source
-  when(req_cache(rsource).memoryLength >= beatSize.U) {
-    loader.io.cache_block_in.bits.len := beatSize.U
+  when(req_cache(rsource).memoryLength >= maxTxLength.U) {
+    loader.io.cache_block_in.bits.len := maxTxLength.U
   }.otherwise {
     loader.io.cache_block_in.bits.len := req_cache(rsource).memoryLength
   }
   loader.io.cache_block_in.bits.idxBase := req_cache(rsource).scratchpadAddress
   mem_out.d.ready := loader.io.cache_block_in.ready
   loader.io.sp_write_out.ready := true.B
-  when(loader.io.cache_block_in.fire) {
-    req_cache(rsource).scratchpadAddress := req_cache(rsource).scratchpadAddress + loader.spEntriesPerBeat.U
-  }
 
-  /* handle progress monitoring */
-  val progressReg = RegInit(0.U((loader.io.sp_write_out.bits.idx.getWidth + 1).W))
-  val perSourceProgress = Reg(Vec(mem_edge.master.endSourceId, UInt((1 + scReqBits).W)))
-  val loadersActive = Reg(Vec(mem_edge.master.endSourceId, Bool()))
-  when (req.request.fire) {
-    loadersActive.foreach(_ := false.B)
-  }
-  when (mem_out.a.fire) {
-    loadersActive(reqChosen) := true.B
-    perSourceProgress(reqChosen) := totalTx.scratchpadAddress
-  }
-  val loaderSource = Reg(UInt(mem_out.params.sourceBits.W))
-  val lowestActive = PriorityEncoder(loadersActive)
-  val haveActive = loadersActive.reduce(_ || _) || !loader.io.cache_block_in.ready
 
-  when (loader.io.cache_block_in.ready && !RegNext(loader.io.cache_block_in.ready)) {
-    loadersActive(loaderSource) := !reqIdleBits(loaderSource)
-  }
+  val mergedStat = {
+    // collate progress statistics
+    // lower ps has precedence
+    def collapseStat(ps1: ProgressStat, ps2: ProgressStat): ProgressStat = {
+      val stat = Wire(new ProgressStat)
+      stat.valid := false.B
+      stat.complete := DontCare
+      stat.progress := DontCare
+      when(ps1.valid && ps2.valid) {
+        val ps1less = ps1.progress < ps2.progress
+        when(ps1less && !ps1.complete) {
+          stat := ps1
+        }.elsewhen(!ps2.complete) {
+          stat := ps2
+        }.elsewhen(ps1less) {
+          stat := ps2
+        }.otherwise {
+          stat := ps1
+        }
+      }.elsewhen(ps1.valid) {
+        stat := ps1
+      }.elsewhen(ps2.valid) {
+        stat := ps2
+      }
 
-  when (RegNext(haveActive)) {
-    progressReg := perSourceProgress(RegNext(lowestActive))
+      val r = Reg(new ProgressStat())
+      when (req.request.fire) {
+        r.valid := false.B
+        r.progress := 0.U
+        r.complete := false.B
+      }.otherwise {
+        r := stat
+      }
+      r
+
+    }
+
+    @tailrec
+    def recurseStat(stats: Seq[ProgressStat]): ProgressStat = {
+      if (stats.length == 1) stats(0)
+      else {
+        val groups = stats.grouped(2).map(a => collapseStat(a(0), a(1))).toSeq
+        recurseStat(groups)
+      }
+    }
+    val ms = recurseStat(perSourceProgress)
+    Mux(ms.valid, ms.progress, 0.U)
   }
+  req.progress := mergedStat
 
   when(mem_out.d.fire) {
-    req_cache(rsource).memoryLength := req_cache(rsource).memoryLength - beatSize.U
+    req_cache(rsource).memoryLength := req_cache(rsource).memoryLength - maxTxLength.U
+    req_cache(rsource).scratchpadAddress := req_cache(rsource).scratchpadAddress + loader.spEntriesPerBeat.U
+    req_cache(rsource).memAddr := req_cache(rsource).memAddr + maxTxLength.U
     loaderSource := mem_out.d.bits.source
-    when(req_cache(rsource).memoryLength <= beatSize.U) {
+    prevProcessed := rsource
+    when(req_cache(rsource).memoryLength <= maxTxLength.U) {
       reqIdleBits(rsource) := true.B
+      prevDone := true.B
+    }.otherwise {
+      // transaction has to keep going, emit another segment
+      relaunch_queue.io.enq.valid := true.B
+      assert(relaunch_queue.io.enq.ready)
+      prevDone := false.B
     }
   }
-  req.progress := progressReg
+
   when(loader.io.sp_write_out.valid) {
     mem.write(loader.io.sp_write_out.bits.idx, loader.io.sp_write_out.bits.dat)
-    perSourceProgress(loaderSource) := loader.io.sp_write_out.bits.idx +& 1.U
+    perSourceProgress(loaderSource).progress := loader.io.sp_write_out.bits.idx +& 1.U
   }
 
-  when(req.request.fire) {
-    progressReg := 0.U
-    perSourceProgress.foreach(_ := 0.U)
+  // processing a new cache block
+  when (loader.io.cache_block_in.ready && !RegNext(loader.io.cache_block_in.ready) && prevDone && reqIdleBits(prevProcessed)) {
+    perSourceProgress(prevProcessed).complete := true.B
   }
 
   when(access.writeReq.valid) {
@@ -229,8 +323,17 @@ class CScratchpadImp(supportWriteback: Boolean,
   if (supportWriteback) {
     require(specialization.isInstanceOf[FlatPackScratchpadParams] && dataWidthBits % 8 == 0)
     val writer = Module(new SequentialWriter(nBytes = dataWidthBits / 8,
-      TLClientNode = outer.writerNode.get))
-    writer.tl_out <> outer.writerNode.get.out(0)._1
+      TLClientNode = outer.mem))
+    writer.tl_out.a.ready := false.B
+    writer.tl_out.d.valid := false.B
+    writer.tl_out.d.bits := DontCare
+    val wb_idle :: wb_read :: wb_rewind :: wb_write :: Nil = Enum(4)
+    val wb_state = RegInit(wb_idle)
+
+    when (wb_state =/= wb_idle) {
+      req.request.ready := false.B
+      writer.tl_out <> mem_out
+    }
     writer.io.req.valid := req.writeback.valid
     req.writeback.ready := writer.io.req.ready
     writer.io.req.bits.len := req.writeback.bits.len
@@ -238,9 +341,7 @@ class CScratchpadImp(supportWriteback: Boolean,
     val channel = writer.io.channel
     val writebackIdx, written = Reg(UInt(log2Up(nDatas).W))
 
-    val wb_idle :: wb_read :: wb_rewind :: wb_write :: Nil = Enum(4)
-    val wb_state = RegInit(wb_idle)
-    val read_valid = nestPipeline(wb_state === wb_read, latency)
+    val read_valid = nestPipeline(wb_state === wb_read, latency) && wb_state === wb_read
     channel.data.valid := read_valid
     channel.data.bits := DontCare
     switch(wb_state) {
@@ -256,7 +357,7 @@ class CScratchpadImp(supportWriteback: Boolean,
         val read = if (latency > 1) nestPipeline(mem.read(writebackIdx), latency - 1) else mem.read(writebackIdx)
         channel.data.bits := read
 
-        when (read_valid && channel.data.ready) {
+        when (channel.data.fire) {
           written := written + 1.U
         }
         writebackIdx := writebackIdx + 1.U
@@ -269,7 +370,7 @@ class CScratchpadImp(supportWriteback: Boolean,
       }
       is (wb_rewind) {
         req.request.ready := false.B
-        when (channel.data.ready) {
+        when (!read_valid && channel.data.ready) {
           wb_state := wb_read
           writebackIdx := written
         }
@@ -285,5 +386,9 @@ class CScratchpadImp(supportWriteback: Boolean,
     }
   } else {
     req.writeback.ready := false.B
+    assert(req.writeback.valid === false.B || reset.asBool === true.B,
+      "Writeback is disabled in the configuration but the valid signal\n" +
+        "is high. Either ensure that the writeback valid signal is never\n" +
+        "asserted or that the config promises writeback support.")
   }
 }

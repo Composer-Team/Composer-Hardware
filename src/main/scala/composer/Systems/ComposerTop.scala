@@ -1,13 +1,13 @@
-package composer
+package composer.Systems
 
+import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
-import composer.ComposerTop._
-import composer.CppGeneration.genCPPHeader
+import composer.Generation.{ConstraintGeneration, CppGeneration}
 import composer.RoccHelpers.{AXI4Compat, AXILHub, RDReserves}
+import composer.Systems.ComposerTop._
+import composer._
 import freechips.rocketchip.amba.axi4._
-import chipsalliance.rocketchip.config._
-
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
@@ -106,8 +106,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   acc.mem zip composer_mems foreach { case (m, x) =>
     (  x
       := AXI4Buffer()
-//      := AXI4Deinterleaver()
-      := AXI4Buffer()
       := TLToAXI4()
       := m)
   }
@@ -129,7 +127,12 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   }
 
   mem_tops foreach { mt =>
-    AXI_MEM := AXI4Buffer() := AXI4UserYanker(capMaxFlight = Some(p(MaxInFlightMemTxsPerSource))) := AXI4Buffer() := AXI4IdIndexer(extMemIDBits) := AXI4Buffer() := mt
+    AXI_MEM :=
+      AXI4Buffer() :=
+      AXI4UserYanker(capMaxFlight = Some(p(MaxInFlightMemTxsPerSource))) :=
+      AXI4Buffer() :=
+      AXI4IdIndexer(extMemIDBits) :=
+      AXI4Buffer() := mt
   }
 
   val cmd_resp_axilhub = LazyModule(new AXILHub()(dummyTL))

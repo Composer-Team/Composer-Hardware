@@ -3,6 +3,7 @@ package composer
 import chipsalliance.rocketchip.config._
 import composer.ComposerConstraintHint.ComposerConstraintHint
 import composer.MemoryStreams._
+import composer.Systems.{ComposerCore, ComposerCoreWrapper}
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
@@ -14,6 +15,9 @@ import freechips.rocketchip.tile._
 // Composer-system parameters
 case object ComposerSystemsKey extends Field[List[ComposerSystemParams]]
 case object SystemName2IdMapKey extends Field[Map[String, Int]]
+
+case object DRAMBankBytes extends Field[Int]
+
 
 // Architecture parameters
 //case object MaxChannelTransactionLenKey extends Field[Int]
@@ -101,6 +105,7 @@ class WithComposer(constraintHints: List[ComposerConstraintHint] = List.empty) e
   case MonitorsEnabled => false
   case TileKey => RocketTileParams()
   case MaxInFlightMemTxsPerSource => 8
+  case DRAMBankBytes => 4 * 1024
 })
 
 object ComposerParams {

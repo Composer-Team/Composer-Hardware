@@ -1,51 +1,32 @@
 package composer.Systems
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
 import chisel3._
 import composer.ComposerParams._
+import composer.Generation.LazyModuleImpWithSLRs
 import composer.MemoryStreams.ChannelTransactionBundle
 import composer._
 import composer.RoccHelpers._
 import composer.TLManagement._
 import composer.common._
-import freechips.rocketchip.diplomacy.LazyModuleImp
 
 import scala.annotation.tailrec
 
-class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) {
+class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) extends LazyModuleImpWithSLRs(outer) {
   val sw_io = if (outer.systemParams.canReceiveSoftwareCommands) Some(IO(new ComposerSystemIO())) else None
-  val respArbiter = Module(new MultiLevelArbiter(new ComposerRoccUserResponse(), outer.systemParams.nCores))
+  val respArbiter = ModuleWithSLR(new MultiLevelArbiter(new ComposerRoccUserResponse(), outer.systemParams.nCores))
   val cores = outer.cores.map(_._2.module)
   val busy = IO(Output(Bool()))
   busy := cores.map(_.io.busy).reduce(_ || _)
 
-  if (ConstraintGeneration.canDistributeOverSLRs()) {
-    // need to generate clock signals on secondary SLRs to ease routing
-    val slr_ctrls: Map[Int, Clock] = Map.from((0 until p(PlatformNumSLRs)).filter(_ != SLRConstants.DEFAULT_SLR).map { slr =>
-      val CLmodName = f"System${outer.systemParams.name}_SLRClockCrossing_${slr}_clock"
-      val cl_mod = Module(new BUFG)
-      cl_mod.suggestName(CLmodName)
-      cl_mod.io.I := clock.asBool
-      ConstraintGeneration.addToSLR(CLmodName, slr)
-      (slr, cl_mod.io.O.asClock)
-    } ++ Seq((SLRConstants.DEFAULT_SLR, clock)))
-    outer.cores.foreach { case (slr_id, core) =>
-      core.module.clock := slr_ctrls(slr_id)
-    }
-
-    outer.flagAlternativeSLR.foreach { case (lm, slr) =>
-      val imp = lm.module.asInstanceOf[LazyModuleImp]
-      imp.clock := slr_ctrls(slr)
-    }
-  }
-
   val validSrcs = Seq(sw_io, outer.internalCommandManager).filter(_.isDefined)
   // if sources can come from multiple domains (sw, other systems), then we have to remember where cmds came from
-  val cmdArbiter = Module(new RRArbiter(new ComposerRoccCommand(), validSrcs.length))
+  val cmdArbiter = ModuleWithSLR(new RRArbiter(new ComposerRoccCommand(), validSrcs.length))
   val icmAsCmdSrc = if (outer.internalCommandManager.isDefined) {
     val managerNode = outer.internalCommandManager.get
     val (b, e) = managerNode.in(0)
-    val manager = Module(new TLManagerModule(b, e))
+    val manager = ModuleWithSLR(new TLManagerModule(b, e))
     managerNode.in(0)._1 <> manager.tl
 
     val cmdIO = Wire(Flipped(Decoupled(new ComposerRoccCommand())))
@@ -65,9 +46,9 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     Some(cmdIO)
   } else None
 
-  val validCmdSrcs = Seq(icmAsCmdSrc, ioAsCmdSrc).filter(_.isDefined)
+  val validCmdSrcs = Seq(icmAsCmdSrc, ioAsCmdSrc).filter(_.isDefined).map(_.get)
   validCmdSrcs.zipWithIndex.foreach { case (src, idx) =>
-    cmdArbiter.io.in(idx) <> src.get
+    cmdArbiter.io.in(idx) <> src
   }
 
   val internalReturnDestinations = if (p(RequireInternalCommandRouting)) Some(VecInit(Seq.fill(outer.nCores)(Reg(new Bundle() {
@@ -109,16 +90,13 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     case _ => 0
   }
 
-  val coreResps = cores.map { core =>
-    if (p(CoreCommandLatency) == 0) {
-      core.io.resp
-    } else {
-      val rq = Module(new Queue[ComposerRoccUserResponse](new ComposerRoccUserResponse(), p(CoreCommandLatency), false, false, true, false))
-      rq.io.enq <> core.io.resp
-      rq.io.deq
+  val coreResps = if (p(CoreCommandLatency) == 0) cores.map(_.io.resp) else {
+    cores.map{ c =>
+      val resp_queue = Module(new Queue[ComposerRoccUserResponse](new ComposerRoccUserResponse(), 2))
+      resp_queue.io.enq <> c.io.resp
+      resp_queue.io.deq
     }
   }
-
 
   respArbiter.io.in <> coreResps
   val resp = Wire(Decoupled(new ComposerRoccResponse()))
@@ -139,7 +117,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
     wire.core_id := internalReturnDestinations.get(respQ.bits.core_id).core
 
     val respClient = outer.outgoingInternalResponseClient.get
-    val internalRespDispatcher = Module(new TLClientModule(respClient))
+    val internalRespDispatcher = ModuleWithSLR(new TLClientModule(respClient))
     internalRespDispatcher.tl <> respClient.out(0)._1
     internalRespDispatcher.io.bits.dat := wire.pack
     internalRespDispatcher.io.bits.addr := ComposerConsts.getInternalCmdRoutingAddress(wire.system_id)
@@ -190,7 +168,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   if (outer.systemParams.canIssueCoreCommands) {
     val managerNode = outer.incomingInternalResponseManager.get
     val (mBundle, mEdge) = managerNode.in(0)
-    val responseManager = Module(new TLManagerModule(mBundle, mEdge))
+    val responseManager = ModuleWithSLR(new TLManagerModule(mBundle, mEdge))
     responseManager.tl <> outer.incomingInternalResponseManager.get.in(0)._1
     val response = ComposerRoccResponse(responseManager.io.bits)
 
@@ -205,17 +183,17 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   val channelSelect = Cat(cmd.bits.inst.rs2(2, 0), cmd.bits.inst.rs1)
 
   cores.zipWithIndex.foreach { case (core, i) =>
-    val coreStart = cmd.fire && funct === ComposerFunc.START.U && coreSelect === i.U
+    // hopefully this maps across the SLR
+    val coreStart = cmd.valid && funct === ComposerFunc.START.U && coreSelect === i.U
     if (p(CoreCommandLatency) > 0) {
-      val pipeIn = Wire(new Bundle() {
-        val start = Bool()
-        val cmdP = cmd.bits.cloneType
-      })
-      val cmdPipe = Pipe(true.B, pipeIn, latency = p(CoreCommandLatency))
-      pipeIn.start := coreStart
-      pipeIn.cmdP := cmd.bits
-      core.io.req.valid := cmdPipe.bits.start && cmdPipe.valid
-      core.io.req.bits := cmdPipe.bits.cmdP
+      val coreCmdQueue = Module(new Queue[ComposerRoccCommand](new ComposerRoccCommand, 2))
+      when (coreStart) {
+        coreCmdQueue.io.enq <> cmd
+      }.otherwise {
+        coreCmdQueue.io.enq.valid := false.B
+        coreCmdQueue.io.enq.bits := DontCare
+      }
+      coreCmdQueue.io.deq <> core.io.req
     } else {
       core.io.req.valid := coreStart
       core.io.req.bits := cmd.bits
@@ -237,6 +215,7 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   val txLenFromCmd = if (addressBits > 0) cmd.bits.payload1(addressBits - 1, 0) else 0.U
 
   case class CChannelIdentifier(system_name: String, core_idx: Int, channel_name: String, channel_subidx: Int, io_idx: Int)
+
   @tailrec
   private def assign_channel_addresses(coreId: Int, channelList: List[((String, Int), DecoupledIO[ChannelTransactionBundle])],
                                        assignment: Int = 0,
@@ -267,4 +246,6 @@ class ComposerSystemImp(val outer: ComposerSystem) extends LazyModuleImp(outer) 
   val core_io_mappings = cores.zipWithIndex.map { case (co, id) =>
     assign_channel_addresses(id, co.read_ios ++ co.write_ios)
   }
+
+  tieClocks()
 }

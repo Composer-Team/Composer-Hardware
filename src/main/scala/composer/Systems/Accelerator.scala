@@ -1,16 +1,16 @@
-package composer
+package composer.Systems
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
-import composer.Systems.ComposerSystem
 import composer.TLManagement.makeTLMultilayerXbar
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.tile._
 import composer.common._
+import composer.{ComposerSystemsKey, RequireInternalCommandRouting, SystemName2IdMapKey}
+import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem.ExtMem
+import freechips.rocketchip.tile._
+import freechips.rocketchip.tilelink._
 
 import scala.language.postfixOps
 

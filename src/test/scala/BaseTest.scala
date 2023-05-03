@@ -1,9 +1,9 @@
 import chipsalliance.rocketchip.config._
-
-
 import chisel3._
 import chisel3.util._
 import composer.MemoryStreams._
+import composer.Systems.ComposerCore
+
 import scala.util.Random
 import composer._
 

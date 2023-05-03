@@ -21,7 +21,7 @@ case object IsAWS extends Field[Boolean]
 
 case class SLRName(name: String, default: Boolean = false)
 
-sealed class WithAWSPlatform(nMemoryChannels: Int) extends Config((_, _, _) => {
+class WithAWSPlatform(nMemoryChannels: Int) extends Config((_, _, _) => {
   // why did this ever become 128? It's 2X the bus width... That doesn't seem to make much sense...
   //  case CacheBlockBytes => 128
   case ExtMem =>
@@ -50,7 +50,7 @@ sealed class WithAWSPlatform(nMemoryChannels: Int) extends Config((_, _, _) => {
   case IsAWS => true
 })
 
-sealed class WithKriaPlatform extends Config((_, _, _) => {
+class WithKriaPlatform extends Config((_, _, _) => {
   case ExtMem => Some(MemoryPortParams(MasterPortParams(
     base = 0,
     size = 1L << 49,
@@ -71,6 +71,32 @@ sealed class WithKriaPlatform extends Config((_, _, _) => {
 
   case PlatformNumSLRs => 1
   case PlatformSLRs => None
+  case IsAWS => false
+})
+
+class WithU200Platform() extends Config ( (_, _, _) => {
+  case ExtMem =>
+    val q = Some(MemoryPortParams(MasterPortParams(
+      base = 0,
+      size = 0x400000000L,
+      beatBytes = 64,
+      idBits = 6
+    ), 1))
+    q
+  // 16GB memory per DIMM
+  case PlatformPhysicalMemoryBytes => 16L << 30
+  case HasDMA => Some(6)
+  case HasAXILExternalMMIO => true
+  // TODO this can be tuned
+  case CXbarMaxDegree => 32
+  case HasDiscreteMemory => true
+  case AXILSlaveAddressMask => 0xFFFFL
+  case MMIOBaseAddress => 0L
+  case AXILSlaveBeatBytes => 4
+  case CoreCommandLatency => 4
+
+  case PlatformNumSLRs => 3
+  case PlatformSLRs => Some(Seq(SLRName("0", default = true), SLRName("1"), SLRName("1")))
   case IsAWS => false
 })
 

@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import composer._
 import chipsalliance.rocketchip.config._
-
+import composer.Systems.DataChannelIO
 import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.tilelink._
 

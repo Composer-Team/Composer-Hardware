@@ -19,13 +19,13 @@ object TestDriver {
     println("Elaborating config: " + short_name)
     new RocketChipStage().execute(
       args = Array("-td", gsrc_dir.toString(),
-        "-T", "composer.ComposerTop",
+        "-T", "composer.Systems.ComposerTop",
         "-C", full_name,
         "--emission-options=disableMemRandomization,disableRegisterRandomization"),
       annotations = Seq())
 
     FirrtlMain.stage.execute(
-      args = Array("-i", gsrc_dir.toString() + "/composer." + short_name + ".fir",
+      args = Array("-i", gsrc_dir.toString() + "/composer.Systems." + short_name + ".fir",
         "-o", gsrc_dir.toString() + "/composer.v",
         "-X", "verilog",
         "--emission-options=disableMemRandomization,disableRegisterRandomization",

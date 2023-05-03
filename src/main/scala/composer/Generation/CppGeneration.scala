@@ -1,11 +1,12 @@
-package composer
+package composer.Generation
 
 import chipsalliance.rocketchip.config._
-
 import chisel3.experimental._
 import chisel3.util.log2Up
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import composer.RoccHelpers.MCRFileMap
+import composer.Systems.{ComposerAcc, ComposerTop}
+import composer._
 import freechips.rocketchip.subsystem.ExtMem
 import os.Path
 
@@ -86,7 +87,7 @@ object CppGeneration {
     }
 
     user_cpp_defs foreach { ppd =>
-      f.write(s"#define ${ppd.ty} (${ppd.value})\n")
+      f.write(s"#define ${ppd.ty} ${ppd.value}\n")
     }
 
     cr.printCRs(Some(f))
@@ -219,5 +220,3 @@ object CppGeneration {
     f.close()
   }
 }
-
-

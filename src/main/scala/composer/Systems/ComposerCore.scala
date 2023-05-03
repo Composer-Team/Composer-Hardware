@@ -1,16 +1,17 @@
-package composer
+package composer.Systems
 
+import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
 import composer.MemoryStreams._
 import composer.RoccHelpers.{ComposerConsts, ComposerFunc, ComposerOpcode}
 import composer.TLManagement.TLClientModule
-import freechips.rocketchip.util._
 import composer.common._
+import composer.{ComposerConstructor, ComposerSystemParams, SystemName2IdMapKey}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
-import chipsalliance.rocketchip.config._
+import freechips.rocketchip.util._
 
 class ComposerCoreIO(implicit p: Parameters) extends ParameterizedBundle()(p) {
   val req = Flipped(DecoupledIO(new ComposerRoccCommand))
@@ -91,8 +92,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
     CacheNodes.map(i => (i._1, i._2._2)) ++
       unCachedReaders ++
       writers ++
-      scratch_mod.map(i => (i._1, List(i._2.mem))) ++
-      scratch_mod.filter(_._2.writerNode.isDefined).map(i => (i._1 + "_writeback", List(i._2.writerNode.get)))
+      scratch_mod.map(i => (i._1, List(i._2.mem)))
     ).flatMap(_._2)
 
   lazy val module = composerSystemParams.buildCore(ComposerConstructor(composerSystemParams.coreParams, this), p)
@@ -109,7 +109,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
 
 //  val cache_invalidate_ios = composerConstructor.composerCoreWrapper.CacheNodes.map(_._2._1.module.io_invalidate)
 
-  def getCoreID: Int = composerConstructor.composerCoreWrapper.core_id
+  def   getCoreID: Int = composerConstructor.composerCoreWrapper.core_id
 
   private def getTLClients(name: String, listList: List[(String, List[TLClientNode])]): List[TLClientNode] = {
     listList.filter(_._1 == name) match {
