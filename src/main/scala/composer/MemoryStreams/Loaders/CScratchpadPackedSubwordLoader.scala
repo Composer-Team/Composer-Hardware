@@ -10,7 +10,8 @@ class CScratchpadPackedSubwordLoader(datOutWidth: Int, idxWidth: Int, wordSizeBi
                                      val beatSize: Int)(implicit p: Parameters)
   extends CScratchpadLoader(datOutWidth, idxWidth, beatSize) {
   require(beatSize * 8 % wordSizeBits == 0, "WordSize within Scratchpad is currently incompatible with our impl.\n" +
-    "Found " + wordSizeBits + ", require a power of 2. If you need this functionality, consider unaligned loader\n" +
+    "Found " + wordSizeBits + ", require beatSize(" + beatSize * 8 + ") to be divisible by wordSize(" + wordSizeBits +
+    "). If you need this functionality, consider unaligned loader\n" +
     "specializations or use raw Readers/Writers with manually instantiated BRAMs to achieve desired functionality\n")
   val subwordCounter = Counter(beatSize)
   val datCounter = Counter(datsPerSubword)
