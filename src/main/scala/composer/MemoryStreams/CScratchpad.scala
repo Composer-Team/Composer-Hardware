@@ -16,7 +16,7 @@ class CScratchpadAccessBundle(scReqBits: Int, dataWidthBits: Int) extends Bundle
   // note the flipped
   val readReq = Flipped(Decoupled(UInt(scReqBits.W)))
   val readRes = ValidIO(UInt(dataWidthBits.W))
-  val writeReq = Flipped(ValidIO(new Bundle() {
+  val writeReq = Flipped(Decoupled(new Bundle() {
       val addr = UInt(scReqBits.W)
       val data = UInt(dataWidthBits.W)
     }))
@@ -45,7 +45,6 @@ class CScratchpad(supportWriteback: Boolean,
                   nDatas: Int,
                   latency: Int,
                   specialization: CScratchpadSpecialization)(implicit p: Parameters) extends LazyModule {
-  require(1 <= latency && latency <= 3)
   require(dataWidthBits > 0)
   require(nDatas > 0)
 
@@ -54,7 +53,7 @@ class CScratchpad(supportWriteback: Boolean,
   val mem = TLClientNode(Seq(TLMasterPortParameters.v2(
     masters = Seq(TLMasterParameters.v1(
       name = "ScratchpadToMemory",
-      sourceId = IdRange(0, 16),
+      sourceId = IdRange(0, 8),
       supportsProbe = TransferSizes(1, channelWidthBytes),
       supportsGet = TransferSizes(1, channelWidthBytes),
       supportsPutFull = TransferSizes(1, channelWidthBytes)
@@ -69,13 +68,13 @@ class CScratchpadImp(supportWriteback: Boolean,
                      latency: Int,
                      specialization: CScratchpadSpecialization,
                      outer: CScratchpad) extends LazyModuleImp(outer) {
-  val (mem_out, mem_edge) = outer.mem.out(0)
-  val scReqBits = log2Up(nDatas)
+  private val (mem_out, mem_edge) = outer.mem.out(0)
+  private val scReqBits = log2Up(nDatas)
 
-  val maxTxLength = outer.channelWidthBytes
-  val lgMaxTxLength = log2Up(maxTxLength)
+  private val maxTxLength = outer.channelWidthBytes
+  private val lgMaxTxLength = log2Up(maxTxLength)
 
-  val pageLength = p(DRAMBankBytes)
+  private val pageLength = p(DRAMBankBytes)
 
   @tailrec
   private def nestPipeline[T <: Data](a: T, depth: Int): T = {
@@ -85,9 +84,11 @@ class CScratchpadImp(supportWriteback: Boolean,
 
   val access = IO(new CScratchpadAccessBundle(scReqBits, dataWidthBits))
   val req = IO(new CScratchpadInitReqIO(mem_out, nDatas))
+
   req.request.ready := true.B
 
-  val mem = SyncReadMem(nDatas, UInt(dataWidthBits.W))
+//  val mem = SyncReadMem(nDatas, UInt(dataWidthBits.W))
+  private val memory = Module(new CMemory(latency-2, dataWidth = dataWidthBits, nRows = nDatas, ports = 1))
 
   private val loader = Module(specialization match {
     case psw: PackedSubwordScratchpadParams =>
@@ -100,10 +101,26 @@ class CScratchpadImp(supportWriteback: Boolean,
   private val mem_tx_state = RegInit(read_idle)
 
   access.readRes.valid := nestPipeline(access.readReq.valid, latency)
-  private val r_valid = if (latency >= 2) RegNext(access.readReq.valid) else access.readReq.valid
-  private val r_addr = if (latency >= 2) RegNext(access.readReq.bits) else access.readReq.bits
-  private val rval = mem.read(r_addr, r_valid)
-  access.readRes.bits := (if (latency > 2) nestPipeline(rval, latency - 2) else rval)
+
+  memory.io.clk := clock
+  memory.io.rst := reset
+
+  memory.io.mem_en(0) := access.readReq.valid || access.writeReq.valid
+  assert(!(access.readReq.valid && access.writeReq.valid), "Currently only support single port BRAMs")
+  memory.io.addr(0) := Mux(access.writeReq.valid, access.writeReq.bits.addr, access.readReq.bits)
+  memory.io.we(0) := access.writeReq.valid
+  memory.io.din(0) := access.writeReq.bits.data
+  memory.io.regce(0) := true.B
+
+//  memory.io.addr(0) := access.writeReq.bits.addr
+//  memory.io.we(0) := true.B
+//  memory.io.din(0) := access.writeReq.bits.data
+//  memory.io.mem_en(0) := access.writeReq.valid
+//  memory.io.regce(WRITE_PORT) := false.B
+
+  val output_enable = nestPipeline(access.readReq.valid, latency)
+  access.readRes.valid := output_enable
+  access.readRes.bits := memory.io.dout(0)
   // in-flight read tx busy bits
 
   req.request.ready := mem_tx_state === read_idle
@@ -112,11 +129,11 @@ class CScratchpadImp(supportWriteback: Boolean,
   private val reqAvailable = reqIdleBits.reduce(_ || _)
   private val reqChosen = PriorityEncoder(reqIdleBits)
   // only consider non-busy transactions to be the
-  private val req_cache = Reg(Vec(mem_edge.master.endSourceId, new Bundle() {
+  private val req_cache = SyncReadMem(mem_edge.master.endSourceId, new Bundle() {
     val scratchpadAddress = UInt(req.request.bits.scAddr.getWidth.W)
     val memoryLength = UInt(mem_out.params.addressBits.W)
     val memAddr = UInt(mem_out.params.addressBits.W)
-  }))
+  })
   /* handle progress monitoring */
 
   class ProgressStat extends Bundle {
@@ -125,8 +142,8 @@ class CScratchpadImp(supportWriteback: Boolean,
     val complete = Bool()
   }
 
-  val perSourceProgress = Reg(Vec(mem_edge.master.endSourceId, new ProgressStat()))
-  val loaderSource = Reg(UInt(mem_out.params.sourceBits.W))
+  private val perSourceProgress = Reg(Vec(mem_edge.master.endSourceId, new ProgressStat()))
+  private val loaderSource = Reg(UInt(mem_out.params.sourceBits.W))
 
   private val totalTx = Reg(new Bundle {
     val memoryAddress = UInt(req.request.bits.memAddr.getWidth.W)
@@ -308,17 +325,17 @@ class CScratchpadImp(supportWriteback: Boolean,
   }
 
   when(loader.io.sp_write_out.valid) {
-    mem.write(loader.io.sp_write_out.bits.idx, loader.io.sp_write_out.bits.dat)
+    memory.io.mem_en(0) := true.B
+    memory.io.we(0) := true.B
+    memory.io.din(0) := loader.io.sp_write_out.bits.dat
+    memory.io.addr(0) := loader.io.sp_write_out.bits.idx
+    access.writeReq.ready := false.B
     perSourceProgress(loaderSource).progress := loader.io.sp_write_out.bits.idx +& 1.U
   }
 
   // processing a new cache block
   when (loader.io.cache_block_in.ready && !RegNext(loader.io.cache_block_in.ready) && prevDone && reqIdleBits(prevProcessed)) {
     perSourceProgress(prevProcessed).complete := true.B
-  }
-
-  when(access.writeReq.valid) {
-    mem.write(access.writeReq.bits.addr, access.writeReq.bits.data)
   }
   if (supportWriteback) {
     require(specialization.isInstanceOf[FlatPackScratchpadParams] && dataWidthBits % 8 == 0)
@@ -341,9 +358,8 @@ class CScratchpadImp(supportWriteback: Boolean,
     val channel = writer.io.channel
     val writebackIdx, written = Reg(UInt(log2Up(nDatas).W))
 
-    val read_valid = nestPipeline(wb_state === wb_read, latency) && wb_state === wb_read
-    channel.data.valid := read_valid
-    channel.data.bits := DontCare
+    channel.data.valid := output_enable && wb_state === wb_read
+    channel.data.bits := memory.io.dout(0)
     switch(wb_state) {
       is (wb_idle) {
         when (req.writeback.fire) {
@@ -354,8 +370,8 @@ class CScratchpadImp(supportWriteback: Boolean,
       }
       is (wb_read) {
         req.request.ready := false.B
-        val read = if (latency > 1) nestPipeline(mem.read(writebackIdx), latency - 1) else mem.read(writebackIdx)
-        channel.data.bits := read
+        memory.io.mem_en(0) := true.B
+        memory.io.addr := writebackIdx
 
         when (channel.data.fire) {
           written := written + 1.U
@@ -370,7 +386,7 @@ class CScratchpadImp(supportWriteback: Boolean,
       }
       is (wb_rewind) {
         req.request.ready := false.B
-        when (!read_valid && channel.data.ready) {
+        when (channel.data.ready) {
           wb_state := wb_read
           writebackIdx := written
         }

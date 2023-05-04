@@ -47,7 +47,7 @@ object CppGeneration {
 
   def genCPPHeader(cr: MCRFileMap, acc: ComposerAcc)(implicit p: Parameters): Unit = {
     // we might have multiple address spaces...
-    val path = Path(System.getenv("COMPOSER_ROOT")) / "Composer-Hardware" / "vsim" / "generated-src"
+    val path = Path(composer.TestDriver.composerRoot()) / "Composer-Hardware" / "vsim" / "generated-src"
     os.makeDir.all(path)
     val f = new FileWriter((path / "composer_allocator_declaration.h").toString())
     val mem = p(ExtMem).get

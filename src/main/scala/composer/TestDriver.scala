@@ -4,15 +4,26 @@ import chipsalliance.rocketchip.config._
 import chisel3.stage.PrintFullStackTraceAnnotation
 import freechips.rocketchip.system._
 import firrtl.stage.FirrtlMain
-import os.Path
+import os._
+import java.util.regex._
 
 object TestDriver {
+  private val errorNoCR = "Environment variables 'COMPOSER_ROOT' is not visible and no shell configuration file found.\n" +
+    " Please define or configure IDE to see this enviornment variable\n"
+  def composerRoot(): String = {
+    if (System.getenv("COMPOSER_ROOT") != null) return System.getenv("COMPOSER_ROOT")
+    val sh_full = System.getenv("SHELL")
+    if (sh_full == null) throw new Exception(errorNoCR)
+    val sh = sh_full.split("/").last
+    val config = os.read(os.home / f".${sh}rc")
+    val pattern = Pattern.compile("export COMPOSER_ROOT=([a-zA-Z/.]*)")
+    val matcher = pattern.matcher(config)
+    if (matcher.find()) matcher.group(0).split("=")(1).strip()
+    else throw new Exception(errorNoCR)
+  }
   def buildConfig(config: Config): Unit = {
-    if (System.getenv("COMPOSER_ROOT") == null) {
-      System.err.println("Environment variables 'COMPOSER_ROOT' is not visible. Please define or configure IDE to see this enviornment variable")
-      throw new Exception
-    }
-    val gsrc_dir = Path(System.getenv("COMPOSER_ROOT")) / "Composer-Hardware" / "vsim" / "generated-src"
+    val croot = composerRoot()
+    val gsrc_dir = Path(croot) / "Composer-Hardware" / "vsim" / "generated-src"
     os.makeDir.all(gsrc_dir)
     val full_name = config.getClass.getCanonicalName
     val short_name = full_name.split('.').last
@@ -37,13 +48,19 @@ object TestDriver {
 
     // make sure that any generated FPUs get copied to the composer hardware generated src directory
 
-    val fpu_cache = os.pwd / ".fpnew_cache"
-    if (os.exists(fpu_cache)) {
-      os.walk(fpu_cache).filter(_.toString().contains(".v")).foreach { path =>
-        val to = gsrc_dir / path.toString().split("/").takeRight(1)(0)
-        if (!os.exists(to))
-          os.copy(path, to)
+    def copy_dir(dirName: String): Unit = {
+      val dir = os.pwd / dirName
+      if (os.exists(dir)) {
+        os.walk(dir).filter{a =>
+          val fname = a.toString
+          val fend = fname.split('.').last
+          fend == "v" || fend == "sv"}.foreach { path =>
+          val to = gsrc_dir / path.toString().split("/").takeRight(1)(0)
+          os.copy(path, to, replaceExisting = true)
+        }
       }
     }
+    copy_dir(".fpnew_cache")
+    copy_dir(".memories")
   }
 }

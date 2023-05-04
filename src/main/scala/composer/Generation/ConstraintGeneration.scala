@@ -58,7 +58,7 @@ object ConstraintGeneration {
     if (!canDistributeOverSLRs()) return
     assert(p(PlatformSLRs).get.count(_.default) == 1, "Require exactly one default SLR in config. Condition not met.")
 
-    val path = Path(System.getenv("COMPOSER_ROOT")) / "Composer-Hardware" / "vsim" / "generated-src"
+    val path = Path(composer.TestDriver.composerRoot()) / "Composer-Hardware" / "vsim" / "generated-src"
     os.makeDir.all(path)
     val f = new FileWriter((path / "user_constraints.xdc").toString())
 

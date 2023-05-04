@@ -19,14 +19,14 @@ import scala.language.implicitConversions
 
 object ComposerTop {
   /**
-    * Get the address mask given the desired address space size (per DIMM) in bytes and the mask for channel bits
-    *
-    * @param addrBits  total number of address bits per DIMM
-    * @param baseTotal mask for the channel bits - address bits are masked out for this
-    * @param idx       DO NOT DEFINE - recursive parameter
-    * @param acc       DO NOT DEFINE - recursive parameter
-    * @return
-    */
+   * Get the address mask given the desired address space size (per DIMM) in bytes and the mask for channel bits
+   *
+   * @param addrBits  total number of address bits per DIMM
+   * @param baseTotal mask for the channel bits - address bits are masked out for this
+   * @param idx       DO NOT DEFINE - recursive parameter
+   * @param acc       DO NOT DEFINE - recursive parameter
+   * @return
+   */
   @tailrec
   def getAddressMask(addrBits: Int, baseTotal: Long, idx: Int = 0, acc: Long = 0): Long = {
     if (addrBits == 0) acc
@@ -85,7 +85,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     case TileVisibilityNodeKey => acc.mem.head
   })
 
-  val dma_port =  if (p(HasDMA).isDefined) {
+  val dma_port = if (p(HasDMA).isDefined) {
     val dma_node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
       masters = Seq(AXI4MasterParameters(
         name = "S01_AXI",
@@ -104,7 +104,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   val composer_mems = Seq.fill(nMemChannels)(AXI4IdentityNode())
   acc.mem zip composer_mems foreach { case (m, x) =>
-    (  x
+    (x
       := AXI4Buffer()
       := TLToAXI4()
       := m)
@@ -130,7 +130,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     AXI_MEM :=
       AXI4Buffer() :=
       AXI4UserYanker(capMaxFlight = Some(p(MaxInFlightMemTxsPerSource))) :=
-      AXI4Buffer() :=
       AXI4IdIndexer(extMemIDBits) :=
       AXI4Buffer() := mt
   }
