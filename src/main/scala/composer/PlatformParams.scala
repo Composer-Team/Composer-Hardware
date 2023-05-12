@@ -16,10 +16,13 @@ case object AXILSlaveBeatBytes extends Field[Int]
 // implementation specifics
 case object PlatformSLRs extends Field[Option[Seq[SLRName]]]
 case object PlatformNumSLRs extends Field[Int]
-
 case object IsAWS extends Field[Boolean]
 
-case class SLRName(name: String, default: Boolean = false)
+case object PostProcessorMacro extends Field[() => Unit]
+
+case class SLRName(name: String,
+                   frontBus: Boolean = false,
+                   memoryBus: Boolean = false)
 
 class WithAWSPlatform(nMemoryChannels: Int) extends Config((_, _, _) => {
   // why did this ever become 128? It's 2X the bus width... That doesn't seem to make much sense...
@@ -46,8 +49,13 @@ class WithAWSPlatform(nMemoryChannels: Int) extends Config((_, _, _) => {
   case CoreCommandLatency => 4
 
   case PlatformNumSLRs => 3
-  case PlatformSLRs => Some(Seq(SLRName("pblock_CL_bot"), SLRName("pblock_CL_mid", default = true), SLRName("pblock_CL_top")))
+  case PlatformSLRs => Some(Seq(SLRName("pblock_CL_bot", frontBus = true), SLRName("pblock_CL_mid", memoryBus = true), SLRName("pblock_CL_top")))
   case IsAWS => true
+  case PostProcessorMacro => () =>
+    val cwd = ComposerBuild.composerVsimDir
+    val cdir = ComposerBuild.composerBin
+    val callable = os.proc(f"$cdir/aws-gen-build")
+    callable.call(cwd = os.Path(cwd))
 })
 
 class WithKriaPlatform extends Config((_, _, _) => {
@@ -72,6 +80,7 @@ class WithKriaPlatform extends Config((_, _, _) => {
   case PlatformNumSLRs => 1
   case PlatformSLRs => None
   case IsAWS => false
+  case PostProcessorMacro => () => ;
 })
 
 class WithU200Platform() extends Config ( (_, _, _) => {
@@ -96,8 +105,9 @@ class WithU200Platform() extends Config ( (_, _, _) => {
   case CoreCommandLatency => 4
 
   case PlatformNumSLRs => 3
-  case PlatformSLRs => Some(Seq(SLRName("0", default = true), SLRName("1"), SLRName("1")))
+  case PlatformSLRs => Some(Seq(SLRName("0", frontBus = true), SLRName("1", memoryBus = true), SLRName("2")))
   case IsAWS => false
+  case PostProcessorMacro => () => ;
 })
 
 object SLRConstants {

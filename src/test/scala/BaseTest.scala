@@ -312,6 +312,4 @@ class exampleConfigKria extends Config(
 )
 
 // Drivers
-object td extends App {
-  TestDriver.buildConfig(new exampleConfigKria)
-}
+object td extends ComposerBuild(new exampleConfigKria)

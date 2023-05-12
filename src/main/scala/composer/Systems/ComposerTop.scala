@@ -7,6 +7,7 @@ import composer.Generation.{ConstraintGeneration, CppGeneration}
 import composer.RoccHelpers.{AXI4Compat, AXILHub, RDReserves}
 import composer.Systems.ComposerTop._
 import composer._
+import composer.tuning.{DesignObjective, EventPerformanceCounter, NoObjective, Tunable}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
@@ -162,6 +163,10 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
   (M00_AXI zip dram_ports.in) foreach { case (i, (o, _)) => AXI4Compat.connectCompatMaster(i, o) }
 
+  val read_success = EventPerformanceCounter(M00_AXI.map( axi => axi.rvalid && axi.rready ), new NoObjective)
+  val read_conflict = EventPerformanceCounter(M00_AXI.map( axi => ! axi.rready && axi.rvalid ), new NoObjective)
+  val write_request_conflict = EventPerformanceCounter(M00_AXI.map( axi => !axi.awready && axi.awvalid ), new NoObjective)
+  val read_request_conflict = EventPerformanceCounter(M00_AXI.map( axi => !axi.arready && axi.arvalid ), new NoObjective)
 
   // make incoming dma port and connect it
 
@@ -170,65 +175,8 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
     AXI4Compat.connectCompatSlave(dma, outer.dma_port.get.out(0)._1)
   }
 
-  //add thing to here
-  val arCnt = RegInit(0.U(64.W))
-  val awCnt = RegInit(0.U(64.W))
-  val rCnt = RegInit(0.U(64.W))
-  val wCnt = RegInit(0.U(64.W))
-  val bCnt = RegInit(0.U(64.W))
-  val q = dram_ports.in(0)._1
-
-  when(q.ar.fire) {
-    arCnt := arCnt + 1.U
-  }
-  when(q.aw.fire) {
-    awCnt := awCnt + 1.U
-  }
-  when(q.r.fire) {
-    rCnt := rCnt + 1.U
-  }
-  when(q.w.fire) {
-    wCnt := wCnt + 1.U
-  }
-  when(q.b.fire) {
-    bCnt := bCnt + 1.U
-  }
-
-  val rWait = RegInit(0.U(64.W))
-  val bWait = RegInit(0.U(64.W))
-  when(q.r.ready && !q.r.valid) {
-    rWait := rWait + 1.U
-  }
-
-  when(q.b.ready && !q.b.valid) {
-    bWait := bWait + 1.U
-  }
-
-  switch(acc.module.io.resp.bits.rd) {
-    is(RDReserves.arCnt.U) {
-      axil_hub.module.io.rocc_out.bits.data := arCnt
-    }
-    is(RDReserves.awCnt.U) {
-      axil_hub.module.io.rocc_out.bits.data := awCnt
-    }
-    is(RDReserves.rCnt.U) {
-      axil_hub.module.io.rocc_out.bits.data := rCnt
-    }
-    is(RDReserves.wCnt.U) {
-      axil_hub.module.io.rocc_out.bits.data := wCnt
-    }
-    is(RDReserves.bCnt.U) {
-      axil_hub.module.io.rocc_out.bits.data := bCnt
-    }
-    is(RDReserves.rWait.U) {
-      axil_hub.module.io.rocc_out.bits.data := rWait
-    }
-    is(RDReserves.bWait.U) {
-      axil_hub.module.io.rocc_out.bits.data := bWait
-    }
-  }
-
   // try to make this the last thing we do
   CppGeneration.genCPPHeader(outer.cmd_resp_axilhub.axil_widget.module.crRegistry, acc.acc)
   ConstraintGeneration.writeConstraints()
+  Tunable.exportNames()
 }

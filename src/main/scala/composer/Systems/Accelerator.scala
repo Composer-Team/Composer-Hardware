@@ -28,6 +28,7 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
     })
     (LazyModule(new ComposerSystem(config, id)(pWithMap)), id, config)
   }.toSeq
+  
 
   system_tups.foreach(a => a._1.suggestName(a._3.name))
 

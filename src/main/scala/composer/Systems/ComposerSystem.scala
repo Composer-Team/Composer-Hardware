@@ -29,10 +29,10 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
       implicit val slrId = post
       def help(a: Seq[Seq[TLNode]]): Seq[TLNode] = {
         a.map { r =>
-          val memory_xbar = WithSLR(LazyModule(new TLXbar()))
+          val memory_xbar = LazyModuleWithSLR(new TLXbar())
 
           r.foreach(memory_xbar.node := _)
-          val memory_xbar_buffer = WithSLR(LazyModule(new TLBuffer()))
+          val memory_xbar_buffer = LazyModuleWithSLR(new TLBuffer())
           memory_xbar_buffer.node := memory_xbar.node
           memory_xbar_buffer.node
         }
@@ -63,15 +63,15 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
           // route across the SLR and give to a buffer
           val sbuf_src = {
             implicit val slrId = Some(slr)
-            val canal = WithSLR(LazyModule(new TLXbar()))
+            val canal = LazyModuleWithSLR(new TLXbar())
             reduction foreach { a => canal.node := a }
-            val sbuf = WithSLR(LazyModule(new TLBuffer(BufferParams.default)))
+            val sbuf = LazyModuleWithSLR(new TLBuffer(BufferParams.default))
             sbuf.node := canal.node
             sbuf
           }
 
           // generate default SLR buffer
-          val dbuf = WithSLR(LazyModule(new TLBuffer(BufferParams.default)))
+          val dbuf = LazyModuleWithSLR(new TLBuffer(BufferParams.default))
           dbuf.node := sbuf_src.node
 
           val endpoint = TLIdentityNode()
@@ -87,7 +87,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
 
   // ROUTE OUTGOING COMMANDS THROUGH HERE
   val outgoingCommandXbar = if (systemParams.canIssueCoreCommands) {
-    val xbar = WithSLR(LazyModule(new TLXbar()))
+    val xbar = LazyModuleWithSLR(new TLXbar())
     cores.foreach(xbar.node := TLBuffer() := _._2.externalCoreCommNodes.get)
     Some(xbar.node)
   } else None
@@ -103,7 +103,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
         supportsProbe = TransferSizes(1 << log2Up(ComposerRoccResponse.getWidthBytes)),
         supportsPutFull = TransferSizes(1 << log2Up(ComposerRoccResponse.getWidthBytes))
       )))))
-    val xbar = WithSLR(LazyModule(new TLXbar()))
+    val xbar = LazyModuleWithSLR(new TLXbar())
     xbar.node := client
     (Some(client), Some(xbar.node))
   } else (None, None)
@@ -121,7 +121,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
           putFull = TransferSizes(l2u_crc)
         ))),
       beatBytes = l2u_crc)))
-    val xbar = WithSLR(LazyModule(new TLXbar()))
+    val xbar = LazyModuleWithSLR(new TLXbar())
     manager := TLBuffer() := xbar.node
 
     (Some(manager), Some(xbar.node))
@@ -135,7 +135,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
           supportsPutFull = TransferSizes(ComposerRoccResponse.getWidthBytes)
         )), beatBytes = ComposerRoccResponse.getWidthBytes
       )))
-    val xbar = WithSLR(LazyModule(new TLXbar()))
+    val xbar = LazyModuleWithSLR(new TLXbar())
     manager := xbar.node
     (Some(manager), Some(xbar.node))
   } else (None, None)

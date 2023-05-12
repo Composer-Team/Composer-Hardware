@@ -2,7 +2,6 @@ package composer.Generation
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import composer.Systems._
 import composer._
 import composer.common.BUFG
 import freechips.rocketchip.diplomacy._
@@ -56,23 +55,24 @@ object ConstraintGeneration {
 
   def writeConstraints()(implicit p: Parameters): Unit = {
     if (!canDistributeOverSLRs()) return
-    assert(p(PlatformSLRs).get.count(_.default) == 1, "Require exactly one default SLR in config. Condition not met.")
 
-    val path = Path(composer.TestDriver.composerRoot()) / "Composer-Hardware" / "vsim" / "generated-src"
+    val path = Path(ComposerBuild.composerGenDir)
     os.makeDir.all(path)
     val f = new FileWriter((path / "user_constraints.xdc").toString())
 
-    val defaultSLRName = p(PlatformSLRs).get.filter(_.default == true)(0).name
-    val secondarySLRs = p(PlatformSLRs).get.filter(_.default == false).map(_.name)
+    val slrs = p(PlatformSLRs).get
+    val id2Name = if (p(IsAWS)) {
+      Map.from((0 until p(PlatformNumSLRs)).map(i => (i, slrs(i).name)))
+    } else Map.from((0 until p(PlatformNumSLRs)).map(i => (i, "composer_slr" + slrs(i).name)))
     if (!p(IsAWS)) {
       // AWS constraints are appended to existing constraint file which already defines pblock names, no need to
       // redefine
-      secondarySLRs.foreach { i =>
-        f.write(f"create_pblock composer_slr$i\nresize_pblock composer_slr$i -add SLR$i")
+      slrs.indices.foreach { i =>
+        f.write(f"create_pblock ${id2Name(i)}\n" +
+          f"resize_pblock -add SLR$i ${id2Name(i)} \n")
       }
     }
 
-    val id2Name = Map.from(Seq((SLRConstants.DEFAULT_SLR, defaultSLRName)) ++ (1 until p(PlatformNumSLRs)).map(i => (i, secondarySLRs(i - 1))))
     (0 until p(PlatformNumSLRs)).foreach { slrID =>
       val cells = slrMappings.filter(_._2 == slrID)
       val plist = cells.map(_._1 + "*").reduce(_ + " " + _)
@@ -135,33 +135,19 @@ class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters)
       m.clock := slr_ctrls(slr)
     }
   }
+}
 
+abstract class AssignmentAnnotation {
+  def transform[T <: LazyModule](d: T)(implicit slrID: Option[Int], valName: ValName): T
 }
 
 abstract class LazyModuleWithSLRs()(implicit p: Parameters) extends LazyModule {
   var lazyClockMap: List[(LazyModule, Int)] = List.empty
   val baseName: String
-  val cores: List[(Int, ComposerCoreWrapper)]
-  val module: LazyModuleImpWithSLRs
   private var gl_id = 0
   implicit val slrId: Option[Int] = if (ConstraintGeneration.canDistributeOverSLRs()) Some(SLRConstants.DEFAULT_SLR) else None
 
-  object WithSLR {
-    def apply[T <: LazyModule](mod: T)(implicit slrId: Option[Int]): T = {
-      slrId match {
-        case None => ;
-        case Some(real_slrid) =>
-          val name = baseName + "_" + mod.name + "_" + gl_id
-          mod.suggestName(name)
-          gl_id = gl_id + 1
-          ConstraintGeneration.addToSLR(name, real_slrid)
-          lazyClockMap = (mod, slrId.get) :: lazyClockMap
-      }
-      mod
-    }
-  }
-
-  def LazyModuleWithSLR[T <: LazyModule](mod: => T)(implicit slrId: Option[Int], valName: ValName): T = {
+  def LazyModuleWithSLR[T <: LazyModule](mod: => T, annotations: Seq[AssignmentAnnotation] = Seq.empty)(implicit slrId: Option[Int], valName: ValName): T = {
     val lm = LazyModule(mod)
     val name = baseName + "_" + valName.name + "_" + gl_id
     lm.suggestName(name)
@@ -172,8 +158,6 @@ abstract class LazyModuleWithSLRs()(implicit p: Parameters) extends LazyModule {
         ConstraintGeneration.addToSLR(name, a)
         lazyClockMap = (lm, slrId.get) :: lazyClockMap
     }
-    lm
-
+    annotations.foldRight(lm){case ( annot: AssignmentAnnotation, cs: T) => annot.transform(cs)}
   }
-
 }
