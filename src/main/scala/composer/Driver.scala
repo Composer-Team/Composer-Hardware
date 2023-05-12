@@ -74,8 +74,9 @@ class ComposerBuild(config: Config) {
     val short_name = full_name.split('.').last
     println("Elaborating config: " + short_name)
     val outputFile = gsrc_dir / "composer.v"
+    val targetDir = gsrc_dir / "composer.fir"
     new ComposerChipStage().transform(AnnotationSeq(Seq(
-      new TargetDirAnnotation(gsrc_dir.toString() + "/composer.fir"),
+      new TargetDirAnnotation(targetDir.toString()),
       new TopModuleAnnotation(Class.forName("composer.Systems.ComposerTop")),
       new ConfigsAnnotation(Seq(full_name)),
       new OutputAnnotationFileAnnotation(outputFile.toString()),
@@ -95,7 +96,7 @@ class ComposerBuild(config: Config) {
         }
       }
     }
-
+    os.move(targetDir / "ComposerTop.v", outputFile)
     appendSrcsTo(os.pwd / ".fpnew_cache", outputFile)
     appendSrcsTo(os.pwd / ".memories", outputFile)
 
