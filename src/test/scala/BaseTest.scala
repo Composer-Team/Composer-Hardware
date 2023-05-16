@@ -13,6 +13,8 @@ class LFSRCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters) 
   // simple state machine - not composer specific, but useful anyways
   val s_idle :: s_working :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
+  val io = composer_IO
+  
 
   // you can use configs to access implementation details for your core (optional)
   val conf = p(LFSRConfigKey)
@@ -75,6 +77,7 @@ class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters)
   // again, we define some sort of state machine
   val s_idle :: s_working :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
+  val io = composer_IO()
 
   // a request will carry our operation, two operands, and we will return a result
   val op = RegInit(0.U(io.req.bits.inst.rs1.getWidth.W))
@@ -141,6 +144,7 @@ class VectorAdder(composerCoreParams: ComposerConstructor)(implicit p: Parameter
   require(isPow2(vConfig.dWidth), "The vector data width must be a power of two!")
   require(vConfig.dWidth % 8 == 0)
   val vDivs = 8
+  val io = composer_IO()
 
   // We get a group of reader/writer channels using this interface. The size of the group is defined in the config
   // dataBytes is the width of a datum
@@ -311,5 +315,5 @@ class exampleConfigKria extends Config(
 
 // Drivers
 object td extends App {
-  TestDriver.buildConfig(new exampleConfigKria)
+  TestDriver.buildConfig(new exampleConfig)
 }

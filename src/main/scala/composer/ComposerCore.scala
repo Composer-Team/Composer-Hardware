@@ -3,7 +3,7 @@ package composer
 import chisel3._
 import chisel3.util._
 import composer.MemoryStreams._
-import composer.RoccHelpers.{ComposerBundleIO, ComposerConsts, ComposerFunc, ComposerOpcode}
+import composer.RoccHelpers.{ComposerBundleIOModule, ComposerConsts, ComposerFunc, ComposerOpcode}
 import composer.TLManagement.TLClientModule
 import freechips.rocketchip.util._
 import freechips.rocketchip.config._
@@ -13,16 +13,17 @@ import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 
 class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2)(implicit p: Parameters) extends ParameterizedBundle()(p) {
-  val req = DecoupledIO(bundleIn.cloneType)
-  val resp = Flipped(DecoupledIO(bundleOut.cloneType))
+  val req: DecoupledIO[T1] = DecoupledIO(bundleIn.cloneType)
+  val resp: DecoupledIO[T2] = Flipped(DecoupledIO(bundleOut.cloneType))
   val busy = Input(Bool())
 }
 
-class ComposerCoreIO(implicit p: Parameters) extends ParameterizedBundle()(p) {
-  val req = Flipped(DecoupledIO(new ComposerRoccCommand))
-  val resp = DecoupledIO(new ComposerRoccUserResponse)
-  val busy = Output(Bool())
-}
+class ComposerCoreIO(implicit p: Parameters) extends CustomIO[ComposerRoccCommand, ComposerRoccUserResponse](new ComposerRoccCommand, new ComposerRoccUserResponse)
+//class ComposerCoreIO(implicit p: Parameters) extends ParameterizedBundle()(p) {
+//  val req = Flipped(DecoupledIO(new ComposerRoccCommand))
+//  val resp = DecoupledIO(new ComposerRoccUserResponse)
+//  val busy = Output(Bool())
+//}
 
 class DataChannelIO(dataBytes: Int, vlen: Int = 1) extends Bundle {
   val data = Decoupled(Vec(vlen, UInt((dataBytes * 8).W)))
@@ -261,23 +262,24 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   def addrBits: Int = log2Up(p(ExtMem).get.master.size)
 
   private object custom_usage extends Enumeration {
+    //noinspection ScalaUnusedSymbol
     type custom_usage = Value
     val unused, default, custom = Value
   }
   private var using_custom = custom_usage.unused
-  val io_declaration = IO(new ComposerCoreIO())
+  private[composer] val io_declaration = IO(Flipped(new ComposerCoreIO()))
 
-  def custom_io[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2): CustomIO[T1, T2] = {
+  def composer_IO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2): CustomIO[T1, T2] = {
     if(using_custom == custom_usage.default) {
       throw new Exception("Cannot use custom io after using the default io")
     }
     using_custom = custom_usage.custom
-    val m = Module(new ComposerBundleIO(bundleIn, bundleOut, composerConstructor.composerCoreParams))
+    val m = Module(new ComposerBundleIOModule[T1, T2](bundleIn, bundleOut, composerConstructor.composerCoreParams))
     m.cio <> io_declaration
     m.io
   }
 
-  def io: ComposerCoreIO = {
+  def composer_IO(): ComposerCoreIO = {
     if(using_custom == custom_usage.custom) {
       throw new Exception("Cannot use io after generating a custom io")
     }

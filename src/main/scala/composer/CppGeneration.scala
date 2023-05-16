@@ -13,9 +13,12 @@ import java.io.FileWriter
 object CppGeneration {
 
   private case class CppDefinition(ty: String, name: String, value: String)
+  private case class HookDef(sysName: String, params: Seq[(String, Int, Boolean)]) {
 
+  }
   private var user_enums: List[EnumFactory] = List()
   private var user_defs: List[CppDefinition] = List()
+  private var hook_defs: List[HookDef] = List()
 
   def addUserCppDefinition[t](ty: String, name: String, value: t): Unit = {
     val ty_f = ty.trim
@@ -32,6 +35,36 @@ object CppGeneration {
   def exportChiselEnum(enum: ChiselEnum): Unit = {
     if (!user_enums.contains(enum))
       user_enums = enum :: user_enums
+  }
+
+  private[composer] def addUserCppFunctionDefinition(systemName: String, params: Seq[(String, Int, Boolean)]): Unit = {
+    val h = HookDef(systemName, params)
+    if (hook_defs.exists(_.sysName == systemName)) {
+      val params_are_same = hook_defs.filter(_.sysName == systemName).map(_.params.equals(params)).reduce(_ && _)
+      assert(params_are_same, "You are trying to expose a hook to a Composer System that appears to differ across cores!")
+    } else {
+      hook_defs = h :: hook_defs
+    }
+  }
+
+  private def getCType(name: String, width: Int, unsigned: Boolean): String = {
+    val isFloatingPoint = name.contains("FP")
+    if (isFloatingPoint) {
+      width match {
+        case 32 => "float"
+        case 64 => "double"
+        case _ => throw new Exception(s"Trying to export a float type but has width $width. Expecting either 32 or 64")
+      }
+    } else {
+      val prefix = if (unsigned) "u" else ""
+      width match {
+        case x if x <= 8 => f"${prefix}int8_t"
+        case x if x <= 16 => f"${prefix}int16_t"
+        case x if x <= 32 => f"${prefix}int32_t"
+        case x if x <= 64 => f"${prefix}int64_t"
+        case _ => "void*"
+      }
+    }
   }
 
   def genCPPHeader(cr: MCRFileMap, acc: ComposerAcc)(implicit p: Parameters): Unit = {
@@ -154,7 +187,95 @@ object CppGeneration {
         |}
         |
         |""".stripMargin)
+    /*
+    // STILL WITHIN COMPOSER NAMESPACE
+    val maxCmdLength = 128 - CoreIDLengthKey
+    hook_defs.foreach { hook =>
+      val sub_signature = hook.params.map { pa =>
+        getCType(pa._1, pa._2, pa._3) + " " + pa._1
+      }
+      val signature = if (sub_signature.isEmpty) "" else {
+        sub_signature.reduce(_ + ", " + _)
+      }
 
+      val bitranges = hook.params.map(_._2).scan(0)(_ + _) zip hook.params map { case (offset: Int, p: (String, Int, Boolean)) =>
+        val payloadId = offset / maxCmdLength
+        val leftOver = offset - payloadId
+//        val onFirstPL =
+        val offsetWithPayload = offset - payloadId * maxCmdLength
+        val numOfPayloadsNeeded = (p._2.toFloat / maxCmdLength).ceil.toInt
+
+        val goesOverBoundary = offset / 120 == (offset + p._2) / 120
+        f"  payloads["
+      }
+      val numCommands = (hook.params.map(_._2).sum.toFloat / maxCmdLength).ceil.toInt
+      f.write(
+        f"""
+          |rocc_response ${hook.sysName}($signature) {
+          |  uint64_t payloads[$numCommands][2];
+          |  memset(payloads, 0, sizeof(uint64_t) * ${numCommands*2});
+          |    int maxCommandSize = payload1Len + payload2Len;
+          |    uint64_t data[numFields];
+          |    int totalWidth = 0;
+          |    for(int i = 0; i < numFields; ++i) {
+          |      totalWidth += fieldWidths[i];
+          |      data[i] = rawData[numFields - 1 - i]
+          |          }
+          |    int numCommands = totalWidth / maxCommandSize + std::min(totalWidth %% maxCommandSize, 1);
+          |
+          |    uint64_t p1 = 0, p2 = 0;
+          |
+          |    int currentCommandLoc = 0;
+          |    int currentDataLoc = 0;
+          |    int inputCount = 0;
+          |    int amountToPack = fieldWidths[0];
+          |    int nextDatum = data[0];
+          |    int startLoc = 0;
+          |    for(int commandCount = 0; commandCount < numCommands; ++commandCount) {
+          |      // Keep packing until the payload would be filled by the next parameter
+          |      while (currentDataLoc < totalWidth && amountToPack + startLoc <= maxCommandSize) {
+          |        pack_helper2(nextDatum, p1, p2, amountToPack, startLoc);
+          |
+          |        currentCommandLoc += amountToPack;
+          |        currentDataLoc += amountToPack;
+          |        inputCount++;
+          |        amountToPack = fieldWidths[inputCount];
+          |        nextDatum = data[inputCount];
+          |        startLoc = currentDataLoc %% maxCommandSize;
+          |        if(startLoc == 0) {
+          |          break;
+          |        }
+          |      }
+          |
+          |      // Pack as much of the next parameter as will fit into the payload
+          |      if(currentDataLoc < totalWidth && startLoc != 0) {
+          |        amountToPack = maxCommandSize - startLoc;
+          |        uint64_t firstPart = data[inputCount] & mask<uint64_t>(amountToPack); // Take first amountToPack bits
+          |        uint64_t carryOverLen = fieldWidths[inputCount] - amountToPack;
+          |
+          |        pack_helper2(firstPart, p1, p2, amountToPack, startLoc);
+          |
+          |        currentCommandLoc += amountToPack;
+          |        currentDataLoc += amountToPack;
+          |        amountToPack = carryOverLen;
+          |        nextDatum = data[inputCount] & (mask<uint64_t>(carryOverLen) << carryOverLen); // the rest of the bits
+          |        startLoc = currentDataLoc %% maxCommandSize;
+          |      }
+          |
+          |      // If there are more parameters, send the command without waiting for a response, then repeat
+          |      if (commandCount < numCommands - 1){
+          |        composer::rocc_cmd::start_cmd(systemID, 0, 0, false, composer::RD::R0, 0, 0, 0, p1, p2).send();
+          |        currentCommandLoc = 0;
+          |        p1 = 0;
+          |        p2 = 0;
+          |      }
+          |    }
+          |
+          |    // Send the last command and return the response
+          |    return composer::rocc_cmd::start_cmd(systemID, 0, 0, true, composer::RD::R0, 0, 0, 0, p1, p2).send().get();
+          |  }
+          |""".stripMargin)
+    }*/
 
     f.write(s"static const uint8_t system_id_bits = $SystemIDLengthKey;\n")
     f.write(s"static const uint8_t core_id_bits = $CoreIDLengthKey;\n")
