@@ -18,7 +18,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   val respArbiter = ModuleWithSLR(new MultiLevelArbiter(new ComposerRoccUserResponse(), outer.systemParams.nCores))
   val cores = outer.cores.map(_._2.module)
   val busy = IO(Output(Bool()))
-  busy := cores.map(_.io.busy).reduce(_ || _)
+  busy := cores.map(_.io_declaration.busy).reduce(_ || _)
 
   val validSrcs = Seq(sw_io, outer.internalCommandManager).filter(_.isDefined)
   // if sources can come from multiple domains (sw, other systems), then we have to remember where cmds came from
@@ -76,7 +76,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   }
 
   lazy val cmd = Queue(cmdArbiter.io.out)
-  cmd.ready := funct =/= ComposerFunc.START.U || VecInit(cores.map(_.io.req.ready))(coreSelect)
+  cmd.ready := funct =/= ComposerFunc.START.U || VecInit(cores.map(_.io_declaration.req.ready))(coreSelect)
 
   lazy val funct = cmd.bits.inst.funct
 
@@ -90,10 +90,10 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     case _ => 0
   }
 
-  val coreResps = if (p(CoreCommandLatency) == 0) cores.map(_.io.resp) else {
+  val coreResps = if (p(CoreCommandLatency) == 0) cores.map(_.io_declaration.resp) else {
     cores.map{ c =>
       val resp_queue = Module(new Queue[ComposerRoccUserResponse](new ComposerRoccUserResponse(), 2))
-      resp_queue.io.enq <> c.io.resp
+      resp_queue.io.enq <> c.io_declaration.resp
       resp_queue.io.deq
     }
   }
@@ -193,10 +193,10 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
         coreCmdQueue.io.enq.valid := false.B
         coreCmdQueue.io.enq.bits := DontCare
       }
-      coreCmdQueue.io.deq <> core.io.req
+      coreCmdQueue.io.deq <> core.io_declaration.req
     } else {
-      core.io.req.valid := coreStart
-      core.io.req.bits := cmd.bits
+      core.io_declaration.req.valid := coreStart
+      core.io_declaration.req.bits := cmd.bits
     }
   }
 

@@ -1,8 +1,8 @@
-package composer.tuning
+package composer.Generation
 
 import composer.ComposerBuild
-import firrtl.ir.DefInstance
 import firrtl._
+import firrtl.ir.DefInstance
 import os._
 
 import java.io.FileWriter

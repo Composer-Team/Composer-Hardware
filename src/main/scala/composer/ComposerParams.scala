@@ -17,6 +17,7 @@ case object ComposerSystemsKey extends Field[List[ComposerSystemParams]]
 case object SystemName2IdMapKey extends Field[Map[String, Int]]
 
 case object DRAMBankBytes extends Field[Int]
+case object ComposerQuiet extends Field[Boolean]
 
 
 // Architecture parameters
@@ -50,13 +51,14 @@ case class ComposerSystemParams(nCores: Int,
                                )
 
 object ComposerConstraintHint extends Enumeration {
-  val DistributeCoresAcrossSLRs = Value
+  val DistributeCoresAcrossSLRs, MemoryConstrained = Value
   type ComposerConstraintHint = Value
 }
 
 case object ConstraintHintsKey extends Field[List[ComposerConstraintHint.type]]
 
-class WithComposer(constraintHints: List[ComposerConstraintHint] = List.empty) extends Config((site, _, _) => {
+class WithComposer(constraintHints: List[ComposerConstraintHint] = List.empty, quiet: Boolean = false) extends Config((site, _, _) => {
+  case ComposerQuiet => quiet
   case ComposerSystemsKey => Seq()
   case TLInterconnectWidthBytes => 16
 //  case MaxChannelTransactionLenKey => 1 << 30

@@ -2,8 +2,9 @@ package composer
 
 import chipsalliance.rocketchip.config._
 import chisel3.stage._
+import composer.ComposerBuild.sourceList
+import composer.Generation.ExportCSymbolPhase
 import composer.Systems.ComposerTop
-import composer.tuning.ExportCSymbolPhase
 import firrtl.{AnnotationSeq, CustomDefaultMemoryEmission, CustomDefaultRegisterEmission, MemoryNoInit}
 import firrtl.options.PhaseManager.PhaseDependency
 import firrtl.options._
@@ -33,11 +34,13 @@ class ComposerChipStage extends Stage with Phase {
 
 }
 
-object Generator extends StageMain(new ComposerChipStage)
-
 object ComposerBuild {
   private val errorNoCR = "Environment variables 'COMPOSER_ROOT' is not visible and no shell configuration file found.\n" +
     " Please define or configure IDE to see this enviornment variable\n"
+
+  private[composer] def addSource(): Unit = {
+
+  }
 
   def composerRoot(): String = {
     if (System.getenv("COMPOSER_ROOT") != null) return System.getenv("COMPOSER_ROOT")
@@ -51,11 +54,21 @@ object ComposerBuild {
     else throw new Exception(errorNoCR)
   }
 
-  def composerGenDir: String = composerRoot() + "/Composer-Hardware/vsim/generated-src"
+  private[composer] val composerGenDir: String = composerRoot() + "/Composer-Hardware/vsim/generated-src"
 
-  def composerVsimDir: String = composerRoot() + "/Composer-Hardware/vsim/"
+  private[composer] val composerVsimDir: String = composerRoot() + "/Composer-Hardware/vsim/"
 
-  def composerBin: String = composerRoot() + "/bin/"
+  private[composer] val composerBin: String = composerRoot() + "/bin/"
+
+  private[composer] val fpnew_dir: Path = os.pwd / ".fpnew_cache"
+
+  private[composer] val memory_dir: Path = os.pwd / ".memories"
+
+  private[composer] var sourceList: Seq[Path] = Seq.empty
+
+  private[composer] def addSource(p: Path): Unit = {
+    sourceList = sourceList :+ p
+  }
 }
 
 object BuildArgs {
@@ -63,8 +76,12 @@ object BuildArgs {
 }
 
 class ComposerBuild(config: Config) {
+
   final def main(args: Array[String]): Unit = {
-    BuildArgs.args = Map.from(args.filter(_.substring(0, 2) == "-D").map { opt =>
+    println("ARGS: ")
+    args.foreach(println(_))
+    println("END ARGS")
+    BuildArgs.args = Map.from(args.filter(str => str.length >= 2 && str.substring(0, 2) == "-D").map { opt =>
       val pr = opt.substring(2).split("=")
       (pr(0), pr(1).toInt)
     })
@@ -96,10 +113,11 @@ class ComposerBuild(config: Config) {
         }
       }
     }
-    os.move(targetDir / "ComposerTop.v", outputFile)
+    os.move(targetDir / "ComposerTop.v", outputFile, replaceExisting = true)
     appendSrcsTo(os.pwd / ".fpnew_cache", outputFile)
-    appendSrcsTo(os.pwd / ".memories", outputFile)
-
+    sourceList foreach { src =>
+      os.write.append(outputFile, os.read(src))
+    }
     config(PostProcessorMacro)() // do post-processing per backend
   }
 }

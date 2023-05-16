@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
 import composer.DRAMBankBytes
+import composer.Generation.{BaseTunable, Tunable}
 import composer.MemoryStreams.Loaders.CScratchpadPackedSubwordLoader
 import composer.common.CLog2Up
 import freechips.rocketchip.diplomacy._
@@ -41,25 +42,35 @@ class CScratchpadInitReqIO(mem_out: TLBundle, nDatas: Int, memLenBits: Int) exte
  * @param specialization How data is loaded from memory. Choose a specialization from CScratchpadSpecialization
  */
 class CScratchpad(supportWriteback: Boolean,
-                  dataWidthBits: Int,
-                  nDatas: Int,
-                  latency: Int,
+                  dataWidthBits: Number,
+                  nDatas: Number,
+                  latency: Number,
+                  val forceURAM: Boolean,
                   specialization: CScratchpadSpecialization)(implicit p: Parameters) extends LazyModule {
-  require(dataWidthBits > 0)
-  require(nDatas > 0)
+  require(dataWidthBits.intValue() > 0)
+  require(nDatas.intValue() > 0)
 
   val channelWidthBytes = p(ExtMem).get.master.beatBytes
+
+  private val biggestTxBytes = dataWidthBits.intValue() / 8 * nDatas.intValue()
+  private val concurrentPages = Math.min(16, Math.max((biggestTxBytes / 4096), 1))
 
   val mem = TLClientNode(Seq(TLMasterPortParameters.v2(
     masters = Seq(TLMasterParameters.v1(
       name = "ScratchpadToMemory",
-      sourceId = IdRange(0, 8),
-      supportsProbe = TransferSizes(1, channelWidthBytes),
-      supportsGet = TransferSizes(1, channelWidthBytes),
-      supportsPutFull = TransferSizes(1, channelWidthBytes)
+      sourceId = IdRange(0, concurrentPages),
+      supportsProbe = TransferSizes(channelWidthBytes),
+      supportsGet = TransferSizes(channelWidthBytes),
+      supportsPutFull = TransferSizes(channelWidthBytes)
     )),
     channelBytes = TLChannelBeatBytes(channelWidthBytes))))
-  lazy val module = new CScratchpadImp(supportWriteback, dataWidthBits, nDatas, latency, specialization, this)
+  lazy val module = new CScratchpadImp(supportWriteback, dataWidthBits.intValue(), nDatas.intValue(), latency.intValue(), specialization, this)
+
+  dataWidthBits match {
+    case a: BaseTunable if !a.isIdentity =>
+      println(s"dataWidthBits is base tunable. Range is ${a.range._1}, ${a.range._2}")
+    case _ => ;
+  }
 }
 
 class CScratchpadImp(supportWriteback: Boolean,
@@ -82,7 +93,7 @@ class CScratchpadImp(supportWriteback: Boolean,
     else nestPipeline(RegNext(a), depth - 1)
   }
 
-  private val memory = Module(new CMemory(latency - 2, dataWidth = dataWidthBits, nRows = nDatas))
+  private val memory = Module(new CMemory(latency - 2, dataWidth = dataWidthBits, nRows = nDatas, forceURAM = outer.forceURAM))
 
   private val loader = Module(specialization match {
     case psw: PackedSubwordScratchpadParams =>
@@ -175,7 +186,7 @@ class CScratchpadImp(supportWriteback: Boolean,
   val rsource = mem_out.d.bits.source
   val prevProcessed = Reg(rsource.cloneType)
   val prevDone = Reg(Bool())
-  val relaunch_queue = Module(new Queue[UInt](reqChosen.cloneType, mem_edge.master.endSourceId, flow = true, useSyncReadMem = true))
+  val relaunch_queue = Module(new Queue[UInt](reqChosen.cloneType, mem_edge.master.endSourceId, flow = false, useSyncReadMem = true))
   relaunch_queue.io.enq.valid := false.B
   relaunch_queue.io.enq.bits := rsource
   relaunch_queue.io.deq.ready := false.B
@@ -315,7 +326,10 @@ class CScratchpadImp(supportWriteback: Boolean,
     def recurseStat(stats: Seq[ProgressStat]): ProgressStat = {
       if (stats.length == 1) stats(0)
       else {
-        val groups = stats.grouped(2).map(a => collapseStat(a(0), a(1))).toSeq
+        val groups = stats.grouped(2).map(a => {
+          if (a.length == 1) a(0)
+          else collapseStat(a(0), a(1))
+        }).toSeq
         recurseStat(groups)
       }
     }

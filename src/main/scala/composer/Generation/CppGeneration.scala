@@ -16,10 +16,12 @@ object CppGeneration {
 
   private case class CppDefinition(ty: String, name: String, value: String)
   private case class PreprocessorDefinition(ty: String, value: String)
+  private case class HookDef(sysName: String, params: Seq[(String, Int, Boolean)])
 
   private var user_enums: List[EnumFactory] = List()
   private var user_defs: List[CppDefinition] = List()
   private var user_cpp_defs: List[PreprocessorDefinition] = List()
+  private var hook_defs: List[HookDef] = List()
 
   def addUserCppDefinition[t](ty: String, name: String, value: t): Unit = {
     val ty_f = ty.trim
@@ -28,6 +30,37 @@ object CppGeneration {
     existingDefs.foreach(a => require(a.ty == ty_f && a.value == value.toString, s"Redefining ${a.name} from (${a.ty}, ${a.value}) to ($ty, $value)"))
     if (existingDefs.isEmpty) user_defs = CppDefinition(ty_f, name_f, value.toString) :: user_defs
   }
+
+  private[composer] def addUserCppFunctionDefinition(systemName: String, params: Seq[(String, Int, Boolean)]): Unit = {
+    val h = HookDef(systemName, params)
+    if (hook_defs.exists(_.sysName == systemName)) {
+      val params_are_same = hook_defs.filter(_.sysName == systemName).map(_.params.equals(params)).reduce(_ && _)
+      assert(params_are_same, "You are trying to expose a hook to a Composer System that appears to differ across cores!")
+    } else {
+      hook_defs = h :: hook_defs
+    }
+  }
+
+  private def getCType(name: String, width: Int, unsigned: Boolean): String = {
+    val isFloatingPoint = name.contains("FP")
+    if (isFloatingPoint) {
+      width match {
+        case 32 => "float"
+        case 64 => "double"
+        case _ => throw new Exception(s"Trying to export a float type but has width $width. Expecting either 32 or 64")
+      }
+    } else {
+      val prefix = if (unsigned) "u" else ""
+      width match {
+        case x if x <= 8 => f"${prefix}int8_t"
+        case x if x <= 16 => f"${prefix}int16_t"
+        case x if x <= 32 => f"${prefix}int32_t"
+        case x if x <= 64 => f"${prefix}int64_t"
+        case _ => "void*"
+      }
+    }
+  }
+
 
   def addPreprocessorDefinition(name: String, value: String = ""): Unit = {
     val ppd = PreprocessorDefinition(name, value)
@@ -204,6 +237,7 @@ object CppGeneration {
           s"using ComposerMemAddressSimDtype=$addrDtype;\n" +
           s"using ComposerStrobeSimDtype=$strobeDtype;\n" +
           s"using ComposerMemIDDtype=$idDtype;\n" +
+          s"#define DEFAULT_PL_CLOCK ${p(DefaultClockRateKey)}\n" +
           (p(HasDMA) match {
             case None => ""
             case Some(a) => s"using ComposerDMAIDtype=${getVerilatorDtype(a)};\n"

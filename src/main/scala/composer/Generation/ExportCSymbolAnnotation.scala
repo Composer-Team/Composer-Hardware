@@ -1,4 +1,4 @@
-package composer.tuning
+package composer.Generation
 
 import firrtl.annotations.{ReferenceTarget, SingleTargetAnnotation}
 

@@ -9,6 +9,8 @@ import composer._
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.subsystem.ExtMem
 
+import scala.math.ScalaNumber
+
 /**
   * Bundle used to communicate memory requests between user and memory manager
   */
@@ -130,24 +132,26 @@ object CCachedReadChannelParams {
 
 class CScratchpadChannelParams(name: String,
                                val supportWriteback: Boolean,
-                               val dataWidthBits: Int,
-                               val nDatas: Int,
-                               val latency: Int = 2,
+                               val dataWidthBits: Number,
+                               val nDatas: Number,
+                               val forceURAM: Boolean = false,
+                               val latency: Number = 2,
                                val specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked)
   extends CChannelParams(name, nChannels = 1, channelType = CChannelType.Scratchpad) {
   private[composer] def make(implicit p: Parameters): CScratchpad = {
     new CScratchpad(
       supportWriteback,
-      dataWidthBits, nDatas, latency, specialization)
+      dataWidthBits, nDatas, latency, forceURAM, specialization)
   }
 }
 
 object CScratchpadChannelParams {
   def apply(name: String,
             supportWriteback: Boolean,
-            dataWidthBits: Int,
-            nDatas: Int,
-            latency: Int = 2,
+            dataWidthBits: Number,
+            nDatas: Number,
+            forceURAM: Boolean = false,
+            latency: Number = 2,
             specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked): CScratchpadChannelParams =
-    new CScratchpadChannelParams(name, supportWriteback, dataWidthBits, nDatas, latency, specialization)
+    new CScratchpadChannelParams(name, supportWriteback, dataWidthBits, nDatas, forceURAM, latency, specialization)
 }

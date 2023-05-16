@@ -3,11 +3,10 @@ package composer.Systems
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
-import composer.Generation.{ConstraintGeneration, CppGeneration}
+import composer.Generation.{ConstraintGeneration, CppGeneration, DesignObjective, EventPerformanceCounter, NoObjective, Tunable}
 import composer.RoccHelpers.{AXI4Compat, AXILHub, RDReserves}
 import composer.Systems.ComposerTop._
 import composer._
-import composer.tuning.{DesignObjective, EventPerformanceCounter, NoObjective, Tunable}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._

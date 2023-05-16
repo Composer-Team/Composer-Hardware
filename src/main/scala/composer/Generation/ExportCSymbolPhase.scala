@@ -1,8 +1,8 @@
-package composer.tuning
+package composer.Generation
 
+import firrtl.AnnotationSeq
 import firrtl.options.Phase
 import firrtl.stage.RunFirrtlTransformAnnotation
-import firrtl.AnnotationSeq
 
 
 class ExportCSymbolPhase extends Phase {
