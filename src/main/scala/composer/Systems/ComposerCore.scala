@@ -4,7 +4,7 @@ import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
 import composer.MemoryStreams._
-import composer.RoccHelpers.{ComposerBundleIOModule, ComposerConsts, ComposerFunc, ComposerOpcode}
+import composer.RoccHelpers._
 import composer.TLManagement.TLClientModule
 import composer.common._
 import composer.{ComposerConstructor, ComposerSystemParams, SystemName2IdMapKey}
