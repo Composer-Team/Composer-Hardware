@@ -1,9 +1,10 @@
 package composer.common
 
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
+import composer.Generation.CppGeneration
 
 /**
   * A small register-based memory providing an easy interface for setting
@@ -74,9 +75,13 @@ class ComposerRoccCommand()(implicit p: Parameters) extends Bundle {
     val system_id = UInt(SystemIDLengthKey.W)
     val funct = UInt((7 - SystemIDLengthKey).W)
   }
+  val payload1Len = 64 - CoreIDLengthKey
+  val payload2Len = 64
   val core_id = UInt(CoreIDLengthKey.W)
-  val payload1 = UInt((64 - CoreIDLengthKey).W)
-  val payload2 = UInt(64.W)
+  val payload1 = UInt(payload1Len.W)
+  val payload2 = UInt(payload2Len.W)
+  CppGeneration.addUserCppDefinition("uint8_t", "payload1Len", payload1Len)
+  CppGeneration.addUserCppDefinition("uint8_t", "payload2Len", payload2Len)
 
   def pack(bufferToPow2: Boolean = true, withRoutingPayload: Option[UInt] = None): UInt = {
     val s = Cat(inst.rd, inst.rs1, inst.rs2, inst.xd, inst.xs1, inst.xs2, inst.opcode, inst.system_id, inst.funct,

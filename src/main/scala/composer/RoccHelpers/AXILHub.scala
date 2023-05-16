@@ -3,7 +3,8 @@ package composer.RoccHelpers
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.amba.axi4._
-import freechips.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
+
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tile.{RoCCCommand, RoCCResponse}
 

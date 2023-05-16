@@ -1,26 +1,22 @@
-package composer
+package composer.Systems
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import composer.TLManagement.makeTLMultilayerXbar
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.tile._
-import freechips.rocketchip.config.Parameters
 import composer.common._
+import composer.{ComposerSystemsKey, RequireInternalCommandRouting, SystemName2IdMapKey}
+import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem.ExtMem
+import freechips.rocketchip.tile._
+import freechips.rocketchip.tilelink._
 
 import scala.language.postfixOps
 
 class ComposerAcc(implicit p: Parameters) extends LazyModule {
   val configs = p(ComposerSystemsKey)
   val name2Id = scala.collection.immutable.Map.from(configs.zipWithIndex.map(a => (a._1.name, a._2)))
-  println(name2Id)
-  configs.zipWithIndex.foreach { case (c, id) =>
-    println(s"$id => $c")
-  }
-  println(configs.length)
   val requireInternalCmdRouting = configs.map(_.canIssueCoreCommands).foldLeft(false)(_ || _)
 
   val system_tups = name2Id.keys.map { name =>
@@ -32,6 +28,7 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
     })
     (LazyModule(new ComposerSystem(config, id)(pWithMap)), id, config)
   }.toSeq
+  
 
   system_tups.foreach(a => a._1.suggestName(a._3.name))
 
@@ -100,7 +97,7 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
     val sys_queue = Module(new Queue(new ComposerRoccCommand, entries = 2))
     val params = sys_tup._3
     val sys_idx = outer.name2Id(params.name)
-    sys_queue.suggestName(params + "_command_queue")
+    sys_queue.suggestName(params.name + "_command_queue")
 
     // enqueue commands from software
     sys_queue.io.enq.valid := accCmd.valid && sys_idx.U === system_id

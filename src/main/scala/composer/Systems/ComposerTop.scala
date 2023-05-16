@@ -1,12 +1,13 @@
-package composer
+package composer.Systems
 
+import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
-import composer.ComposerTop._
-import composer.CppGeneration.genCPPHeader
+import composer.Generation.{ConstraintGeneration, CppGeneration, DesignObjective, EventPerformanceCounter, NoObjective, Tunable}
 import composer.RoccHelpers.{AXI4Compat, AXILHub, RDReserves}
+import composer.Systems.ComposerTop._
+import composer._
 import freechips.rocketchip.amba.axi4._
-import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
@@ -18,14 +19,14 @@ import scala.language.implicitConversions
 
 object ComposerTop {
   /**
-    * Get the address mask given the desired address space size (per DIMM) in bytes and the mask for channel bits
-    *
-    * @param addrBits  total number of address bits per DIMM
-    * @param baseTotal mask for the channel bits - address bits are masked out for this
-    * @param idx       DO NOT DEFINE - recursive parameter
-    * @param acc       DO NOT DEFINE - recursive parameter
-    * @return
-    */
+   * Get the address mask given the desired address space size (per DIMM) in bytes and the mask for channel bits
+   *
+   * @param addrBits  total number of address bits per DIMM
+   * @param baseTotal mask for the channel bits - address bits are masked out for this
+   * @param idx       DO NOT DEFINE - recursive parameter
+   * @param acc       DO NOT DEFINE - recursive parameter
+   * @return
+   */
   @tailrec
   def getAddressMask(addrBits: Int, baseTotal: Long, idx: Int = 0, acc: Long = 0): Long = {
     if (addrBits == 0) acc
@@ -84,7 +85,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     case TileVisibilityNodeKey => acc.mem.head
   })
 
-  val dma_port =  if (p(HasDMA).isDefined) {
+  val dma_port = if (p(HasDMA).isDefined) {
     val dma_node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
       masters = Seq(AXI4MasterParameters(
         name = "S01_AXI",
@@ -103,9 +104,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   val composer_mems = Seq.fill(nMemChannels)(AXI4IdentityNode())
   acc.mem zip composer_mems foreach { case (m, x) =>
-    (  x
-      := AXI4Buffer()
-//      := AXI4Deinterleaver()
+    (x
       := AXI4Buffer()
       := TLToAXI4()
       := m)
@@ -128,7 +127,11 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   }
 
   mem_tops foreach { mt =>
-    AXI_MEM := AXI4Buffer() := AXI4UserYanker(capMaxFlight = Some(p(MaxInFlightMemTxsPerSource))) := AXI4Buffer() := AXI4IdIndexer(extMemIDBits) := AXI4Buffer() := mt
+    AXI_MEM :=
+      AXI4Buffer() :=
+      AXI4UserYanker(capMaxFlight = Some(p(MaxInFlightMemTxsPerSource))) :=
+      AXI4IdIndexer(extMemIDBits) :=
+      AXI4Buffer() := mt
   }
 
   val cmd_resp_axilhub = LazyModule(new AXILHub()(dummyTL))
@@ -159,6 +162,10 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
   (M00_AXI zip dram_ports.in) foreach { case (i, (o, _)) => AXI4Compat.connectCompatMaster(i, o) }
 
+  val read_success = EventPerformanceCounter(M00_AXI.map( axi => axi.rvalid && axi.rready ), new NoObjective)
+  val read_conflict = EventPerformanceCounter(M00_AXI.map( axi => ! axi.rready && axi.rvalid ), new NoObjective)
+  val write_request_conflict = EventPerformanceCounter(M00_AXI.map( axi => !axi.awready && axi.awvalid ), new NoObjective)
+  val read_request_conflict = EventPerformanceCounter(M00_AXI.map( axi => !axi.arready && axi.arvalid ), new NoObjective)
 
   // make incoming dma port and connect it
 
@@ -167,64 +174,8 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
     AXI4Compat.connectCompatSlave(dma, outer.dma_port.get.out(0)._1)
   }
 
-  //add thing to here
-  val arCnt = RegInit(0.U(64.W))
-  val awCnt = RegInit(0.U(64.W))
-  val rCnt = RegInit(0.U(64.W))
-  val wCnt = RegInit(0.U(64.W))
-  val bCnt = RegInit(0.U(64.W))
-  val q = dram_ports.in(0)._1
-
-  when(q.ar.fire) {
-    arCnt := arCnt + 1.U
-  }
-  when(q.aw.fire) {
-    awCnt := awCnt + 1.U
-  }
-  when(q.r.fire) {
-    rCnt := rCnt + 1.U
-  }
-  when(q.w.fire) {
-    wCnt := wCnt + 1.U
-  }
-  when(q.b.fire) {
-    bCnt := bCnt + 1.U
-  }
-
-  val rWait = RegInit(0.U(64.W))
-  val bWait = RegInit(0.U(64.W))
-  when(q.r.ready && !q.r.valid) {
-    rWait := rWait + 1.U
-  }
-
-  when(q.b.ready && !q.b.valid) {
-    bWait := bWait + 1.U
-  }
-
-  switch(acc.module.io.resp.bits.rd) {
-    is(RDReserves.arCnt.U) {
-      axil_hub.module.io.rocc_out.bits.data := arCnt
-    }
-    is(RDReserves.awCnt.U) {
-      axil_hub.module.io.rocc_out.bits.data := awCnt
-    }
-    is(RDReserves.rCnt.U) {
-      axil_hub.module.io.rocc_out.bits.data := rCnt
-    }
-    is(RDReserves.wCnt.U) {
-      axil_hub.module.io.rocc_out.bits.data := wCnt
-    }
-    is(RDReserves.bCnt.U) {
-      axil_hub.module.io.rocc_out.bits.data := bCnt
-    }
-    is(RDReserves.rWait.U) {
-      axil_hub.module.io.rocc_out.bits.data := rWait
-    }
-    is(RDReserves.bWait.U) {
-      axil_hub.module.io.rocc_out.bits.data := bWait
-    }
-  }
-
   // try to make this the last thing we do
-  genCPPHeader(outer.cmd_resp_axilhub.axil_widget.module.crRegistry, acc.acc)
+  CppGeneration.genCPPHeader(outer.cmd_resp_axilhub.axil_widget.module.crRegistry, acc.acc)
+  ConstraintGeneration.writeConstraints()
+  Tunable.exportNames()
 }

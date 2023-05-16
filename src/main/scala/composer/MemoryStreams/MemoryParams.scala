@@ -1,5 +1,6 @@
 package composer.MemoryStreams
 
+
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
@@ -8,12 +9,14 @@ import composer._
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.subsystem.ExtMem
 
+import scala.math.ScalaNumber
+
 /**
   * Bundle used to communicate memory requests between user and memory manager
   */
 class ChannelTransactionBundle(implicit p: Parameters) extends Bundle {
   val addr = UInt(log2Up(p(ExtMem).get.nMemoryChannels * p(ExtMem).get.master.size).W)
-  val len = UInt((log2Up(p(MaximumTransactionLength))+1).W)
+  val len = UInt(log2Up(p(PlatformPhysicalMemoryBytes)).W)
 }
 
 /**
@@ -72,25 +75,24 @@ object CChannelType extends Enumeration {
   *
   * @param name      The name of the channel
   * @param nChannels number of memory access channels of this type
-  * @param location  location of access
   */
-abstract case class CChannelParams(name: String, nChannels: Int, channelType: CChannelType.CChannelType, location: String = "Mem")
+abstract case class CChannelParams(name: String, nChannels: Int, channelType: CChannelType.CChannelType)
 
 /**
   * Read Channel group
   *
   * @param name      The name of the channel
   * @param nChannels number of memory access channels of this type
-  * @param location  location of access
   */
-class CReadChannelParams(name: String, nChannels: Int, val maxInFlightTxs: Int = 1, location: String = "Mem") extends CChannelParams(name, nChannels, CChannelType.ReadChannel, location)
+class CReadChannelParams(name: String,
+                         nChannels: Int,
+                         val maxInFlightTxs: Int) extends CChannelParams(name, nChannels, CChannelType.ReadChannel)
 
 object CReadChannelParams {
   def apply(name: String,
             nChannels: Int,
-            maxInFlightTxs: Int = 1,
-            location: String = "Mem"): CReadChannelParams =
-    new CReadChannelParams(name, nChannels, maxInFlightTxs, location)
+            maxInFlightTxs: Int = 1): CReadChannelParams =
+    new CReadChannelParams(name, nChannels, maxInFlightTxs)
 }
 
 /**
@@ -99,16 +101,14 @@ object CReadChannelParams {
   * @param name           The name of the channel
   * @param nChannels      number of memory access channels of this type
   * @param maxInFlightTxs maximum number of AXI/TileLink memory transactions can be inflight per writer module at once
-  * @param location       location of access
   */
 class CWriteChannelParams(name: String,
                           nChannels: Int,
-                          val maxInFlightTxs: Int = 2,
-                          location: String = "Mem") extends CChannelParams(name, nChannels, CChannelType.WriteChannel, location)
+                          val maxInFlightTxs: Int) extends CChannelParams(name, nChannels, CChannelType.WriteChannel)
 
 object CWriteChannelParams {
-  def apply(name: String, nChannels: Int, maxInFlightTxs: Int = 2, location: String = "Mem"): CWriteChannelParams =
-    new CWriteChannelParams(name, nChannels, maxInFlightTxs, location)
+  def apply(name: String, nChannels: Int, maxInFlightTxs: Int = 2): CWriteChannelParams =
+    new CWriteChannelParams(name, nChannels, maxInFlightTxs)
 }
 
 /**
@@ -122,36 +122,36 @@ object CScratchpadSpecialization {
   def flatPacked: FlatPackScratchpadParams = new FlatPackScratchpadParams
 }
 
-class CCachedReadChannelParams(name: String, nChannels: Int, val cacheParams: CCacheParams, location: String = "Mem")
-  extends CChannelParams(name, nChannels, CChannelType.CacheChannel, location)
+class CCachedReadChannelParams(name: String, nChannels: Int, val cacheParams: CCacheParams)
+  extends CChannelParams(name, nChannels, CChannelType.CacheChannel)
 
 object CCachedReadChannelParams {
-  def apply(name: String, nChannels: Int, cacheParams: CCacheParams, location: String = "Mem"): CChannelParams =
-    new CCachedReadChannelParams(name, nChannels, cacheParams, location)
+  def apply(name: String, nChannels: Int, cacheParams: CCacheParams): CChannelParams =
+    new CCachedReadChannelParams(name, nChannels, cacheParams)
 }
 
 class CScratchpadChannelParams(name: String,
                                val supportWriteback: Boolean,
-                               val dataWidthBits: Int,
-                               val nDatas: Int,
-                               val latency: Int = 2,
-                               val supportReadLength: Int = 1 << 15,
+                               val dataWidthBits: Number,
+                               val nDatas: Number,
+                               val forceURAM: Boolean = false,
+                               val latency: Number = 2,
                                val specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked)
   extends CChannelParams(name, nChannels = 1, channelType = CChannelType.Scratchpad) {
   private[composer] def make(implicit p: Parameters): CScratchpad = {
     new CScratchpad(
       supportWriteback,
-      dataWidthBits, nDatas, latency, supportReadLength, specialization)
+      dataWidthBits, nDatas, latency, forceURAM, specialization)
   }
 }
 
 object CScratchpadChannelParams {
   def apply(name: String,
             supportWriteback: Boolean,
-            dataWidthBits: Int,
-            nDatas: Int,
-            latency: Int = 2,
-            supportReadLength: Int = 1 << 15,
+            dataWidthBits: Number,
+            nDatas: Number,
+            forceURAM: Boolean = false,
+            latency: Number = 2,
             specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked): CScratchpadChannelParams =
-    new CScratchpadChannelParams(name, supportWriteback, dataWidthBits, nDatas, latency, supportReadLength, specialization)
+    new CScratchpadChannelParams(name, supportWriteback, dataWidthBits, nDatas, forceURAM, latency, specialization)
 }

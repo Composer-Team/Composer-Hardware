@@ -2,7 +2,8 @@ package composer.RoccHelpers
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
+
 import freechips.rocketchip.tile.{RoCCCommand, RoCCResponse}
 
 class RoccMonitor(implicit p: Parameters) extends Module {

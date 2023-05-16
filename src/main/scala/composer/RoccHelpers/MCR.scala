@@ -4,7 +4,8 @@ import chisel3._
 import chisel3.util._
 import composer._
 import freechips.rocketchip.amba.axi4.{AXI4SlaveNode, AXI4SlaveParameters, AXI4SlavePortParameters}
-import freechips.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
+
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
@@ -297,7 +298,6 @@ class MCRFileModuleTL(outer: MCRFileTL, numRegs: Int)(implicit p: Parameters) ex
         param := in.a.bits.size
         val start = log2Up(p(AXILSlaveBeatBytes))
         val end = start + log2Up(numRegs) - 1
-        println(p(AXILSlaveBeatBytes))
         address := in.a.bits.address(end, start)
         when (in.a.bits.opcode === TLMessages.PutFullData || in.a.bits.opcode === TLMessages.PutPartialData) {
           state := s_write

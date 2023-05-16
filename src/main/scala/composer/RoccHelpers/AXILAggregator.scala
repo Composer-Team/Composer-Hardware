@@ -1,6 +1,8 @@
 package composer.RoccHelpers
 
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
+
+
 import chisel3._
 import chisel3.util._
 import composer.{AXILSlaveBeatBytes, CmdRespBusWidthBytes}

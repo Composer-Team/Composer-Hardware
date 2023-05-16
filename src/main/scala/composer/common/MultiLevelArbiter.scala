@@ -1,5 +1,7 @@
 package composer.common
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
+
+
 import chisel3._
 import chisel3.util._
 import composer.CXbarMaxDegree

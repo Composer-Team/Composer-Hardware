@@ -1,6 +1,7 @@
 package composer.TLManagement
 
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
+
 import composer.CXbarMaxDegree
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.tilelink._
