@@ -112,5 +112,5 @@ class WithComposer(constraintHints: List[ComposerConstraintHint] = List.empty, q
 
 object ComposerParams {
   val SystemIDLengthKey = 4
-  val CoreIDLengthKey = 8
+  val CoreIDLengthKey = 10
 }

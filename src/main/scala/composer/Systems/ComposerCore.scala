@@ -105,12 +105,8 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
 
   private val outer = composerConstructor.composerCoreWrapper
 
-  var read_ios: List[((String, Int), DecoupledIO[ChannelTransactionBundle])] = List()
-  var write_ios: List[((String, Int), DecoupledIO[ChannelTransactionBundle])] = List()
+  def getCoreID: Int = composerConstructor.composerCoreWrapper.core_id
 
-//  val cache_invalidate_ios = composerConstructor.composerCoreWrapper.CacheNodes.map(_._2._1.module.io_invalidate)
-
-  def   getCoreID: Int = composerConstructor.composerCoreWrapper.core_id
 
   private def getTLClients(name: String, listList: List[(String, List[TLClientNode])]): List[TLClientNode] = {
     listList.filter(_._1 == name) match {
@@ -148,14 +144,9 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       case None => getTLClients(name, outer.readerNodes).map(tab_id => Module(new CReader(dataBytes, vlen, tab_id)))
     }
     //noinspection DuplicatedCode
-    mod.zipWithIndex foreach { case (m, m_idx) =>
+    mod foreach { m =>
       m.tl_out <> m.tl_outer
       m.suggestName(name)
-      if (useSoftwareAddressing) {
-        val newio = IO(Flipped(Decoupled(new ChannelTransactionBundle))).suggestName(name)
-        newio <> m.io.req
-        read_ios = List(((name, idx.getOrElse(m_idx)), newio)) ++ read_ios
-      }
     }
     val ret = (if (useSoftwareAddressing) List()
     else mod.map(_.io.req),
@@ -181,31 +172,24 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   }
 
   def getWriterModules(name: String,
-                       useSoftwareAddressing: Boolean,
                        dataBytes: Int,
                        idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[WriterDataChannelIO]) = {
 
     val params = outer.coreParams.memoryChannelParams.filter(_.name == name)
     require(params.length == 1, "Found writer descriptions (" + params.length + "). If > 1, then you have defined the" +
       " same group multiple times. If =0, then you have not described this writer group.")
-//    val param = params(0).asInstanceOf[CWriteChannelParams]
+    //    val param = params(0).asInstanceOf[CWriteChannelParams]
     val mod = idx match {
       case Some(id) => List(Module(new SequentialWriter(dataBytes, getTLClients(name, outer.writers)(id))))
       case None => getTLClients(name, outer.writers).map(tab_id => Module(new SequentialWriter(dataBytes, tab_id)))
     }
     //noinspection DuplicatedCode
-    mod.zipWithIndex foreach { case (m, m_idx) =>
+    mod foreach { m =>
       m.tl_out <> m.tl_outer
       m.suggestName(name)
-      if (useSoftwareAddressing) {
-        val newio = IO(Flipped(Decoupled(new ChannelTransactionBundle))).suggestName(name)
-        newio <> m.io.req
-        write_ios = List(((name, idx.getOrElse(m_idx)), newio)) ++ write_ios
-      }
     }
 
-    val ret = (if (useSoftwareAddressing) List() else mod.map(_.io.req),
-      mod.map(_.io.channel))
+    val ret = (mod.map(_.io.req), mod.map(_.io.channel))
     ret._2.foreach { dat =>
       dat.data.valid := false.B
       dat.data.bits := DontCare
@@ -218,10 +202,9 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   }
 
   def getWriterModule(name: String,
-                      useSoftwareAddressing: Boolean,
                       dataBytes: Int,
                       idx: Int): (DecoupledIO[ChannelTransactionBundle], WriterDataChannelIO) = {
-    val a = getWriterModules(name, useSoftwareAddressing, dataBytes, Some(idx))
+    val a = getWriterModules(name, dataBytes, Some(idx))
     (a._1(0), a._2(0))
   }
 
@@ -261,20 +244,17 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   def getSystemID(name: String): UInt = p(SystemName2IdMapKey)(name).U
 
   def genCoreCommand(name: String, expectResponse: Bool, rs1: UInt = 0.U, rs2: UInt = 0.U, rd: UInt = 0.U,
-                     xs2: UInt = 0.U, coreId: UInt = 0.U, payload1: UInt = 0.U, payload2: UInt = 0.U,
-                     funct: ComposerFunc.ComposerFunc): UInt = {
+                     xs2: UInt = 0.U, coreId: UInt = 0.U, payload1: UInt = 0.U, payload2: UInt = 0.U): UInt = {
     val wire = Wire(new ComposerRoccCommand())
-    wire.inst.rs1 := rs1
-    wire.inst.rs2 := rs2
+    wire.inst.core_id := coreId
     wire.inst.rd := rd
     // flag for internally routed command
     wire.inst.xs1 := true.B
     wire.inst.xs2 := xs2
     wire.inst.xd := expectResponse
     wire.inst.system_id := p(SystemName2IdMapKey)(name).U
-    wire.inst.funct := funct.U
+    wire.inst.funct := 0.U
     wire.inst.opcode := ComposerOpcode.ACCEL
-    wire.core_id := coreId
     wire.payload1 := payload1
     wire.payload2 := payload2
     wire.pack()
@@ -300,6 +280,17 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     m.cio <> io_declaration
     m.io
   }
+
+  def composer_IO[T1 <: Bundle](bundleIn: T1): CustomIO[T1, ComposerRoccUserResponse] = {
+    if (using_custom == custom_usage.default) {
+      throw new Exception("Cannot use custom io after using the default io")
+    }
+    using_custom = custom_usage.custom
+    val m = Module(new ComposerBundleIOModule[T1, ComposerRoccUserResponse](bundleIn, new ComposerRoccUserResponse, composerConstructor.composerCoreParams))
+    m.cio <> io_declaration
+    m.io
+  }
+
 
   def composer_IO(): ComposerCoreIO = {
     if (using_custom == custom_usage.custom) {

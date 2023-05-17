@@ -48,7 +48,7 @@ class ExportCSymbolTransform extends Transform {
       val objective = tgt_set(0).designObjective
       f"\t\"$tgt_name\" : {\n\t\t\"paths\" : [ $list ],\n\t\t\"objective\": ${objective.getObjective}\n\t}"
     }
-    f.write(f"{\n${lines.reduce(_ + ",\n" + _)}\n}")
+    if (lines.nonEmpty) f.write(f"{\n${lines.reduce(_ + ",\n" + _)}\n}")
     f.close()
     CircuitState(state.circuit, state.form, AnnotationSeq(annos_filter), state.renames)
   }

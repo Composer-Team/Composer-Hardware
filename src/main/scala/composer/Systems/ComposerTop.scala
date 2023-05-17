@@ -4,7 +4,7 @@ import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
 import composer.Generation.{ConstraintGeneration, CppGeneration, DesignObjective, EventPerformanceCounter, NoObjective, Tunable}
-import composer.RoccHelpers.{AXI4Compat, AXILHub, RDReserves}
+import composer.RoccHelpers.{AXI4Compat, AXILHub}
 import composer.Systems.ComposerTop._
 import composer._
 import freechips.rocketchip.amba.axi4._
@@ -64,8 +64,19 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       id = IdRange(0, 1 << 16)
     )),
   )))
-  // AXI4 DRAM Ports
-  val AXI_MEM = AXI4SlaveNode(Seq.tabulate(nMemChannels) { channel =>
+
+  val cmd_resp_axilhub = LazyModule(new AXILHub())
+
+  // connect axil hub to external axil port
+  cmd_resp_axilhub.node := AXI4Buffer() := S00_AXI
+  // connect axil hub to accelerator
+
+  val dummyTL = p.alterPartial({ case TileVisibilityNodeKey => cmd_resp_axilhub.axil_widget.throughId })
+
+
+  val acc = LazyModule(new ComposerAccSystem()(dummyTL))
+
+  val AXI_MEM = if (acc.mem.nonEmpty) Some(AXI4SlaveNode(Seq.tabulate(nMemChannels) { channel =>
     AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
         address = Seq(getAddressSet(channel)),
@@ -76,14 +87,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
         interleavedId = Some(1)
       )),
       beatBytes = externalMemParams.master.beatBytes)
-  })
-
-  val acc = LazyModule(new ComposerAccSystem())
-
-  // note dummyTL doesn't do it anything. it is to avoid rocket compile errors
-  val dummyTL = p.alterPartial({
-    case TileVisibilityNodeKey => acc.mem.head
-  })
+  })) else None
 
   val dma_port = if (p(HasDMA).isDefined) {
     val dma_node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
@@ -102,12 +106,13 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   // We have to share shell DDR ports with DMA bus (which is AXI4). Use RocketChip utils to do that instead of the
   // whole shebang with instantiating strange encrypted Xilinx IPs'
 
-  val composer_mems = Seq.fill(nMemChannels)(AXI4IdentityNode())
-  acc.mem zip composer_mems foreach { case (m, x) =>
-    (x
+  val composer_mems = acc.mem map { case m =>
+    val composer_mem = AXI4IdentityNode()
+    (composer_mem
       := AXI4Buffer()
       := TLToAXI4()
       := m)
+    composer_mem
   }
   val extMemIDBits = p(ExtMem) match {
     case None => 0
@@ -127,18 +132,14 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   }
 
   mem_tops foreach { mt =>
-    AXI_MEM :=
+    AXI_MEM.get :=
       AXI4Buffer() :=
       AXI4UserYanker(capMaxFlight = Some(p(MaxInFlightMemTxsPerSource))) :=
       AXI4IdIndexer(extMemIDBits) :=
       AXI4Buffer() := mt
   }
 
-  val cmd_resp_axilhub = LazyModule(new AXILHub()(dummyTL))
 
-  // connect axil hub to external axil port
-  cmd_resp_axilhub.node := AXI4Buffer() := S00_AXI
-  // connect axil hub to accelerator
 
   lazy val module = new TopImpl(this)
 }
@@ -147,31 +148,33 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   val acc = outer.acc
   val axil_hub = outer.cmd_resp_axilhub
   val ocl_port = outer.S00_AXI
-  val dram_ports = outer.AXI_MEM
   acc.module.io.cmd <> axil_hub.module.io.rocc_in
   axil_hub.module.io.rocc_out <> acc.module.io.resp
 
   val S00_AXI = IO(Flipped(new AXI4Compat(ocl_port.out(0)._1.params)))
   AXI4Compat.connectCompatSlave(S00_AXI, ocl_port.out(0)._1)
 
-  val M00_AXI = dram_ports.in.zipWithIndex.map(a => {
-    val io = IO(new AXI4Compat(a._1._1.params))
-    io.suggestName(s"M0${a._2}_AXI")
-    io
-  })
-  //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
-  (M00_AXI zip dram_ports.in) foreach { case (i, (o, _)) => AXI4Compat.connectCompatMaster(i, o) }
+  if (outer.AXI_MEM.isDefined) {
+    val dram_ports = outer.AXI_MEM.get
+    val M00_AXI = dram_ports.in.zipWithIndex.map(a => {
+      val io = IO(new AXI4Compat(a._1._1.params))
+      io.suggestName(s"M0${a._2}_AXI")
+      io
+    })
+    //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
+    (M00_AXI zip dram_ports.in) foreach { case (i, (o, _)) => AXI4Compat.connectCompatMaster(i, o) }
 
-  val read_success = EventPerformanceCounter(M00_AXI.map( axi => axi.rvalid && axi.rready ), new NoObjective)
-  val read_conflict = EventPerformanceCounter(M00_AXI.map( axi => ! axi.rready && axi.rvalid ), new NoObjective)
-  val write_request_conflict = EventPerformanceCounter(M00_AXI.map( axi => !axi.awready && axi.awvalid ), new NoObjective)
-  val read_request_conflict = EventPerformanceCounter(M00_AXI.map( axi => !axi.arready && axi.arvalid ), new NoObjective)
+    val read_success = EventPerformanceCounter(M00_AXI.map(axi => axi.rvalid && axi.rready), new NoObjective)
+    val read_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.rready && axi.rvalid), new NoObjective)
+    val write_request_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.awready && axi.awvalid), new NoObjective)
+    val read_request_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.arready && axi.arvalid), new NoObjective)
 
-  // make incoming dma port and connect it
+    // make incoming dma port and connect it
+    if (p(HasDMA).isDefined) {
+      val dma = IO(Flipped(new AXI4Compat(outer.AXI_MEM.get.in(0)._1.params)))
+      AXI4Compat.connectCompatSlave(dma, outer.dma_port.get.out(0)._1)
+    }
 
-  if (p(HasDMA).isDefined) {
-    val dma = IO(Flipped(new AXI4Compat(outer.AXI_MEM.in(0)._1.params)))
-    AXI4Compat.connectCompatSlave(dma, outer.dma_port.get.out(0)._1)
   }
 
   // try to make this the last thing we do
