@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import composer.MemoryStreams._
 import composer.RoccHelpers._
-import composer.TLManagement.TLClientModule
+import composer.TLManagement.{ComposerRespConverter, MultiBeatCommandEmitter, TLClientModule}
 import composer.common._
 import composer.{ComposerConstructor, ComposerSystemParams, SystemName2IdMapKey}
 import freechips.rocketchip.diplomacy._
@@ -13,7 +13,7 @@ import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 
-class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2)(implicit p: Parameters) extends ParameterizedBundle()(p) {
+class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2) extends Bundle {
   val req: DecoupledIO[T1] = DecoupledIO(bundleIn.cloneType)
   val resp: DecoupledIO[T2] = Flipped(DecoupledIO(bundleOut.cloneType))
   val busy = Input(Bool())
@@ -26,7 +26,7 @@ class DataChannelIO(dataBytes: Int, vlen: Int = 1) extends Bundle {
   val in_progress = Output(Bool())
 }
 
-class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val core_id: Int, system_id: Int)(implicit p: Parameters) extends LazyModule {
+class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val core_id: Int, val system_id: Int)(implicit p: Parameters) extends LazyModule {
   val coreParams = composerSystemParams.coreParams.copy(core_id = core_id, system_id = system_id)
   val blockBytes = p(CacheBlockBytes)
 
@@ -218,12 +218,23 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     (mod.req, mod.access)
   }
 
-  private val composer_response_io_ = if (outer.composerSystemParams.canIssueCoreCommands) {
+  private[composer] val composer_response_io_ = if (outer.composerSystemParams.canIssueCoreCommands) {
     Some(IO(Flipped(Decoupled(new ComposerRoccResponse()))))
   } else None
 
-  def composer_response_io: DecoupledIO[ComposerRoccResponse] = composer_response_io_.getOrElse {
-    throw new Exception("Attempted to get internal response IO but core was declared as not being able to issue core commands")
+  
+
+  def composer_response_io[T <: ComposerUserResponse](gen: T = new ComposerUserResponse): DecoupledIO[T] = {
+    val raw_io = composer_response_io_.getOrElse {
+      throw new Exception("Attempted to get internal response IO but core was declared as not being able to issue core commands")
+    }
+    if (gen.isInstanceOf[ComposerRoccResponse]) {
+      raw_io.asInstanceOf[DecoupledIO[T]]
+    } else {
+      val conv_module = Module(new ComposerRespConverter[T](gen))
+      conv_module.in <> raw_io
+      conv_module.out
+    }
   }
 
 
@@ -239,26 +250,14 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     Some(wire)
   } else None
 
-  def composer_command_io: DecoupledIO[ComposerRoccCommand] = composer_command_io_.get
+  def composer_command_io[T <: ComposerCommand](gen: T = new ComposerRoccCommand): DecoupledIO[T] = {
+    val raw_io = composer_command_io_.get
+    val multiBeatCommandMod = Module(new MultiBeatCommandEmitter(gen, outer.externalCoreCommNodes.get.out(0)._1))
+    raw_io <> multiBeatCommandMod.out
+    multiBeatCommandMod.in
+  }
 
   def getSystemID(name: String): UInt = p(SystemName2IdMapKey)(name).U
-
-  def genCoreCommand(name: String, expectResponse: Bool, rs1: UInt = 0.U, rs2: UInt = 0.U, rd: UInt = 0.U,
-                     xs2: UInt = 0.U, coreId: UInt = 0.U, payload1: UInt = 0.U, payload2: UInt = 0.U): UInt = {
-    val wire = Wire(new ComposerRoccCommand())
-    wire.inst.core_id := coreId
-    wire.inst.rd := rd
-    // flag for internally routed command
-    wire.inst.xs1 := true.B
-    wire.inst.xs2 := xs2
-    wire.inst.xd := expectResponse
-    wire.inst.system_id := p(SystemName2IdMapKey)(name).U
-    wire.inst.funct := 0.U
-    wire.inst.opcode := ComposerOpcode.ACCEL
-    wire.payload1 := payload1
-    wire.payload2 := payload2
-    wire.pack()
-  }
 
   def addrBits: Int = log2Up(p(ExtMem).get.master.size)
 
@@ -271,28 +270,28 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   private var using_custom = custom_usage.unused
   private[composer] val io_declaration = IO(Flipped(new ComposerCoreIO()))
 
-  def composer_IO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2): CustomIO[T1, T2] = {
+  def ComposerIO[T1 <: ComposerCommand, T2 <: ComposerUserResponse](bundleIn: T1, bundleOut: T2): CustomIO[T1, T2] = {
     if (using_custom == custom_usage.default) {
       throw new Exception("Cannot use custom io after using the default io")
     }
     using_custom = custom_usage.custom
-    val m = Module(new ComposerBundleIOModule[T1, T2](bundleIn, bundleOut, composerConstructor.composerCoreParams))
+    val m = Module(new ComposerCommandBundler[T1, T2](bundleIn, bundleOut, composerConstructor.composerCoreWrapper))
     m.cio <> io_declaration
     m.io
   }
 
-  def composer_IO[T1 <: Bundle](bundleIn: T1): CustomIO[T1, ComposerRoccUserResponse] = {
+  def ComposerIO[T1 <: ComposerCommand](bundleIn: T1): CustomIO[T1, ComposerRoccUserResponse] = {
     if (using_custom == custom_usage.default) {
       throw new Exception("Cannot use custom io after using the default io")
     }
     using_custom = custom_usage.custom
-    val m = Module(new ComposerBundleIOModule[T1, ComposerRoccUserResponse](bundleIn, new ComposerRoccUserResponse, composerConstructor.composerCoreParams))
+    val m = Module(new ComposerCommandBundler[T1, ComposerRoccUserResponse](bundleIn, new ComposerRoccUserResponse, composerConstructor.composerCoreWrapper))
     m.cio <> io_declaration
     m.io
   }
 
 
-  def composer_IO(): ComposerCoreIO = {
+  def ComposerIO(): ComposerCoreIO = {
     if (using_custom == custom_usage.custom) {
       throw new Exception("Cannot use io after generating a custom io")
     }
@@ -301,7 +300,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   }
 }
 
-class ComposerSystemIO(implicit p: Parameters) extends Bundle {
+class ComposerSystemIO extends Bundle {
   val cmd = Flipped(Decoupled(new ComposerRoccCommand))
   val resp = Decoupled(new ComposerRoccResponse())
 }

@@ -79,7 +79,7 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   accCmd.bits.inst.funct := cmdRouter.io.out(1).bits.inst.funct(6-SystemIDLengthKey, 0)
   accCmd.bits.inst.system_id := cmdRouter.io.out(1).bits.inst.funct(6, 6-SystemIDLengthKey+1)
 
-  accCmd.bits.core_id := cmdRouter.io.out(1).bits.rs1(63, 64-CoreIDLengthKey)
+  accCmd.bits.getCoreID := cmdRouter.io.out(1).bits.rs1(63, 64-CoreIDLengthKey)
   accCmd.bits.payload1 := cmdRouter.io.out(1).bits.rs1(63-CoreIDLengthKey, 0)
   accCmd.bits.payload2 := cmdRouter.io.out(1).bits.rs2
 

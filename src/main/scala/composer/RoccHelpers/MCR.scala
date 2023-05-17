@@ -62,15 +62,12 @@ class MCRFileMap() {
     case (e: RegisterEntry, addr) => mcrIO.bindReg(e, addr)
   }
 
-  def printCRs(outStream: Option[FileWriter] = None)(implicit p: Parameters): Unit = {
-    regList.zipWithIndex foreach { case (entry, i) =>
+  def getCRdef(implicit p: Parameters): Seq[String] = {
+    (regList.zipWithIndex map { case (entry, i) =>
       val addr = i << log2Up(p(AXILSlaveBeatBytes))
       require(i < 1024)
-      outStream match {
-        case a: Some[FileWriter] => a.get.write(s"#define ${entry.name.toUpperCase()} ($addr)\n")
-        case None => println(s"Name: ${entry.name}, ID: $i, Addr: $addr")
-      }
-    }
+      s"#define ${entry.name.toUpperCase()} ($addr)\n"
+    }).toSeq
   }
 }
 
