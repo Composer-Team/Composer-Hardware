@@ -4,9 +4,8 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.amba.axi4._
 import chipsalliance.rocketchip.config._
-
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.tile.{RoCCCommand, RoCCResponse}
+import freechips.rocketchip.tile.{RoCCCommand, RoCCResponse, TileVisibilityNodeKey}
 
 class AXILHub(implicit p: Parameters) extends LazyModule {
 //  val axil_aggregator = LazyModule(new AXILAggregator())
@@ -17,7 +16,9 @@ class AXILHub(implicit p: Parameters) extends LazyModule {
 
 //  mem_out := axil_aggregator.node
   axil_widget.node := node
-  lazy val module = new AXILHubModule(this)
+  lazy val module = new AXILHubModule(this)(p.alterPartial{
+    case TileVisibilityNodeKey => axil_widget.throughId
+  })
 }
 
 class AXILHubModule(outer: AXILHub)(implicit p: Parameters) extends LazyModuleImp(outer) {

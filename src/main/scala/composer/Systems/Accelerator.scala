@@ -69,8 +69,7 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   val accCmd = Wire(Decoupled(new ComposerRoccCommand)) //CUSTOM3, used for everything else
   accCmd.valid := cmdRouter.io.out(1).valid
   cmdRouter.io.out(1).ready := accCmd.ready
-  accCmd.bits.inst.rs1 := cmdRouter.io.out(1).bits.inst.rs1
-  accCmd.bits.inst.rs2 := cmdRouter.io.out(1).bits.inst.rs2
+  accCmd.bits.inst.core_id := Cat(cmdRouter.io.out(1).bits.inst.rs1, cmdRouter.io.out(1).bits.inst.rs2)
   accCmd.bits.inst.rd := cmdRouter.io.out(1).bits.inst.rd
   accCmd.bits.inst.xd := cmdRouter.io.out(1).bits.inst.xd
   accCmd.bits.inst.xs1 := cmdRouter.io.out(1).bits.inst.xs1
@@ -134,28 +133,30 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
 
 class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
   val nMemChannels = p(ExtMem).get.nMemoryChannels
-
-//  val hostmem = TLIdentityNode()
-  val mem = Seq.fill(nMemChannels) { TLIdentityNode() }
-
-  val dummyTL = p.alterPartial({ case TileVisibilityNodeKey => mem.head})
-  val acc = LazyModule(new ComposerAcc()(dummyTL))
-
   val crossbarModule = LazyModule(new TLXbar())
+
+  val acc = LazyModule(new ComposerAcc())
+
+  val mem = if (acc.mems.nonEmpty) {
+    Seq.fill(nMemChannels) { TLIdentityNode() }
+  } else {
+    Seq()
+  }
 
   val crossbar = crossbarModule.node
 
-  acc.mems foreach (crossbar := _)
-  mem.foreach ( _ := crossbar)
-//  crossbar := hostmem
+  if (acc.mems.nonEmpty) {
+    acc.mems foreach (crossbar := _)
+    mem.foreach(_ := crossbar)
+  }
 
   lazy val module = new ComposerAccSystemModule(this)
 }
 
 class ComposerAccSystemModule(outer: ComposerAccSystem)(implicit p: Parameters) extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
-    val cmd = Flipped(Decoupled(new RoCCCommand()(outer.dummyTL)))
-    val resp = Decoupled(new RoCCResponse()(outer.dummyTL))
+    val cmd = Flipped(Decoupled(new RoCCCommand()))
+    val resp = Decoupled(new RoCCResponse())
   })
 
   outer.acc.module.io.cmd <> io.cmd

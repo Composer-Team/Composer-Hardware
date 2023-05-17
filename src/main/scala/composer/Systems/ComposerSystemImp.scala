@@ -15,7 +15,7 @@ import scala.annotation.tailrec
 
 class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) extends LazyModuleImpWithSLRs(outer) {
   val sw_io = if (outer.systemParams.canReceiveSoftwareCommands) Some(IO(new ComposerSystemIO())) else None
-  val respArbiter = ModuleWithSLR(new MultiLevelArbiter(new ComposerRoccUserResponse(), outer.systemParams.nCores))
+  val respArbiter = ModuleWithSLR(new MultiLevelArbiter(new ComposerRoccResponse(), outer.systemParams.nCores))
   val cores = outer.cores.map(_._2.module)
   val busy = IO(Output(Bool()))
   busy := cores.map(_.io_declaration.busy).reduce(_ || _)
@@ -76,7 +76,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   }
 
   lazy val cmd = Queue(cmdArbiter.io.out)
-  cmd.ready := funct =/= ComposerFunc.START.U || VecInit(cores.map(_.io_declaration.req.ready))(coreSelect)
+  cmd.ready := VecInit(cores.map(_.io_declaration.req.ready))(coreSelect)
 
   lazy val funct = cmd.bits.inst.funct
 
@@ -90,12 +90,19 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     case _ => 0
   }
 
-  val coreResps = if (p(CoreCommandLatency) == 0) cores.map(_.io_declaration.resp) else {
-    cores.map{ c =>
-      val resp_queue = Module(new Queue[ComposerRoccUserResponse](new ComposerRoccUserResponse(), 2))
-      resp_queue.io.enq <> c.io_declaration.resp
-      resp_queue.io.deq
+  val coreResps = cores.map { c =>
+    val lastRecievedRd = Reg(UInt(5.W))
+    when(c.io_declaration.req.fire) {
+      lastRecievedRd := c.io_declaration.req.bits.inst.rd
     }
+    val resp_queue = Module(new Queue[ComposerRoccResponse](new ComposerRoccResponse(), entries = 2))
+    resp_queue.io.enq.bits.system_id := outer.system_id.U
+    resp_queue.io.enq.bits.core_id := c.composerConstructor.composerCoreWrapper.core_id.U
+    resp_queue.io.enq.bits.rd := lastRecievedRd
+    resp_queue.io.enq.bits.data := c.io_declaration.resp.bits.data
+    resp_queue.io.enq.valid := c.io_declaration.resp.valid
+    c.io_declaration.resp.ready := resp_queue.io.enq.ready
+    resp_queue.io.deq
   }
 
   respArbiter.io.in <> coreResps
@@ -180,72 +187,16 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     responseManager.io.ready := VecInit(cores.map(_.composer_response_io.ready))(response.core_id)
   }
 
-  val channelSelect = Cat(cmd.bits.inst.rs2(2, 0), cmd.bits.inst.rs1)
-
-  cores.zipWithIndex.foreach { case (core, i) =>
-    // hopefully this maps across the SLR
-    val coreStart = cmd.valid && funct === ComposerFunc.START.U && coreSelect === i.U
+  cores.foreach { core =>
     if (p(CoreCommandLatency) > 0) {
       val coreCmdQueue = Module(new Queue[ComposerRoccCommand](new ComposerRoccCommand, 2))
-      when (coreStart) {
-        coreCmdQueue.io.enq <> cmd
-      }.otherwise {
-        coreCmdQueue.io.enq.valid := false.B
-        coreCmdQueue.io.enq.bits := DontCare
-      }
+      coreCmdQueue.io.enq <> cmd
       coreCmdQueue.io.deq <> core.io_declaration.req
     } else {
-      core.io_declaration.req.valid := coreStart
+      core.io_declaration.req.valid := cmd.valid
       core.io_declaration.req.bits := cmd.bits
+      cmd.ready := core.io_declaration.req.ready
     }
   }
-
-  // scope to separate out read channel stuff
-  val cmdFireLatch = RegNext(cmd.fire)
-  val cmdBitsLatch = RegNext(cmd.bits)
-  val functLatch = cmdBitsLatch.inst.funct
-  val coreSelectLatch = cmdBitsLatch.core_id
-
-  val addr_func_live = cmd.bits.inst.funct === ComposerFunc.ADDR.U && cmd.fire
-
-  if (cores(0).read_ios.nonEmpty) {
-    cores(0).read_ios(0)._2.valid := false.B
-    cores(0).write_ios(0)._2.valid := true.B
-  }
-  val txLenFromCmd = if (addressBits > 0) cmd.bits.payload1(addressBits - 1, 0) else 0.U
-
-  case class CChannelIdentifier(system_name: String, core_idx: Int, channel_name: String, channel_subidx: Int, io_idx: Int)
-
-  @tailrec
-  private def assign_channel_addresses(coreId: Int, channelList: List[((String, Int), DecoupledIO[ChannelTransactionBundle])],
-                                       assignment: Int = 0,
-                                       // core name, core_id, channel name, channel idx, io_idx
-                                       io_map: List[CChannelIdentifier] = List()): List[CChannelIdentifier] = {
-    channelList match {
-      case (channel_identifier, txio) :: rst =>
-        val tx_len = Reg(UInt(addressBits.W))
-        val tx_addr_start = Reg(UInt(addressBits.W))
-        when(addr_func_live && coreSelect === coreId.U && channelSelect === assignment.U) {
-          tx_len := txLenFromCmd
-          tx_addr_start := cmd.bits.payload2(addressBits - 1, 0)
-        }
-        txio.valid := cmdFireLatch && functLatch === ComposerFunc.START.U && coreSelectLatch === coreId.U
-        txio.bits.addr := tx_addr_start
-        txio.bits.len := tx_len
-        assign_channel_addresses(coreId, rst, assignment + 1,
-          CChannelIdentifier(
-            system_name = outer.systemParams.name,
-            core_idx = coreId,
-            channel_name = channel_identifier._1,
-            channel_subidx = channel_identifier._2,
-            io_idx = assignment) :: io_map)
-      case _ => io_map
-    }
-  }
-
-  val core_io_mappings = cores.zipWithIndex.map { case (co, id) =>
-    assign_channel_addresses(id, co.read_ios ++ co.write_ios)
-  }
-
   tieClocks()
 }

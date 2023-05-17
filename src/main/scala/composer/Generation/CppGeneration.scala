@@ -15,8 +15,19 @@ import java.io.FileWriter
 object CppGeneration {
 
   private case class CppDefinition(ty: String, name: String, value: String)
+
   private case class PreprocessorDefinition(ty: String, value: String)
-  private case class HookDef(sysName: String, params: Seq[(String, Int, Boolean)])
+
+  private case class HookDef(sysName: String, params: Seq[(String, Int, Boolean)]) {
+    params.foreach{ p =>
+      val paramLength = p._2
+      val paramName = p._1
+      assert(paramLength <= 64 || paramLength % 8 == 0,
+      "Bit fields that are longer than 64b MUST be byte aligned (for our own implementation-simplicity-sake).\n" +
+        " If this is an absolutely necessary functionality, contact developers.\n" +
+        s"Variable in question: $paramName. Length: $paramLength\n")
+    }
+  }
 
   private var user_enums: List[EnumFactory] = List()
   private var user_defs: List[CppDefinition] = List()
@@ -90,7 +101,7 @@ object CppGeneration {
       "#include <cinttypes>\n" +
       "#ifndef COMPOSER_ALLOCATOR_GEN\n" +
       "#define COMPOSER_ALLOCATOR_GEN\n" +
-      s"#define AXIL_BUS_WIDTH ${p(AXILSlaveBeatBytes)*8}\n")
+      s"#define AXIL_BUS_WIDTH ${p(AXILSlaveBeatBytes) * 8}\n")
     if (!p(HasDiscreteMemory)) f.write("#ifdef SIM\n")
     f.write("#define COMPOSER_USE_CUSTOM_ALLOC\n" +
       "#define NUM_DDR_CHANNELS " + mem.nMemoryChannels + "\n" +
@@ -125,132 +136,100 @@ object CppGeneration {
 
     cr.printCRs(Some(f))
 
-    val num_systems = acc.systems.length
-    val max_core_per_system = acc.systems.map(_.nCores).max
-    val max_channels_per_channelGroup = {
-      val g = acc.systems.flatMap(_.module.core_io_mappings.flatMap(_.map(_.channel_subidx)))
-      if (g.isEmpty) -1
-      else g.max + 1
-    }
-
     acc.system_tups.filter(_._3.canReceiveSoftwareCommands) foreach { tup =>
       val sys_id = tup._2
       val sys_name = tup._3.name
       // write out system id so that users can reference it directly
       f.write(s"const uint8_t ${sys_name}_ID = $sys_id;\n")
     }
-    f.write("// index by... sys_id, core_id, name_id, id_within_channel\n")
-    if (max_channels_per_channelGroup > 0) {
-      // first gotta make channel_names in C++ header
-      val allChannelNames = acc.systems.flatMap(_.module.core_io_mappings.flatten.map(_.channel_name))
-      f.write("enum ComposerChannels {\n")
-      allChannelNames.zipWithIndex.foreach { a =>
-        f.write(s"\t${a._1} = ${a._2},\n")
+    // STILL WITHIN COMPOSER NAMESPACE
+    val maxCmdLength = 128
+    hook_defs.foreach { hook =>
+      val sub_signature = hook.params.map { pa =>
+        getCType(pa._1, pa._2, pa._3) + " " + pa._1
       }
-      f.write("};\n")
-      val nNames = allChannelNames.length
+      val signature = if (sub_signature.isEmpty) "" else {
+        sub_signature.reduce(_ + ", " + _)
+      }
 
-      val name_invalid_list = "{ " + Seq.fill(max_channels_per_channelGroup - 1)("(char)0xFF, ").foldLeft("")(_ + _) + " (char)0xFF }"
-      val core_invalid_list = "{ " + Seq.fill(nNames - 1)(name_invalid_list + ", ").foldLeft("")(_ + _) + name_invalid_list + " }"
-      f.write(s"static const char __composer_channel_map[$num_systems][$max_core_per_system][$nNames][$max_channels_per_channelGroup] = {")
-      (0 until num_systems) foreach { sys_id =>
-        val sys = acc.system_tups.filter(_._2 == sys_id)(0)._1.module
-        f.write("{ ")
-        (0 until max_core_per_system) foreach { core_id =>
-          if (core_id >= sys.cores.length) {
-            f.write(core_invalid_list)
-          } else {
-            f.write("{ ")
-            val core_ios = sys.core_io_mappings(core_id)
-            allChannelNames.zipWithIndex foreach { case (name, name_idx) =>
-              val members = core_ios.filter(_.channel_name == name)
-              if (members.isEmpty)
-              // this core doesn't have this group
-                f.write(name_invalid_list)
-              else {
-                f.write("{ ")
-                (0 until max_channels_per_channelGroup) foreach { ch_sidx =>
-                  val hit = members.filter(_.channel_subidx == ch_sidx)
-                  if (hit.isEmpty) {
-                    // this channel does not use software addressing
-                    f.write("(char)0xFF")
-                  } else {
-                    f.write(hit(0).io_idx.toString)
-                  }
-                  if (ch_sidx < max_channels_per_channelGroup - 1) f.write(", ")
-                }
-                f.write("}")
-              }
-              if (name_idx < nNames - 1) f.write(", ")
-            }
-            f.write("}")
-          }
-          if (core_id < max_core_per_system - 1) f.write(", ")
+      val assignments = hook.params.map(_._2).scan(0)(_ + _) zip hook.params flatMap { case (offset: Int, p: (String, Int, Boolean)) =>
+        val payloadId = offset / 64
+        val payloadLocalOffset = offset % 64
+        val bitsLeftInPayload = 64 - payloadLocalOffset
+        if (bitsLeftInPayload < p._2) {
+          // we're going to roll over!
+          Seq(
+            f"\tpayloads[$payloadId] = payloads[$payloadId] | ((${p._1} & ${(1 << bitsLeftInPayload)-1}) << $payloadLocalOffset));",
+            f"\tpayloads[${payloadId+1}] = payloads[${payloadId+1}] | ((${p._1} >> $bitsLeftInPayload) & ${(1 << (p._2 - bitsLeftInPayload))-1});"
+          )
+        } else {
+          Seq(f"\tpayloads[$payloadId] = payloads[$payloadId] | (${p._1} << $payloadLocalOffset);")
         }
-        f.write("}")
-        if (sys_id < num_systems - 1) f.write(", ")
       }
-      f.write("};\n")
-    } else f.write(s"static const char __composer_channel_map[1][1][1][1] = {{{{(char)0xFF}}}};\nenum ComposerChannels {};\n")
-    f.write(
-      """
-        |namespace composer {
-        |  static ChannelAddressInfo getChannelSubIdx(uint16_t system_id, uint8_t core_id, ComposerChannels name, int id) {
-        |    return ChannelAddressInfo(system_id, core_id, __composer_channel_map[system_id][core_id][uint8_t(name)][id]);
-        |  }
-        |}
-        |
-        |""".stripMargin)
+      val numCommands = (hook.params.map(_._2).sum.toFloat / maxCmdLength).ceil.toInt
+      f.write(
+        f"""
+           |rocc_response ${hook.sysName}Command(uint16_t core_id, $signature) {
+           |  assert(core_id < (1 << 10));
+           |  uint64_t payloads[${numCommands*2}];
+           |  """.stripMargin + (if (assignments.length == 1) assignments(0) + "\n" else assignments.reduce(_ + "\n" + _) )+
+        f"""
+           |  for (int i = 0; i < ${numCommands}; ++i) {
+           |    rocc_cmd::start_cmd(${hook.sysName}_ID, i == ${numCommands - 1}, 0, false, false, core_id, payloads[i*2], payloads[i*2+1]);
+           |  }
+           |}
+           |""".stripMargin)
+    }
 
 
     f.write(s"static const uint8_t system_id_bits = $SystemIDLengthKey;\n")
-    f.write(s"static const uint8_t core_id_bits = $CoreIDLengthKey;\n")
-    //    f.write(//s"static const uint8_t numChannelSelectionBits = ${p(ChannelSelectionBitsKey)}," +
-    //      s"static const uint8_t channelTransactionLenBits = ${log2Up(p(MaxChannelTransactionLenKey))};\n")
-    f.write(s"static const composer::composer_pack_info pack_cfg(system_id_bits, core_id_bits);\n")
-    val addrSet = ComposerTop.getAddressSet(0)
-    f.write(s"static const uint64_t addrMask = ${addrSet.mask};\n")
+      f.write(s"static const uint8_t core_id_bits = $CoreIDLengthKey;\n")
+      //    f.write(//s"static const uint8_t numChannelSelectionBits = ${p(ChannelSelectionBitsKey)}," +
+      //      s"static const uint8_t channelTransactionLenBits = ${log2Up(p(MaxChannelTransactionLenKey))};\n")
+      f.write(s"static const composer::composer_pack_info pack_cfg(system_id_bits, core_id_bits);\n")
+      val addrSet = ComposerTop.getAddressSet(0)
+      f.write(s"static const uint64_t addrMask = ${addrSet.mask};\n")
 
-    // this next stuff is just for simulation
-    def getVerilatorDtype(width: Int): String = {
-      width match {
-        case x if x <= 8 => "CData"
-        case x if x <= 16 => "SData"
-        case x if x <= 32 => "IData"
-        case x if x <= 64 => "QData"
-        case _ => "ERROR"
+      // this next stuff is just for simulation
+      def getVerilatorDtype(width: Int): String = {
+        width match {
+          case x if x <= 8 => "CData"
+          case x if x <= 16 => "SData"
+          case x if x <= 32 => "IData"
+          case x if x <= 64 => "QData"
+          case _ => "ERROR"
+        }
       }
+
+      if (p(HasDMA).isDefined) {
+        f.write("#define COMPOSER_HAS_DMA\n")
+      }
+
+      p(ExtMem) match {
+        case Some(a) =>
+          val strobeDtype = getVerilatorDtype(p(ExtMem).get.master.beatBytes)
+          val addrWid = log2Up(a.master.size)
+          val addrDtype = getVerilatorDtype(addrWid)
+          val idDtype = getVerilatorDtype(p(ExtMem).get.master.idBits)
+          f.write(s"#ifdef SIM\n" +
+            s"#include <verilated.h>\n" +
+            s"using ComposerMemAddressSimDtype=$addrDtype;\n" +
+            s"using ComposerStrobeSimDtype=$strobeDtype;\n" +
+            s"using ComposerMemIDDtype=$idDtype;\n" +
+            s"#define DEFAULT_PL_CLOCK ${p(DefaultClockRateKey)}\n" +
+            (p(HasDMA) match {
+              case None => ""
+              case Some(a) => s"using ComposerDMAIDtype=${getVerilatorDtype(a)};\n"
+            }) +
+            s"#define DATA_BUS_WIDTH ${p(ExtMem).get.master.beatBytes * 8}\n" +
+            s"#endif\n")
+        case None =>
+          f.write("// No memory detected, not defining Address Sim Dtype\n")
+      }
+      f.write("const uint64_t ComposerMMIOOffset = " + p(MMIOBaseAddress) + "L;\n")
+
+
+      f.write("#endif\n")
+      f.close()
     }
-
-    if (p(HasDMA).isDefined) {
-      f.write("#define COMPOSER_HAS_DMA\n")
-    }
-
-    p(ExtMem) match {
-      case Some(a) =>
-        val strobeDtype = getVerilatorDtype(p(ExtMem).get.master.beatBytes)
-        val addrWid = log2Up(a.master.size)
-        val addrDtype = getVerilatorDtype(addrWid)
-        val idDtype = getVerilatorDtype(p(ExtMem).get.master.idBits)
-        f.write(s"#ifdef SIM\n" +
-          s"#include <verilated.h>\n" +
-          s"using ComposerMemAddressSimDtype=$addrDtype;\n" +
-          s"using ComposerStrobeSimDtype=$strobeDtype;\n" +
-          s"using ComposerMemIDDtype=$idDtype;\n" +
-          s"#define DEFAULT_PL_CLOCK ${p(DefaultClockRateKey)}\n" +
-          (p(HasDMA) match {
-            case None => ""
-            case Some(a) => s"using ComposerDMAIDtype=${getVerilatorDtype(a)};\n"
-          }) +
-          s"#define DATA_BUS_WIDTH ${p(ExtMem).get.master.beatBytes * 8}\n" +
-          s"#endif\n")
-      case None =>
-        f.write("// No memory detected, not defining Address Sim Dtype\n")
-    }
-    f.write("const uint64_t ComposerMMIOOffset = " + p(MMIOBaseAddress) + "L;\n")
-
-
-    f.write("#endif\n")
-    f.close()
   }
-}

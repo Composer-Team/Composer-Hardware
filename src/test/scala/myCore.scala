@@ -16,7 +16,7 @@ class SimpleInput extends Bundle {
   val b = UInt(103.W)
 }
 class SimpleOutput extends Bundle {
-  val result = UInt(60.W)
+  val result = UInt(50.W)
 }
 
 class SimpleCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {

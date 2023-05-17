@@ -9,24 +9,15 @@ import composer.Systems._
 import composer.Generation._
 
 class ComposerBundleIOModule[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2, composerCoreParams: ComposerCoreParams)(implicit p: Parameters) extends Module {
-
   val cio = IO(Flipped(new ComposerCoreIO))
   val io = IO(new CustomIO[T1, T2](bundleIn.cloneType, bundleOut.cloneType))
 
   val widths = bundleIn.getElements.map(data => data.getWidth)
-  val widthsString = widths.toString()
-  val essentialWidthsString = widthsString.substring(widthsString.indexOf("(") + 1, widthsString.indexOf(")"))
-  val widthsArrayString = "{" + essentialWidthsString + "}"
-  CppGeneration.addUserCppDefinition("uint16_t", "fieldWidths[]", widthsArrayString)
-  CppGeneration.addUserCppDefinition("uint16_t", "numFields", bundleIn.getElements.size)
-
-  //  CppGeneration.generateCommand("int", "op", "uint64_t", "a", "uint64_t", "b")
-  //  println("------------")
-  //  val names = bundleIn.getElements.map(data => data.)
-  //  println(names)
-  //
-  //  println("------------")
-
+//  val widthsString = widths.toString()
+//  val essentialWidthsString = widthsString.substring(widthsString.indexOf("(") + 1, widthsString.indexOf(")"))
+//  val widthsArrayString = "{" + essentialWidthsString + "}"
+//  CppGeneration.addUserCppDefinition("uint16_t", "fieldWidths[]", widthsArrayString)
+//  CppGeneration.addUserCppDefinition("uint16_t", "numFields", bundleIn.getElements.size)
   //zero initialize values
   io.req.bits.elements.foreach { case (_, data) => data := 0.U }
   cio.resp.bits.elements.foreach { case (_, data) => data := 0.U }
@@ -35,7 +26,6 @@ class ComposerBundleIOModule[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut
 
   cio.resp.valid := io.resp.valid
   io.resp.ready := cio.resp.ready
-
   when(io.resp.fire) {
     val payload = io.resp.bits.asUInt
     loadOutputPayload(payload, cio.resp.bits.data)
