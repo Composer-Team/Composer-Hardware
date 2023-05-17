@@ -4,24 +4,25 @@ import chisel3.util._
 import composer.Systems._
 import composer._
 import composer.MemoryStreams._
+import composer.common._
 
 //TODO: Will we ever need to take more inputs in the middle of a calculation? Or only at the beginning?
 
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * Simple ALU Implementation * * * * * * * * * * * * * * * * * * *
 
-class SimpleInput extends Bundle {
+class SimpleInput extends ComposerCommand {
   val op = UInt(101.W)
   val a = UInt(102.W)
   val b = UInt(103.W)
 }
-class SimpleOutput extends Bundle {
+class SimpleOutput extends ComposerUserResponse {
   val result = UInt(50.W)
 }
 
 class SimpleCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters) extends ComposerCore(composerCoreParams) {
 
-  val io = composer_IO(new SimpleInput, new SimpleOutput)
+  val io = ComposerIO(new SimpleInput, new SimpleOutput)
 
   val s_idle :: s_working :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)

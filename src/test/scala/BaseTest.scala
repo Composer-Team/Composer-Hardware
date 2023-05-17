@@ -2,10 +2,12 @@ import chipsalliance.rocketchip.config.{Config, Field, Parameters}
 import chisel3._
 import chisel3.util._
 import composer.MemoryStreams._
+
 import scala.util.Random
 import composer.Systems._
 import composer._
 import composer.Generation._
+import composer.common.ComposerCommand
 
 case class LFSRConfig(length: Int, taps: Seq[Int])
 
@@ -15,7 +17,7 @@ class LFSRCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters) 
   // simple state machine - not composer specific, but useful anyways
   val s_idle :: s_working :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
-  val io = composer_IO
+  val io = ComposerIO
 
 
   // you can use configs to access implementation details for your core (optional)
@@ -33,7 +35,7 @@ class LFSRCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters) 
   // here we're using the Chisel last-connect semantics to define the default values for each of the wires
   io.req.ready := false.B
   io.resp.valid := false.B
-  io.resp.bits.data := 0.U
+  io.resp.bits.data_field := 0.U
   io.busy := true.B
 
   // when we're idle we accept commands
@@ -64,7 +66,7 @@ class LFSRCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters) 
     }
   }.elsewhen(state === s_finish) {
     // when we're done we signal response what we want to send back to the CPU
-    io.resp.bits.data := VecInit(outputCache).asUInt
+    io.resp.bits.data_field := VecInit(outputCache).asUInt
     io.resp.valid := true.B
     when(io.resp.fire) {
       state := s_idle
@@ -78,7 +80,7 @@ class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters)
   // again, we define some sort of state machine
   val s_idle :: s_working :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
-  val io = composer_IO(new Bundle() {
+  val io = ComposerIO(new ComposerCommand() {
     val opcode = UInt(2.W)
     val a = UInt(32.W)
     val b = UInt(32.W)
@@ -95,7 +97,7 @@ class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters)
   // state then io.resp.valid will be true
   io.req.ready := false.B
   io.resp.valid := false.B
-  io.resp.bits.data := 0.U
+  io.resp.bits.data_field := 0.U
   io.busy := true.B
 
   when(state === s_idle) {
@@ -125,7 +127,7 @@ class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters)
     state := s_finish
   }.elsewhen(state === s_finish) {
     // resp is valid and we set it to our result value
-    io.resp.bits.data := result(31, 0)
+    io.resp.bits.data_field := result(31, 0)
     io.resp.valid := true.B
     when(io.resp.fire) {
       // make sure you return to your idle state and reset anything you need to

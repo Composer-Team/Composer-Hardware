@@ -26,17 +26,9 @@ import java.io.FileWriter
  * For the memory system, we condense all of the memory channels down to a single TL port so that it can be easily
  * routed across the SLR. Previous approaches allowed channels to be routed across the SLR fabric independently but
  * even for a modest number of channels (ie 4), we consumed around 50% of the SLR routing resources. For this reason,
- * we limit it to a single TL channel. Picture below:
+ * we limit it to a single TL channel.
  *
- * SLR default               |    SLR secondary
- * |
- * |             |------channel
- * To dram                   |             |------channel
- * <----X---------buffer---------buffer----X------channel
- * |                    |
- * |---mem node         |
- *
- * dTODO handle intra system cmd/resp routing
+ * TODO handle intra system cmd/resp routing
  *
  * There's some stuff here where we're passing around lambdas. We do this because LazyModule doesn't promise a clock/
  * reset signal in the contained module. This lambda is basically to enforce lazy evaluation of clock/reset signals

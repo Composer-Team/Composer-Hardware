@@ -69,8 +69,8 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
 
     // arbiter is choosing this one
     when(intCmd.fire && intCmd.bits.inst.xd) {
-      internalReturnDestinations.get(intCmd.bits.core_id).sys := fromSys
-      internalReturnDestinations.get(intCmd.bits.core_id).core := fromCore
+      internalReturnDestinations.get(intCmd.bits.getCoreID).sys := fromSys
+      internalReturnDestinations.get(intCmd.bits.getCoreID).core := fromCore
       // arbiter is consuming input and we are expecting response, so mark as cmd destination
     }
   }
@@ -80,7 +80,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
 
   lazy val funct = cmd.bits.inst.funct
 
-  lazy val coreSelect = cmd.bits.core_id
+  lazy val coreSelect = cmd.bits.getCoreID
 
   val addressBits = outer.memory_nodes map { m =>
     m.out(0)._1.params.addressBits
@@ -99,7 +99,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     resp_queue.io.enq.bits.system_id := outer.system_id.U
     resp_queue.io.enq.bits.core_id := c.composerConstructor.composerCoreWrapper.core_id.U
     resp_queue.io.enq.bits.rd := lastRecievedRd
-    resp_queue.io.enq.bits.data := c.io_declaration.resp.bits.data
+    resp_queue.io.enq.bits.data_field := c.io_declaration.resp.bits.data_field
     resp_queue.io.enq.valid := c.io_declaration.resp.valid
     c.io_declaration.resp.ready := resp_queue.io.enq.ready
     resp_queue.io.deq
@@ -110,7 +110,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   resp.valid := respArbiter.io.out.valid
   resp.bits.rd := respArbiter.io.out.bits.rd
   resp.bits.core_id := respArbiter.io.chosen // .io.out.bits.core_id
-  resp.bits.data := respArbiter.io.out.bits.data
+  resp.bits.data_field := respArbiter.io.out.bits.data_field
   resp.bits.system_id := outer.system_id.U
   respArbiter.io.out.ready := resp.ready
 
@@ -118,7 +118,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
 
   val internalRespDispatchModule = if (p(RequireInternalCommandRouting)) {
     val wire = Wire(new ComposerRoccResponse())
-    wire.data := respQ.bits.data
+    wire.data_field := respQ.bits.data_field
     wire.rd := respQ.bits.rd
     wire.system_id := internalReturnDestinations.get(respQ.bits.core_id).sys
     wire.core_id := internalReturnDestinations.get(respQ.bits.core_id).core
@@ -126,7 +126,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     val respClient = outer.outgoingInternalResponseClient.get
     val internalRespDispatcher = ModuleWithSLR(new TLClientModule(respClient))
     internalRespDispatcher.tl <> respClient.out(0)._1
-    internalRespDispatcher.io.bits.dat := wire.pack
+    internalRespDispatcher.io.bits.dat := wire.pack()
     internalRespDispatcher.io.bits.addr := ComposerConsts.getInternalCmdRoutingAddress(wire.system_id)
     Some(internalRespDispatcher)
   } else None
@@ -141,10 +141,10 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     val reqCmdSourcedInternally = Reg(Vec(outer.nCores, Bool()))
 
     when(icmAsCmdSrc.get.fire && icmAsCmdSrc.get.bits.inst.xd) {
-      reqCmdSourcedInternally(icmAsCmdSrc.get.bits.core_id) := true.B
+      reqCmdSourcedInternally(icmAsCmdSrc.get.bits.getCoreID) := true.B
     }
     when(swio.cmd.fire && swio.cmd.bits.inst.xd) {
-      reqCmdSourcedInternally(swio.cmd.bits.core_id) := false.B
+      reqCmdSourcedInternally(swio.cmd.bits.getCoreID) := false.B
     }
 
 
@@ -180,11 +180,11 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     val response = ComposerRoccResponse(responseManager.io.bits)
 
     cores.zipWithIndex.foreach { case (core, core_idx) =>
-      core.composer_response_io.valid := responseManager.io.valid && response.core_id === core_idx.U
-      core.composer_response_io.bits := response
+      core.composer_response_io_.get.valid := responseManager.io.valid && response.core_id === core_idx.U
+      core.composer_response_io_.get.bits := response
     }
 
-    responseManager.io.ready := VecInit(cores.map(_.composer_response_io.ready))(response.core_id)
+    responseManager.io.ready := VecInit(cores.map(_.composer_response_io_.get.ready))(response.core_id)
   }
 
   cores.foreach { core =>

@@ -120,8 +120,6 @@ abstract class WidgetModule(outer: Widget) extends LazyModuleImp(outer) {
     crRegistry.lookupAddress(name).getOrElse(
       throw new RuntimeException(s"Could not find CR:$name in widget: $wName"))
   }
-
-  def printCRs(ostream: Option[FileWriter] = None): Unit = crRegistry.printCRs(ostream)
 }
 
 // instead of relying on the widget writer
