@@ -121,24 +121,6 @@ object CppGeneration {
     }
 
     val numCommands = cc.getNBeats()
-
-    //    val assignments = cc.fieldSubranges.flatMap { case (name: String, range: (Int, Int)) =>
-    //      val high = range._1
-    //      val low = range._2
-    //      val width = 1 + high - low
-    //      val payloadId = low / 64
-    //      val payloadLocalOffset = low % 64
-    //      val bitsLeftInPayload = 64 - payloadLocalOffset
-    //      if (bitsLeftInPayload < width) {
-    //        // we're going to roll over!
-    //        Seq(
-    //          f"  payloads[$payloadId] = payloads[$payloadId] | ((uint64_t)($name & ${intToHexFlag((1 << bitsLeftInPayload) - 1)}) << $payloadLocalOffset);",
-    //          f"  payloads[${payloadId + 1}] = payloads[${payloadId + 1}] | (($name >> $bitsLeftInPayload) & ${intToHexFlag((1 << (width - bitsLeftInPayload)) - 1)}L);"
-    //        )
-    //      } else {
-    //        Seq(f"  payloads[$payloadId] = payloads[$payloadId] | ((uint64_t)$name << $payloadLocalOffset);")
-    //      }
-    //    }
     val payloads = cc.fieldSubranges.flatMap { case (name: String, range: (Int, Int)) =>
       val high = range._1
       val low = range._2
@@ -149,7 +131,7 @@ object CppGeneration {
       if (bitsLeftInPayload < width) {
         // we're going to roll over!
         Seq((payloadId, f"((uint64_t)($name & ${intToHexFlag((1 << bitsLeftInPayload) - 1)}L) << $payloadLocalOffset)"),
-          (payloadId + 1, f"(($name >> $bitsLeftInPayload) & ${intToHexFlag((1 << (width - bitsLeftInPayload)) - 1)}L)")
+          (payloadId + 1, f"(((uint64_t)$name >> $bitsLeftInPayload) & ${intToHexFlag((1 << (width - bitsLeftInPayload)) - 1)}L)")
         )
       } else {
         Seq((payloadId, f"((uint64_t)$name << $payloadLocalOffset)"))
