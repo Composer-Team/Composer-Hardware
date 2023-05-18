@@ -18,7 +18,9 @@ class ComposerCommandBundler[T1 <: ComposerCommand, T2 <: ComposerUserResponse](
   io.req.bits.__core_id := composerCoreWrapper.core_id.U
   cio.busy := io.busy
 
-  cio.resp <> io.resp
+  cio.resp.valid := io.resp.valid
+  io.resp.ready := cio.resp.ready
+  cio.resp.bits := io.resp.bits.data_field
 
   val s_req_idle :: s_done :: Nil = Enum(2)
   val req_state = RegInit(s_req_idle)
