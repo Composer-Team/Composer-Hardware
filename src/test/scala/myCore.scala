@@ -12,9 +12,9 @@ import composer.common._
 // * * * * * * * * * * * * * * * * * * * * * * * * * * Simple ALU Implementation * * * * * * * * * * * * * * * * * * *
 
 class SimpleInput extends ComposerCommand {
-  val op = UInt(101.W)
-  val a = UInt(102.W)
-  val b = UInt(103.W)
+  val op = UInt(128.W)
+  val a = UInt(120.W)
+  val b = UInt(104.W)
 }
 class SimpleOutput extends ComposerUserResponse {
   val result = UInt(50.W)

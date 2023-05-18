@@ -281,13 +281,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   }
 
   def ComposerIO[T1 <: ComposerCommand](bundleIn: T1): CustomIO[T1, ComposerRoccUserResponse] = {
-    if (using_custom == custom_usage.default) {
-      throw new Exception("Cannot use custom io after using the default io")
-    }
-    using_custom = custom_usage.custom
-    val m = Module(new ComposerCommandBundler[T1, ComposerRoccUserResponse](bundleIn, new ComposerRoccUserResponse, composerConstructor.composerCoreWrapper))
-    m.cio <> io_declaration
-    m.io
+    ComposerIO[T1, ComposerRoccUserResponse](bundleIn, new ComposerRoccUserResponse)
   }
 
 

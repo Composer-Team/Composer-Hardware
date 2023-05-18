@@ -123,23 +123,22 @@ object CppGeneration {
       if (bitsLeftInPayload < width) {
         // we're going to roll over!
         Seq(
-          f"\tpayloads[$payloadId] = payloads[$payloadId] | (($name & ${(1 << bitsLeftInPayload) - 1}) << $payloadLocalOffset));",
+          f"\tpayloads[$payloadId] = payloads[$payloadId] | (($name & ${(1 << bitsLeftInPayload) - 1}) << $payloadLocalOffset);",
           f"\tpayloads[${payloadId + 1}] = payloads[${payloadId + 1}] | (($name >> $bitsLeftInPayload) & ${(1 << (width - bitsLeftInPayload)) - 1});"
         )
       } else {
         Seq(f"\tpayloads[$payloadId] = payloads[$payloadId] | ($name << $payloadLocalOffset);")
       }
     }
-    val numCommands = cc.getNBeats
+    val numCommands = cc.getNBeats()
     f"""
-       |template <>
        |composer::rocc_response ${sysName}Command(uint16_t core_id, $signature) {
        |  assert(core_id < (1 << 10));
        |  uint64_t payloads[${numCommands * 2}];
        |  """.stripMargin + (if (assignments.length == 1) assignments(0) + "\n" else assignments.reduce(_ + "\n" + _)) +
       f"""
          |  for (int i = 0; i < ${numCommands}; ++i) {
-         |    rocc_cmd::start_cmd(${sysName}_ID, i == ${numCommands - 1}, 0, false, false, core_id, payloads[i*2], payloads[i*2+1]);
+         |    composer::rocc_cmd::start_cmd(${sysName}_ID, i == ${numCommands - 1}, 0, false, false, core_id, payloads[i*2], payloads[i*2+1]);
          |  }
          |}
          |""".stripMargin
