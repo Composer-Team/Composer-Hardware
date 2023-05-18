@@ -35,12 +35,10 @@ class LFSRCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters) 
   // here we're using the Chisel last-connect semantics to define the default values for each of the wires
   io.req.ready := false.B
   io.resp.valid := false.B
-  io.resp.bits.data_field := 0.U
-  io.busy := true.B
+  io.resp.bits.getDataField := 0.U
 
   // when we're idle we accept commands
   when(state === s_idle) {
-    io.busy := false.B
     io.req.ready := true.B
     when(io.req.fire) {
       state := s_working
@@ -66,7 +64,7 @@ class LFSRCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters) 
     }
   }.elsewhen(state === s_finish) {
     // when we're done we signal response what we want to send back to the CPU
-    io.resp.bits.data_field := VecInit(outputCache).asUInt
+    io.resp.bits.getDataField := VecInit(outputCache).asUInt
     io.resp.valid := true.B
     when(io.resp.fire) {
       state := s_idle
@@ -97,11 +95,9 @@ class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters)
   // state then io.resp.valid will be true
   io.req.ready := false.B
   io.resp.valid := false.B
-  io.resp.bits.data_field := 0.U
-  io.busy := true.B
+  io.resp.bits.getDataField := 0.U
 
   when(state === s_idle) {
-    io.busy := false.B
     io.req.ready := true.B
     // .fire means (.ready && .valid)
     when(io.req.fire) {
@@ -127,7 +123,7 @@ class SimpleALU(composerCoreParams: ComposerConstructor)(implicit p: Parameters)
     state := s_finish
   }.elsewhen(state === s_finish) {
     // resp is valid and we set it to our result value
-    io.resp.bits.data_field := result(31, 0)
+    io.resp.bits.getDataField := result(31, 0)
     io.resp.valid := true.B
     when(io.resp.fire) {
       // make sure you return to your idle state and reset anything you need to

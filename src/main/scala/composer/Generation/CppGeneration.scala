@@ -8,7 +8,7 @@ import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import composer.RoccHelpers.MCRFileMap
 import composer.Systems.{ComposerAcc, ComposerTop}
 import composer._
-import composer.common.AbstractComposerCommand
+import composer.common.{AbstractComposerCommand, ComposerUserResponse}
 import freechips.rocketchip.subsystem.ExtMem
 import os.Path
 
@@ -21,7 +21,7 @@ object CppGeneration {
 
   private case class PreprocessorDefinition(ty: String, value: String)
 
-  private case class HookDef(sysName: String, cc: AbstractComposerCommand) {
+  private case class HookDef(sysName: String, cc: AbstractComposerCommand, resp: ComposerUserResponse) {
     cc.elements.foreach { p =>
       val data = p._2
       val paramName = p._1
@@ -45,8 +45,8 @@ object CppGeneration {
     if (existingDefs.isEmpty) user_defs = CppDefinition(ty_f, name_f, value.toString) :: user_defs
   }
 
-  private[composer] def addUserCppFunctionDefinition(systemName: String, cc: AbstractComposerCommand): Unit = {
-    val h = HookDef(systemName, cc)
+  private[composer] def addUserCppFunctionDefinition(systemName: String, cc: AbstractComposerCommand, resp: ComposerUserResponse): Unit = {
+    val h = HookDef(systemName, cc, resp)
     if (!hook_defs.exists(_.sysName == systemName)) {
       hook_defs = h :: hook_defs
     }
@@ -89,6 +89,7 @@ object CppGeneration {
       user_enums = enum :: user_enums
   }
 
+
   def enumToCpp(myEnum: ChiselEnum): String = {
     val enumClassName = myEnum.getClass.getSimpleName.split("\\$")(0)
     s"enum $enumClassName {\n" +
@@ -104,7 +105,9 @@ object CppGeneration {
       }.reduce(_ + "\n" + _) + "\n};"
   }
 
-  def customCommandToCpp(sysName: String, cc: AbstractComposerCommand): String = {
+  private def safe_join(s: Seq[String], sep: String = "\n"): String = if (s.isEmpty) "" else if (s.length == 1) s(0) else s.reduce(_ + sep + _)
+
+  def customCommandToCpp(sysName: String, cc: AbstractComposerCommand, resp: ComposerUserResponse): (String, String) = {
     val sub_signature = cc.realElements.map { pa =>
       val isSigned = pa._2.isInstanceOf[SInt]
       getCType(pa._1, pa._2.getWidth, isSigned) + " " + pa._1
@@ -113,7 +116,30 @@ object CppGeneration {
       sub_signature.reduce(_ + ", " + _)
     }
 
-    val assignments = cc.fieldSubranges.flatMap { case (name: String, range: (Int, Int)) =>
+    def intToHexFlag(a: Long): String = {
+      f"0x${a.toHexString}"
+    }
+
+    val numCommands = cc.getNBeats()
+
+    //    val assignments = cc.fieldSubranges.flatMap { case (name: String, range: (Int, Int)) =>
+    //      val high = range._1
+    //      val low = range._2
+    //      val width = 1 + high - low
+    //      val payloadId = low / 64
+    //      val payloadLocalOffset = low % 64
+    //      val bitsLeftInPayload = 64 - payloadLocalOffset
+    //      if (bitsLeftInPayload < width) {
+    //        // we're going to roll over!
+    //        Seq(
+    //          f"  payloads[$payloadId] = payloads[$payloadId] | ((uint64_t)($name & ${intToHexFlag((1 << bitsLeftInPayload) - 1)}) << $payloadLocalOffset);",
+    //          f"  payloads[${payloadId + 1}] = payloads[${payloadId + 1}] | (($name >> $bitsLeftInPayload) & ${intToHexFlag((1 << (width - bitsLeftInPayload)) - 1)}L);"
+    //        )
+    //      } else {
+    //        Seq(f"  payloads[$payloadId] = payloads[$payloadId] | ((uint64_t)$name << $payloadLocalOffset);")
+    //      }
+    //    }
+    val payloads = cc.fieldSubranges.flatMap { case (name: String, range: (Int, Int)) =>
       val high = range._1
       val low = range._2
       val width = 1 + high - low
@@ -122,31 +148,61 @@ object CppGeneration {
       val bitsLeftInPayload = 64 - payloadLocalOffset
       if (bitsLeftInPayload < width) {
         // we're going to roll over!
-        Seq(
-          f"\tpayloads[$payloadId] = payloads[$payloadId] | (($name & ${(1 << bitsLeftInPayload) - 1}) << $payloadLocalOffset);",
-          f"\tpayloads[${payloadId + 1}] = payloads[${payloadId + 1}] | (($name >> $bitsLeftInPayload) & ${(1 << (width - bitsLeftInPayload)) - 1});"
+        Seq((payloadId, f"((uint64_t)($name & ${intToHexFlag((1 << bitsLeftInPayload) - 1)}L) << $payloadLocalOffset)"),
+          (payloadId + 1, f"(($name >> $bitsLeftInPayload) & ${intToHexFlag((1 << (width - bitsLeftInPayload)) - 1)}L)")
         )
       } else {
-        Seq(f"\tpayloads[$payloadId] = payloads[$payloadId] | ($name << $payloadLocalOffset);")
+        Seq((payloadId, f"((uint64_t)$name << $payloadLocalOffset)"))
       }
     }
-    val numCommands = cc.getNBeats()
-    f"""
-       |composer::rocc_response ${sysName}Command(uint16_t core_id, $signature) {
-       |  assert(core_id < (1 << 10));
-       |  uint64_t payloads[${numCommands * 2}];
-       |  """.stripMargin + (if (assignments.length == 1) assignments(0) + "\n" else assignments.reduce(_ + "\n" + _)) +
-      f"""
-         |  for (int i = 0; i < ${numCommands}; ++i) {
-         |    composer::rocc_cmd::start_cmd(${sysName}_ID, i == ${numCommands - 1}, 0, false, false, core_id, payloads[i*2], payloads[i*2+1]);
-         |  }
-         |}
-         |""".stripMargin
+    val assignments = (0 until (numCommands * 2)) map { payloadIdx =>
+      f"  payloads[$payloadIdx] = ${safe_join(payloads.filter(_._1 == payloadIdx).map(_._2), " | ")};";
+    }
 
+    val structName = f"${sysName}Response_t"
+    val structMembersWithType = resp.realElements.map(a => f"${getCType(a._1, a._2.getWidth, a._2.isInstanceOf[SInt])} ${a._1}")
+    val response_struct = f"struct $structName {\n // struct members \n" +
+      safe_join(structMembersWithType.map(_ + ";")) + "\n" +
+      "// constructor\n" +
+      s"$structName(${safe_join(structMembersWithType, ", ")}) : ${safe_join(resp.realElements.map(a => f"${a._1}(${a._1})"))} {}\n}"
+
+    val template_sig = f"template<> $structName composer::response_handle<$structName>::get()"
+    val command_sig = f"composer::response_handle<$structName> ${sysName}Command(uint16_t core_id, $signature)"
+    val template_def = resp.fieldSubranges.map { ele =>
+      val mask = (1 << (1 + ele._2._1 + ele._2._2)) - 1
+      (ele._1, f"(resp & 0x${mask.toHexString}L) >> ${ele._2._2}")
+    }.sortBy(_._1).map(_._2).reduce(_ + ", " + _)
+
+    val definition =
+      f"""
+         |
+         |$template_sig {
+         |  auto r = rg.get();
+         |  auto resp = r.data;
+         |  return $structName($template_def);
+         |}
+         |
+         |$command_sig {
+         |  assert(core_id < (1 << 10));
+         |  uint64_t payloads[${numCommands * 2}];
+         |""".stripMargin + (if (assignments.length == 1) assignments(0) + "\n" else assignments.reduce(_ + "\n" + _)) +
+        f"""
+           |  for (int i = 0; i < ${numCommands - 1}; ++i) {
+           |    composer::rocc_cmd::start_cmd(${sysName}_ID, false, 0, false, false, core_id, payloads[i*2], payloads[i*2+1]).send();
+           |  }
+           |  return composer::rocc_cmd::start_cmd(${sysName}_ID, true, 0, false, false, core_id, payloads[${numCommands - 1}*2 + 1], payloads[${numCommands - 1}*2]).send().to<$structName>();
+           |}
+           |""".stripMargin
+    val declaration =
+      f"""
+         |$response_struct;
+         |$template_sig;
+         |$command_sig;
+         |""".stripMargin
+    (declaration, definition)
   }
 
   def genCPPHeader(cr: MCRFileMap, acc: ComposerAcc)(implicit p: Parameters): Unit = {
-    def safe_join(s: Seq[String]): String = if (s.isEmpty) "" else if (s.length == 1) s(0) else s.reduce(_ + "\n" + _)
 
     // we might have multiple address spaces...
     val path = Path(ComposerBuild.composerGenDir)
@@ -155,12 +211,12 @@ object CppGeneration {
 
     val allocator =
       s"""
-        |#ifdef SIM
-        |#define NUM_DDR_CHANNELS ${mem.nMemoryChannels}
-        |#endif
-        |using composer_allocator=composer::device_allocator<${p(PlatformPhysicalMemoryBytes)}>;
-        |${if (!p(HasDiscreteMemory)) "#ifdef SIM" else "" }
-        |""".stripMargin + (if (p(HasDiscreteMemory)) "#define COMPOSER_USE_CUSTOM_ALLOC\n" else "") +
+         |#ifdef SIM
+         |#define NUM_DDR_CHANNELS ${mem.nMemoryChannels}
+         |#endif
+         |using composer_allocator=composer::device_allocator<${p(PlatformPhysicalMemoryBytes)}>;
+         |${if (!p(HasDiscreteMemory)) "#ifdef SIM" else ""}
+         |""".stripMargin + (if (p(HasDiscreteMemory)) "#define COMPOSER_USE_CUSTOM_ALLOC\n" else "") +
         (if (!p(HasDiscreteMemory)) "#ifdef SIM" else "")
 
     val addrBits = s"const uint8_t composerNumAddrBits = ${log2Up(mem.master.size)};"
@@ -171,7 +227,9 @@ object CppGeneration {
     val system_ids = safe_join(acc.system_tups.filter(_._3.canReceiveSoftwareCommands) map { tup =>
       s"const uint8_t ${tup._3.name}_ID = ${tup._2};"
     })
-    val customCommandHooks = safe_join(hook_defs map (a => customCommandToCpp(a.sysName, a.cc)))
+    val hooks_dec_def = hook_defs map (a => customCommandToCpp(a.sysName, a.cc, a.resp))
+    val commandDeclarations = safe_join(hooks_dec_def.map(_._1))
+    val commandDefinitions = safe_join(hooks_dec_def.map(_._2))
     val maxCmdLength = 128
     val addrSet = ComposerTop.getAddressSet(0)
     val idLengths =
@@ -217,8 +275,8 @@ object CppGeneration {
     }
     val mmio_addr = "const uint64_t ComposerMMIOOffset = " + p(MMIOBaseAddress) + "L;"
 
-    val f = new FileWriter((path / "composer_allocator_declaration.h").toString())
-    f.write(
+    val header = new FileWriter((path / "composer_allocator_declaration.h").toString())
+    header.write(
       f"""
          |// Automatically generated header for Composer
          |
@@ -252,7 +310,7 @@ object CppGeneration {
          |$system_ids
          |
          |// Custom command interfaces
-         |$customCommandHooks
+         |$commandDeclarations
          |
          |// misc
          |$idLengths
@@ -264,6 +322,15 @@ object CppGeneration {
          |#endif
          |//
     """.stripMargin)
-    f.close()
+    header.close()
+
+    val src = new FileWriter((path / "generated_composer_src.cc").toString())
+    src.write(
+      f"""
+         |#include "composer_allocator_declaration.h"
+         |
+         |$commandDefinitions
+         |""".stripMargin)
+    src.close()
   }
 }

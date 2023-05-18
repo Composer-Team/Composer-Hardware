@@ -16,7 +16,6 @@ import freechips.rocketchip.util._
 class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2) extends Bundle {
   val req: DecoupledIO[T1] = DecoupledIO(bundleIn.cloneType)
   val resp: DecoupledIO[T2] = Flipped(DecoupledIO(bundleOut.cloneType))
-  val busy = Input(Bool())
 }
 
 class ComposerCoreIO(implicit p: Parameters) extends CustomIO[ComposerRoccCommand, ComposerRoccUserResponse](new ComposerRoccCommand, new ComposerRoccUserResponse)
@@ -133,7 +132,6 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
    *         commands in software.
    */
   def getReaderModules(name: String,
-                       useSoftwareAddressing: Boolean,
                        dataBytes: Int,
                        vlen: Int,
                        idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
@@ -148,9 +146,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       m.tl_out <> m.tl_outer
       m.suggestName(name)
     }
-    val ret = (if (useSoftwareAddressing) List()
-    else mod.map(_.io.req),
-      mod.map(_.io.channel))
+    val ret = (mod.map(_.io.req), mod.map(_.io.channel))
     // initially tie off everything to false and DontCare. Saves some pain down the line
     ret._2.foreach { dat =>
       dat.data.ready := false.B
@@ -163,11 +159,10 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   }
 
   def getReaderModule(name: String,
-                      useSoftwareAddressing: Boolean,
                       dataBytes: Int,
                       vlen: Int,
                       idx: Int): (DecoupledIO[ChannelTransactionBundle], DataChannelIO) = {
-    val a = getReaderModules(name, useSoftwareAddressing, dataBytes, vlen, Some(idx))
+    val a = getReaderModules(name, dataBytes, vlen, Some(idx))
     (a._1(0), a._2(0))
   }
 

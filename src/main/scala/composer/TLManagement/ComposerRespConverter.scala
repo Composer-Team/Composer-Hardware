@@ -11,6 +11,6 @@ class ComposerRespConverter[T <: ComposerUserResponse](gen: T) extends Module {
   in.ready := out.ready
   out.valid := in.valid
 
-  val w = hasAccessibleUserSubRegions.apply[T](in.bits.data_field, gen)
+  val w = hasAccessibleUserSubRegions.apply[T](in.bits.getDataField, gen)
   out.bits := w
 }

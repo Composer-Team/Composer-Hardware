@@ -40,7 +40,7 @@ object hasRoccResponseFields {
 
 class ComposerUserResponse extends Bundle with hasAccessibleUserSubRegions {
   override val reservedNames: Seq[String] = Seq()
-  def data_field: UInt = {
+  def getDataField: UInt = {
     val datacat = Cat(realElements.map(_._2.asUInt))
     require(datacat.getWidth <= 50, "Defined response is too large to fit in return payload")
     if (datacat.getWidth < 50) {
@@ -70,7 +70,9 @@ class ComposerRoccUserResponse extends ComposerUserResponse {
   /**
    * Typically 50 bits
    */
-  override val data_field = UInt((64 - SystemIDLengthKey - CoreIDLengthKey).W)
+  val data = UInt((64 - SystemIDLengthKey - CoreIDLengthKey).W)
+
+  override def getDataField: UInt = data
 }
 
 class ComposerRoccResponse() extends ComposerRoccUserResponse with hasRoccResponseFields {
@@ -84,7 +86,7 @@ object ComposerRoccResponse {
   def apply(a: UInt): ComposerRoccResponse = {
     // unpack from @pack
     val wire = Wire(new ComposerRoccResponse())
-    wire.data_field := a(58 - SystemIDLengthKey - CoreIDLengthKey, 0)
+    wire.getDataField := a(58 - SystemIDLengthKey - CoreIDLengthKey, 0)
     wire.rd := a(63 - SystemIDLengthKey - CoreIDLengthKey, 59 - SystemIDLengthKey - CoreIDLengthKey)
     wire.core_id := a(63 - SystemIDLengthKey, 64 - SystemIDLengthKey - CoreIDLengthKey)
     wire.system_id := a(63, 64 - SystemIDLengthKey)

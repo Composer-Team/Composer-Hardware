@@ -17,8 +17,6 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   val sw_io = if (outer.systemParams.canReceiveSoftwareCommands) Some(IO(new ComposerSystemIO())) else None
   val respArbiter = ModuleWithSLR(new MultiLevelArbiter(new ComposerRoccResponse(), outer.systemParams.nCores))
   val cores = outer.cores.map(_._2.module)
-  val busy = IO(Output(Bool()))
-  busy := cores.map(_.io_declaration.busy).reduce(_ || _)
 
   val validSrcs = Seq(sw_io, outer.internalCommandManager).filter(_.isDefined)
   // if sources can come from multiple domains (sw, other systems), then we have to remember where cmds came from
@@ -99,7 +97,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     resp_queue.io.enq.bits.system_id := outer.system_id.U
     resp_queue.io.enq.bits.core_id := c.composerConstructor.composerCoreWrapper.core_id.U
     resp_queue.io.enq.bits.rd := lastRecievedRd
-    resp_queue.io.enq.bits.data_field := c.io_declaration.resp.bits.data_field
+    resp_queue.io.enq.bits.getDataField := c.io_declaration.resp.bits.getDataField
     resp_queue.io.enq.valid := c.io_declaration.resp.valid
     c.io_declaration.resp.ready := resp_queue.io.enq.ready
     resp_queue.io.deq
@@ -110,7 +108,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   resp.valid := respArbiter.io.out.valid
   resp.bits.rd := respArbiter.io.out.bits.rd
   resp.bits.core_id := respArbiter.io.chosen // .io.out.bits.core_id
-  resp.bits.data_field := respArbiter.io.out.bits.data_field
+  resp.bits.getDataField := respArbiter.io.out.bits.getDataField
   resp.bits.system_id := outer.system_id.U
   respArbiter.io.out.ready := resp.ready
 
@@ -118,7 +116,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
 
   val internalRespDispatchModule = if (p(RequireInternalCommandRouting)) {
     val wire = Wire(new ComposerRoccResponse())
-    wire.data_field := respQ.bits.data_field
+    wire.getDataField := respQ.bits.getDataField
     wire.rd := respQ.bits.rd
     wire.system_id := internalReturnDestinations.get(respQ.bits.core_id).sys
     wire.core_id := internalReturnDestinations.get(respQ.bits.core_id).core

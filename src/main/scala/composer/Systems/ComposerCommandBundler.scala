@@ -8,7 +8,7 @@ import composer.common._
 
 class ComposerCommandBundler[T1 <: ComposerCommand, T2 <: ComposerUserResponse](bundleIn: T1, bundleOut: T2, composerCoreWrapper: ComposerCoreWrapper)(implicit p: Parameters) extends Module {
   if (composerCoreWrapper.composerSystemParams.canReceiveSoftwareCommands)
-    CppGeneration.addUserCppFunctionDefinition(composerCoreWrapper.composerSystemParams.name, bundleIn)
+    CppGeneration.addUserCppFunctionDefinition(composerCoreWrapper.composerSystemParams.name, bundleIn, bundleOut)
 
   val cio = IO(Flipped(new ComposerCoreIO))
   val io = IO(new CustomIO[T1, T2](bundleIn.cloneType, bundleOut.cloneType))
@@ -16,11 +16,11 @@ class ComposerCommandBundler[T1 <: ComposerCommand, T2 <: ComposerUserResponse](
   io.req.bits.elements.foreach { case (_, data) => data := DontCare }
   io.req.bits.__system_id := composerCoreWrapper.system_id.U
   io.req.bits.__core_id := composerCoreWrapper.core_id.U
-  cio.busy := io.busy
 
   cio.resp.valid := io.resp.valid
   io.resp.ready := cio.resp.ready
-  cio.resp.bits.data_field := io.resp.bits.data_field
+  cio.resp.bits.getDataField := io.resp.bits.getDataField
+
 
   val s_req_idle :: s_done :: Nil = Enum(2)
   val req_state = RegInit(s_req_idle)
@@ -44,7 +44,7 @@ class ComposerCommandBundler[T1 <: ComposerCommand, T2 <: ComposerUserResponse](
     val fs = io.req.bits.fieldSubranges
 
     def crossesBoundary(high: Int, low: Int): Boolean = high / 128 != low / 128
-
+    println(fs)
     fs foreach { sr =>
       val range = sr._2
       val field = io.req.bits.elements(sr._1)
