@@ -3,6 +3,7 @@ package composer.Systems
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
+import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import composer.MemoryStreams._
 import composer.RoccHelpers._
 import composer.TLManagement.{ComposerRespConverter, MultiBeatCommandEmitter, TLClientModule}
@@ -214,7 +215,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   }
 
   private[composer] val composer_response_io_ = if (outer.composerSystemParams.canIssueCoreCommands) {
-    Some(IO(Flipped(Decoupled(new ComposerRoccResponse()))))
+    Some(IO(Flipped(Decoupled(new ComposerInternallyRoutedRoccResponse()))))
   } else None
 
   
@@ -226,7 +227,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     if (gen.isInstanceOf[ComposerRoccResponse]) {
       raw_io.asInstanceOf[DecoupledIO[T]]
     } else {
-      val conv_module = Module(new ComposerRespConverter[T](gen))
+      val conv_module = Module(new ComposerRespConverter[T, ComposerInternallyRoutedRoccResponse](gen, new ComposerInternallyRoutedRoccResponse))
       conv_module.in <> raw_io
       conv_module.out
     }
@@ -240,14 +241,16 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     val wire = Wire(Decoupled(new ComposerRoccCommand))
     wire.ready := mod.io.ready
     mod.io.valid := wire.valid
-    mod.io.bits.dat := wire.bits.pack()
+    // NEED TO TELL OTHER CORE HOW TO SEND RESPONSE BACK
+    val returnRoutingPayload = Cat(outer.system_id.U(SystemIDLengthKey.W), getCoreID.U(CoreIDLengthKey.W))
+    mod.io.bits.dat := wire.bits.pack(withRoutingPayload = Some(returnRoutingPayload))
     mod.io.bits.addr := ComposerConsts.getInternalCmdRoutingAddress(wire.bits.inst.system_id)
     Some(wire)
   } else None
 
   def composer_command_io[T <: ComposerCommand](gen: T = new ComposerRoccCommand): DecoupledIO[T] = {
     val raw_io = composer_command_io_.get
-    val multiBeatCommandMod = Module(new MultiBeatCommandEmitter(gen, outer.externalCoreCommNodes.get.out(0)._1))
+    val multiBeatCommandMod = Module(new MultiBeatCommandEmitter(gen))
     raw_io <> multiBeatCommandMod.out
     multiBeatCommandMod.in
   }
@@ -270,9 +273,10 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       throw new Exception("Cannot use custom io after using the default io")
     }
     using_custom = custom_usage.custom
-    val m = Module(new ComposerCommandBundler[T1, T2](bundleIn, bundleOut, composerConstructor.composerCoreWrapper))
-    m.cio <> io_declaration
-    m.io
+    val composerCustomCommandManager = Module(new ComposerCommandBundler[T1, T2](bundleIn, bundleOut, composerConstructor.composerCoreWrapper))
+    composerCustomCommandManager.suggestName(composerConstructor.composerCoreWrapper.composerSystemParams.name + "CustomCommand")
+    composerCustomCommandManager.cio <> io_declaration
+    composerCustomCommandManager.io
   }
 
   def ComposerIO[T1 <: ComposerCommand](bundleIn: T1): CustomIO[T1, ComposerRoccUserResponse] = {

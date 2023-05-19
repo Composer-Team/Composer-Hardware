@@ -2,15 +2,15 @@ package composer.TLManagement
 
 import chisel3._
 import chisel3.util._
-import composer.common.{ComposerRoccResponse, ComposerUserResponse, hasAccessibleUserSubRegions}
+import composer.common.{ComposerRoccResponse, ComposerUserResponse, hasAccessibleUserSubRegions, hasDataField}
 
-class ComposerRespConverter[T <: ComposerUserResponse](gen: T) extends Module {
-  val in = IO(Input(Flipped(Decoupled(new ComposerRoccResponse))))
-  val out = IO(Output(Decoupled(gen)))
+class ComposerRespConverter[outT <: ComposerUserResponse, inT <: Bundle with hasDataField](genOut: outT, genIn: inT) extends Module {
+  val in = IO(Flipped(Decoupled(genIn)))
+  val out = IO(Decoupled(genOut))
 
   in.ready := out.ready
   out.valid := in.valid
 
-  val w = hasAccessibleUserSubRegions.apply[T](in.bits.getDataField, gen)
+  val w = hasAccessibleUserSubRegions.apply[outT](in.bits.getDataField, genOut)
   out.bits := w
 }

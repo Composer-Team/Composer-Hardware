@@ -12,12 +12,18 @@ trait hasAccessibleUserSubRegions {
 
   private[composer] def realDatas: SeqMap[String, Data] = elements.filter(ele => !reservedNames.contains(ele._1))
 
-  private[composer] def realElements: Seq[(String, Data)] = realDatas.toSeq.map(a => (a._1, a._2)).sortBy(_._1)
+  private[composer] def realElements: Seq[(String, Data)] = realDatas.toSeq.map(a => (a._1, a._2))
 
   private[composer] def fieldSubranges: Seq[(String, (Int, Int))] = {
     val eles = realElements
     val scan = eles.map(_._2.getWidth).scan(0)(_ + _).tail
     eles zip scan map { case (e, top) => (e._1, (top - 1, top - e._2.getWidth)) }
+  }
+
+  private def do_:=(other: UInt) = {
+    this.fieldSubranges.foreach { case (ele_name, (high, low)) =>
+      elements(ele_name) := other(high, low)
+    }
   }
 }
 
@@ -25,7 +31,12 @@ object hasAccessibleUserSubRegions {
   def apply[T <: hasAccessibleUserSubRegions with Bundle](in: UInt, gen: T): T = {
     val a = Wire(gen)
     a.fieldSubranges.foreach{ case (ele_name, (high, low)) =>
-      a.elements(ele_name) := in(high, low)
+      val ele = a.elements(ele_name)
+      ele match {
+        case regions: hasAccessibleUserSubRegions =>
+          regions.do_:=(in(high, low))
+        case _ => a.elements(ele_name) := in(high, low)
+      }
     }
     a
   }

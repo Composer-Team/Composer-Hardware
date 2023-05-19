@@ -132,8 +132,8 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
       Seq(TLSlavePortParameters.v1(
         managers = Seq(TLSlaveParameters.v1(
           Seq(ComposerConsts.getInternalCmdRoutingAddressSet(system_id)),
-          supportsPutFull = TransferSizes(ComposerRoccResponse.getWidthBytes)
-        )), beatBytes = ComposerRoccResponse.getWidthBytes
+          supportsPutFull = TransferSizes(ComposerInternallyRoutedRoccResponse.getWidthBytes)
+        )), beatBytes = ComposerInternallyRoutedRoccResponse.getWidthBytes
       )))
     val xbar = LazyModuleWithSLR(new TLXbar())
     manager := xbar.node

@@ -27,21 +27,22 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     val manager = ModuleWithSLR(new TLManagerModule(b, e))
     managerNode.in(0)._1 <> manager.tl
 
-    val cmdIO = Wire(Flipped(Decoupled(new ComposerRoccCommand())))
-    manager.io.ready := cmdIO.ready
-    cmdIO.valid := manager.io.valid
-    cmdIO.bits := ComposerRoccCommand(manager.io.bits)
+    val cmdIO = manager.io.map(r => hasAccessibleUserSubRegions[ComposerRoccCommand](r, new ComposerRoccCommand))
+//    Wire(Flipped(Decoupled(new ComposerRoccCommand())))
+//    manager.io.ready := cmdIO.ready
+//    cmdIO.valid := manager.io.valid
+//    cmdIO.bits := ComposerRoccCommand(manager.io.bits)
 
     Some(cmdIO)
   } else None
 
   val ioAsCmdSrc = if (sw_io.isDefined) {
-    val cmdIO = Wire(Flipped(Decoupled(new ComposerRoccCommand())))
-    val io_ = sw_io.get
-    cmdIO.valid := io_.cmd.valid
-    io_.cmd.ready := cmdIO.ready
-    cmdIO.bits := io_.cmd.bits
-    Some(cmdIO)
+//    val cmdIO = Wire(Flipped(Decoupled(new ComposerRoccCommand())))
+//    val io_ = sw_io.get
+//    cmdIO.valid := io_.cmd.valid
+//    io_.cmd.ready := cmdIO.ready
+//    cmdIO.bits := io_.cmd.bits
+    Some(sw_io.get.cmd)
   } else None
 
   val validCmdSrcs = Seq(icmAsCmdSrc, ioAsCmdSrc).filter(_.isDefined).map(_.get)
@@ -55,15 +56,12 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   })))) else None
 
   if (p(RequireInternalCommandRouting)) {
-    // a core must have only 1 ongoing command that can recieve a response. If the command was sourced from a core, then
-    // the response must go to that same core, and if from software then back to software. Mark this bit whenever a
-    // command is processed to remember where it came from
-    val routingPayload = outer.internalCommandManager.get.in(0)._1.a.bits.data(
-      ComposerRoccCommand.packLengthBytes * 8 + SystemIDLengthKey + CoreIDLengthKey - 1,
-      ComposerRoccCommand.packLengthBytes * 8)
+    val a_in = outer.internalCommandManager.get.in(0)._1.a.bits.data
+    val routingPayload = a_in(a_in.getWidth - 1, ComposerRoccCommand.packLengthBytes * 8)
     val fromCore = routingPayload(CoreIDLengthKey - 1, 0)
     val fromSys = routingPayload(CoreIDLengthKey + SystemIDLengthKey - 1, CoreIDLengthKey)
     val intCmd = icmAsCmdSrc.get
+    dontTouch(intCmd)
 
     // arbiter is choosing this one
     when(intCmd.fire && intCmd.bits.inst.xd) {
@@ -74,7 +72,6 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   }
 
   lazy val cmd = Queue(cmdArbiter.io.out)
-  cmd.ready := VecInit(cores.map(_.io_declaration.req.ready))(coreSelect)
 
   lazy val funct = cmd.bits.inst.funct
 
@@ -96,7 +93,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     val resp_queue = Module(new Queue[ComposerRoccResponse](new ComposerRoccResponse(), entries = 2))
     resp_queue.io.enq.bits.system_id := outer.system_id.U
     resp_queue.io.enq.bits.core_id := c.composerConstructor.composerCoreWrapper.core_id.U
-    resp_queue.io.enq.bits.rd := lastRecievedRd
+    resp_queue.io.enq.bits.rd.get := lastRecievedRd
     resp_queue.io.enq.bits.getDataField := c.io_declaration.resp.bits.getDataField
     resp_queue.io.enq.valid := c.io_declaration.resp.valid
     c.io_declaration.resp.ready := resp_queue.io.enq.ready
@@ -106,7 +103,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   respArbiter.io.in <> coreResps
   val resp = Wire(Decoupled(new ComposerRoccResponse()))
   resp.valid := respArbiter.io.out.valid
-  resp.bits.rd := respArbiter.io.out.bits.rd
+  resp.bits.rd.get := respArbiter.io.out.bits.rd.get
   resp.bits.core_id := respArbiter.io.chosen // .io.out.bits.core_id
   resp.bits.getDataField := respArbiter.io.out.bits.getDataField
   resp.bits.system_id := outer.system_id.U
@@ -115,16 +112,17 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   val respQ = Queue(resp)
 
   val internalRespDispatchModule = if (p(RequireInternalCommandRouting)) {
-    val wire = Wire(new ComposerRoccResponse())
+    val wire = Wire(new ComposerInternallyRoutedRoccResponse())
     wire.getDataField := respQ.bits.getDataField
-    wire.rd := respQ.bits.rd
+//    wire.rd := respQ.bits.rd
     wire.system_id := internalReturnDestinations.get(respQ.bits.core_id).sys
     wire.core_id := internalReturnDestinations.get(respQ.bits.core_id).core
 
     val respClient = outer.outgoingInternalResponseClient.get
     val internalRespDispatcher = ModuleWithSLR(new TLClientModule(respClient))
     internalRespDispatcher.tl <> respClient.out(0)._1
-    internalRespDispatcher.io.bits.dat := wire.pack()
+    // Don't need RD internally so don't send it. Adding it would force use to use a _much_ wider interconnect...
+    internalRespDispatcher.io.bits.dat := wire.packRocc
     internalRespDispatcher.io.bits.addr := ComposerConsts.getInternalCmdRoutingAddress(wire.system_id)
     Some(internalRespDispatcher)
   } else None
@@ -175,7 +173,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     val (mBundle, mEdge) = managerNode.in(0)
     val responseManager = ModuleWithSLR(new TLManagerModule(mBundle, mEdge))
     responseManager.tl <> outer.incomingInternalResponseManager.get.in(0)._1
-    val response = ComposerRoccResponse(responseManager.io.bits)
+    val response = ComposerInternallyRoutedRoccResponse(responseManager.io.bits)
 
     cores.zipWithIndex.foreach { case (core, core_idx) =>
       core.composer_response_io_.get.valid := responseManager.io.valid && response.core_id === core_idx.U
@@ -185,16 +183,21 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     responseManager.io.ready := VecInit(cores.map(_.composer_response_io_.get.ready))(response.core_id)
   }
 
-  cores.foreach { core =>
+  val core_readys = cores.map { core =>
     if (p(CoreCommandLatency) > 0) {
       val coreCmdQueue = Module(new Queue[ComposerRoccCommand](new ComposerRoccCommand, 2))
-      coreCmdQueue.io.enq <> cmd
+      coreCmdQueue.io.enq.bits := cmd.bits
+      coreCmdQueue.io.enq.valid := cmd.valid && coreSelect === core.getCoreID.U
       coreCmdQueue.io.deq <> core.io_declaration.req
+      coreCmdQueue.io.enq.ready
     } else {
       core.io_declaration.req.valid := cmd.valid
       core.io_declaration.req.bits := cmd.bits
-      cmd.ready := core.io_declaration.req.ready
+      core.io_declaration.req.ready
     }
   }
+
+  cmd.ready := VecInit(core_readys)(coreSelect)
+
   tieClocks()
 }

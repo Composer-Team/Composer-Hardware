@@ -122,8 +122,9 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   } else {
     val respArbiter = Module(new RRArbiter[RoCCResponse](new RoCCResponse, systemSoftwareResps.size))
     respArbiter.io.in.zip(systemSoftwareResps).foreach { case (arbio, sysio) =>
-      arbio.bits.data := sysio.bits.pack()
-      arbio.bits.rd := sysio.bits.rd
+      // these commands are being routed back to the sw so they need to be full Rocc
+      arbio.bits.data := sysio.bits.packRocc
+      arbio.bits.rd := sysio.bits.rd.get
       arbio.valid := sysio.valid
       sysio.ready := arbio.ready
     }

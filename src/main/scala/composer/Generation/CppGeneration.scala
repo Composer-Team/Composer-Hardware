@@ -108,7 +108,7 @@ object CppGeneration {
   private def safe_join(s: Seq[String], sep: String = "\n"): String = if (s.isEmpty) "" else if (s.length == 1) s(0) else s.reduce(_ + sep + _)
 
   def customCommandToCpp(sysName: String, cc: AbstractComposerCommand, resp: ComposerUserResponse): (String, String) = {
-    val sub_signature = cc.realElements.map { pa =>
+    val sub_signature = cc.realElements.sortBy(_._1).map { pa =>
       val isSigned = pa._2.isInstanceOf[SInt]
       getCType(pa._1, pa._2.getWidth, isSigned) + " " + pa._1
     }
@@ -120,7 +120,7 @@ object CppGeneration {
       f"0x${a.toHexString}"
     }
 
-    val numCommands = cc.getNBeats()
+    val numCommands = cc.getNBeats
     val payloads = cc.fieldSubranges.flatMap { case (name: String, range: (Int, Int)) =>
       val high = range._1
       val low = range._2
