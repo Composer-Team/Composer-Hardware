@@ -3,10 +3,11 @@ package composer
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.subsystem._
 
-// memory
+/****** MEMORY ******/
 case object MMIOBaseAddress extends Field[Long]
 case object HasDiscreteMemory extends Field[Boolean]
 case object HasDMA extends Field[Option[Int]]
+case object HasDisjointMemoryControllers extends Field[Boolean]
 
 // memory capacities
 case object PlatformNBRAM extends Field[Int]
@@ -31,13 +32,13 @@ case class SLRName(name: String,
                    frontBus: Boolean = false,
                    memoryBus: Boolean = false)
 
-class WithKriaPlatform extends Config((_, _, _) => {
+class WithKriaPlatform(nMemoryChannels: Int) extends Config((_, _, _) => {
   case ExtMem => Some(MemoryPortParams(MasterPortParams(
     base = 0,
     size = 1L << 49,
     beatBytes = 16,
     idBits = 6
-  ), 1))
+  ), nMemoryChannels))
   // 4GB total physical memory
   case PlatformPhysicalMemoryBytes => 4L << 30
   case MMIOBaseAddress =>      0x2000000000L
@@ -59,6 +60,7 @@ class WithKriaPlatform extends Config((_, _, _) => {
   case PlatformSLRs => None
   case IsAWS => false
   case PostProcessorMacro => () => ;
+  case HasDisjointMemoryControllers => false
 })
 
 private[composer] class U200Base(nMemoryChannels: Int) extends Config( (_, _, _) => {
@@ -83,6 +85,7 @@ private[composer] class U200Base(nMemoryChannels: Int) extends Config( (_, _, _)
   case MMIOBaseAddress => 0L
   case AXILSlaveBeatBytes => 4
   case CoreCommandLatency => 4
+  case HasDisjointMemoryControllers => true
 
   case PlatformNURAM => 960
   case PlatformNBRAM => 2160
