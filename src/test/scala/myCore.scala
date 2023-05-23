@@ -34,10 +34,8 @@ class SimpleCore(composerCoreParams: ComposerConstructor)(implicit p: Parameters
   io.req.ready := false.B
   io.resp.valid := false.B
   io.resp.bits.result := 0.U
-  io.busy := true.B
 
   when(state === s_idle) {
-    io.busy := false.B
     io.req.ready := true.B
     when(io.req.fire) {
       state := s_working

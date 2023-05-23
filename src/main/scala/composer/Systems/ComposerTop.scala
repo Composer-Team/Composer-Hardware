@@ -3,10 +3,11 @@ package composer.Systems
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
-import composer.Generation.{ConstraintGeneration, CppGeneration, DesignObjective, EventPerformanceCounter, NoObjective, Tunable}
-import composer.RoccHelpers.{AXI4Compat, AXILHub}
+import composer.Generation._
+import composer.RoccHelpers.{AXI4Compat, FrontBusHub}
 import composer.Systems.ComposerTop._
 import composer._
+import freechips.rocketchip.amba.ahb._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
@@ -42,52 +43,67 @@ object ComposerTop {
     //    val continuity = p(CacheBlockBytes)
     //  this one splits the DIMMS into contiguous address spaces. Not sure what that's good for...
     //  but it seems anyways that it won't work UNLESS it's like this!
-    val continuity = 1L << 34
+    val continuity = p(ExtMem).get.master.size
     val baseTotal = (nMemChannels - 1) * continuity
-    val amask = getAddressMask(log2Up(p(ExtMem).get.master.size), baseTotal)
+    val amask = getAddressMask(log2Up(p(ExtMem).get.master.size), baseTotal.toLong)
     AddressSet(continuity * ddrChannel, amask)
   }
 }
 
 class ComposerTop(implicit p: Parameters) extends LazyModule() {
   private val externalMemParams: MemoryPortParams = p(ExtMem).get
-  private val lineSize = p(CacheBlockBytes)
   private val nMemChannels = externalMemParams.nMemoryChannels
   private val device = new MemoryDevice
 
-  // AXI-L Port - commands come through here
-  val S00_AXI = AXI4MasterNode(Seq(AXI4MasterPortParameters(
-    masters = Seq(AXI4MasterParameters(
-      name = "S00_AXI",
-      aligned = true,
-      maxFlight = Some(1),
-      id = IdRange(0, 1 << 16)
-    )),
-  )))
+  val cmd_resp_axilhub = LazyModule(new FrontBusHub())
 
-  val cmd_resp_axilhub = LazyModule(new AXILHub())
+  // AXI-L Port - commands come through here
+  val COMM_IN = p(FrontBusProtocolKey) match {
+    case FrontBusProtocol.AXI4 | FrontBusProtocol.AXIL =>
+      val axi_master = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+        masters = Seq(AXI4MasterParameters(
+          name = "S00_AXI",
+          aligned = true,
+          maxFlight = Some(1),
+          id = IdRange(0, 1 << 16)
+        )),
+      )))
+      cmd_resp_axilhub.node.asInstanceOf[AXI4IdentityNode] := axi_master
+      axi_master
+    case FrontBusProtocol.AHB =>
+      val ahb_master = AHBSlaveSourceNode(
+        portParams = Seq(AHBMasterPortParameters(
+          masters = Seq(AHBMasterParameters(
+            "S00_AHB"
+          ))
+        ))
+      )
+      cmd_resp_axilhub.node.asInstanceOf[AHBSlaveIdentityNode] := ahb_master
+      ahb_master
+  }
 
   // connect axil hub to external axil port
-  cmd_resp_axilhub.node := AXI4Buffer() := S00_AXI
+//  cmd_resp_axilhub.node := AXI4Buffer() := COMM_IN
   // connect axil hub to accelerator
 
-  val dummyTL = p.alterPartial({ case TileVisibilityNodeKey => cmd_resp_axilhub.axil_widget.throughId })
+  val dummyTL = p.alterPartial({ case TileVisibilityNodeKey => cmd_resp_axilhub.widget.node })
 
 
   val acc = LazyModule(new ComposerAccSystem()(dummyTL))
 
-  val AXI_MEM = if (acc.mem.nonEmpty) Some(AXI4SlaveNode(Seq.tabulate(nMemChannels) { channel =>
-    AXI4SlavePortParameters(
+  val AXI_MEM = if (acc.mem.nonEmpty) Some(Seq.tabulate(nMemChannels) { channel_idx =>
+    AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
-        address = Seq(getAddressSet(channel)),
+        address = Seq(getAddressSet(channel_idx)),
         resources = device.reg,
         regionType = RegionType.UNCACHED,
-        supportsWrite = TransferSizes(1, lineSize),
-        supportsRead = TransferSizes(1, lineSize),
+        supportsRead = TransferSizes(externalMemParams.master.beatBytes),
+        supportsWrite = TransferSizes(externalMemParams.master.beatBytes),
         interleavedId = Some(1)
       )),
-      beatBytes = externalMemParams.master.beatBytes)
-  })) else None
+      beatBytes = externalMemParams.master.beatBytes
+    )))
+  }) else None
 
   val dma_port = if (p(HasDMA).isDefined) {
     val dma_node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
@@ -106,7 +122,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   // We have to share shell DDR ports with DMA bus (which is AXI4). Use RocketChip utils to do that instead of the
   // whole shebang with instantiating strange encrypted Xilinx IPs'
 
-  val composer_mems = acc.mem map { case m =>
+  val composer_mems = acc.mem map { m =>
     val composer_mem = AXI4IdentityNode()
     (composer_mem
       := AXI4Buffer()
@@ -131,12 +147,16 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     composer_mems
   }
 
-  mem_tops foreach { mt =>
-    AXI_MEM.get :=
-      AXI4Buffer() :=
-      AXI4UserYanker(capMaxFlight = Some(p(MaxInFlightMemTxsPerSource))) :=
-      AXI4IdIndexer(extMemIDBits) :=
-      AXI4Buffer() := mt
+  AXI_MEM match {
+    case Some(mems) =>
+      mem_tops zip mems foreach { case (mt, endpoint) =>
+        endpoint :=
+          AXI4Buffer() :=
+          AXI4UserYanker(capMaxFlight = Some(p(MaxInFlightMemTxsPerSource))) :=
+          AXI4IdIndexer(extMemIDBits) :=
+          AXI4Buffer() := mt
+      }
+    case None => ;
   }
 
 
@@ -147,38 +167,50 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   val acc = outer.acc
   val axil_hub = outer.cmd_resp_axilhub
-  val ocl_port = outer.S00_AXI
+  val ocl_port = outer.COMM_IN
   acc.module.io.cmd <> axil_hub.module.io.rocc_in
   axil_hub.module.io.rocc_out <> acc.module.io.resp
 
-  val S00_AXI = IO(Flipped(new AXI4Compat(ocl_port.out(0)._1.params)))
-  AXI4Compat.connectCompatSlave(S00_AXI, ocl_port.out(0)._1)
+  val S00_AXI = p(FrontBusProtocolKey) match {
+    case FrontBusProtocol.AXI4 | FrontBusProtocol.AXIL =>
+      val port_cast = ocl_port.asInstanceOf[AXI4MasterNode]
+      val S00_AXI = IO(Flipped(new AXI4Compat(port_cast.out(0)._1.params)))
+      AXI4Compat.connectCompatSlave(S00_AXI, port_cast.out(0)._1)
+      S00_AXI
+    case FrontBusProtocol.AHB =>
+      val port_cast = ocl_port.asInstanceOf[AHBSlaveSourceNode]
+      val S00_AHB = IO(Flipped(AHBSlaveBundle(port_cast.out(0)._1.params)))
+      S00_AHB.suggestName("S00_AHB")
+      S00_AHB <> port_cast.out(0)._1
+      S00_AHB
+  }
 
   if (outer.AXI_MEM.isDefined) {
     val dram_ports = outer.AXI_MEM.get
-    val M00_AXI = dram_ports.in.zipWithIndex.map(a => {
-      val io = IO(new AXI4Compat(a._1._1.params))
-      io.suggestName(s"M0${a._2}_AXI")
+    val M00_AXI = dram_ports.zipWithIndex.map{case (a, idx) =>
+      val io = IO(new AXI4Compat(a.in(0)._1.params))
+      io.suggestName(s"M0${idx}_AXI")
       io
-    })
+    }
+    val ins = dram_ports.map(_.in(0))
     //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
-    (M00_AXI zip dram_ports.in) foreach { case (i, (o, _)) => AXI4Compat.connectCompatMaster(i, o) }
+    (M00_AXI zip ins) foreach { case (i, (o, _)) => AXI4Compat.connectCompatMaster(i, o) }
 
-    val read_success = EventPerformanceCounter(M00_AXI.map(axi => axi.rvalid && axi.rready), new NoObjective)
-    val read_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.rready && axi.rvalid), new NoObjective)
-    val write_request_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.awready && axi.awvalid), new NoObjective)
-    val read_request_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.arready && axi.arvalid), new NoObjective)
+//    val read_success = EventPerformanceCounter(M00_AXI.map(axi => axi.rvalid && axi.rready), new NoObjective)
+//    val read_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.rready && axi.rvalid), new NoObjective)
+//    val write_request_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.awready && axi.awvalid), new NoObjective)
+//    val read_request_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.arready && axi.arvalid), new NoObjective)
 
     // make incoming dma port and connect it
     if (p(HasDMA).isDefined) {
-      val dma = IO(Flipped(new AXI4Compat(outer.AXI_MEM.get.in(0)._1.params)))
+      val dma = IO(Flipped(new AXI4Compat(outer.AXI_MEM.get(0).in(0)._1.params)))
       AXI4Compat.connectCompatSlave(dma, outer.dma_port.get.out(0)._1)
     }
 
   }
 
   // try to make this the last thing we do
-  CppGeneration.genCPPHeader(outer.cmd_resp_axilhub.axil_widget.module.crRegistry, acc.acc)
+  CppGeneration.genCPPHeader(outer.cmd_resp_axilhub.widget.module.crRegistry, acc.acc)
   ConstraintGeneration.writeConstraints()
   Tunable.exportNames()
 }

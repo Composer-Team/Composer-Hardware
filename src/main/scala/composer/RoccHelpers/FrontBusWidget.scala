@@ -7,16 +7,16 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.tilelink.TLIdentityNode
 
-class AXILWidget(implicit p: Parameters) extends Widget()(p) {
+class FrontBusWidget(implicit p: Parameters) extends Widget()(p) {
 //  override val crFile = LazyModule(new MCRFileAXI(8)(p))
 //  crFile.node := AXI4IdIndexer(1) := node
   override val crFile = LazyModule(new MCRFileTL(8))
   val throughId = TLIdentityNode()
-  crFile.node := throughId := AXI4ToTL() :=  AXI4UserYanker(capMaxFlight = Some(4)) := AXI4Fragmenter() := AXI4IdIndexer(1) :=  node
+  crFile.node := node
   override lazy val module = new AXILWidgetModule(this)
 }
 
-class AXILWidgetModule(outer: AXILWidget) extends WidgetModule(outer) {
+class AXILWidgetModule(outer: FrontBusWidget) extends WidgetModule(outer) {
 
   val io = IO(new Bundle {
     val cmds = Decoupled(UInt(nastiXDataBits.W))

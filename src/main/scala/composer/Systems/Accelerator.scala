@@ -4,9 +4,10 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
+import composer.MemoryStreams.CIntraCoreMemoryPort
 import composer.TLManagement.makeTLMultilayerXbar
 import composer.common._
-import composer.{ComposerSystemsKey, RequireInternalCommandRouting, SystemName2IdMapKey}
+import composer._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem.ExtMem
 import freechips.rocketchip.tile._
@@ -17,30 +18,49 @@ import scala.language.postfixOps
 class ComposerAcc(implicit p: Parameters) extends LazyModule {
   val configs = p(ComposerSystemsKey)
   val name2Id = scala.collection.immutable.Map.from(configs.zipWithIndex.map(a => (a._1.name, a._2)))
-  val requireInternalCmdRouting = configs.map(_.canIssueCoreCommands).foldLeft(false)(_ || _)
+  val requireInternalCmdRouting = configs.map(_.canIssueCoreCommandsTo).foldLeft(false)(_ || _.nonEmpty)
+
+  // preprocess intra-core memory IOs and pass through param object
+  val largestMM = p(ComposerSystemsKey).flatMap(_.coreParams.memoryChannelParams).filter(_.isInstanceOf[CIntraCoreMemoryPort]).map(_.asInstanceOf[CIntraCoreMemoryPort]).map(a => a.dataWidthBits.longValue() / 8 * a.nDatas.intValue()).fold(0L)(_ + _)
+  val mm_algsz = log2Up(largestMM)
+  val mm_off = 1L << mm_algsz
+  val system2ICMPOffset = {
+    val mm_amask = mm_off - 1
+    val systems_sorted_with_n_icmp = configs.filter(_.coreParams.memoryChannelParams.count(_.isInstanceOf[CIntraCoreMemoryPort]) > 0).sortBy(cs => name2Id(cs.name)) map (cs => (cs, 1 << log2Up(cs.coreParams.memoryChannelParams.count(_.isInstanceOf[CIntraCoreMemoryPort]))))
+    Map.from(systems_sorted_with_n_icmp.map(_._1) zip systems_sorted_with_n_icmp.map(_._2).scan(0)(_ + _) map {
+      case (sys, off_mul) =>
+        (sys.name, AddressSet(off_mul * mm_off, mm_amask))
+    })
+  }
+
 
   val system_tups = name2Id.keys.map { name =>
     val id = name2Id(name)
     val config = configs(id)
     val pWithMap = p.alterPartial({
       case SystemName2IdMapKey => name2Id
-      case RequireInternalCommandRouting => requireInternalCmdRouting
+      case SystemName2ICMPMapKey => system2ICMPOffset
+      case BaseICMPSizeKey => mm_off
     })
-    (LazyModule(new ComposerSystem(config, id)(pWithMap)), id, config)
+    (LazyModule(new ComposerSystem(config, id, configs.flatMap(_.canIssueCoreCommandsTo).contains(name))(pWithMap)), id, config)
   }.toSeq
-  
+
 
   system_tups.foreach(a => a._1.suggestName(a._3.name))
 
   if (requireInternalCmdRouting) {
-    // for each system that can issue commands, connect them to the other systems in the accelerator
-    val cmdSourceSystems = system_tups.filter(_._3.canIssueCoreCommands).map(_._1.outgoingCommandXbar.get)
-    val cmdManagerSystems = system_tups.map(_._1.incomingInternalCommandXbar.get)
-    makeTLMultilayerXbar(cmdSourceSystems, cmdManagerSystems)
+    // for each system that can issue commands, connect them to the target systems in the accelerator
+    // Seq of tuple of (target name, src xbar)
+    val cmdSourceSystems = system_tups.filter(_._3.canIssueCoreCommandsTo.nonEmpty).flatMap(a => a._3.canIssueCoreCommandsTo.map(b => (b, a)))
+    system_tups.filter(_._1.incomingInternalCommandXbar.isDefined).foreach { sys =>
+      val origins = cmdSourceSystems.filter(_._1 == sys._1.name).map(_._2)
+      makeTLMultilayerXbar(origins.map(_._1.outgoingCommandXbar.get), Seq(sys._1.incomingInternalCommandXbar.get))
+    }
 
-    val respSources = system_tups.map(_._1.outgoingInternalResponseXbar.get)
-    val respManagers = system_tups.filter(_._3.canIssueCoreCommands).map(_._1.incomingInternalResponseXBar.get)
-    makeTLMultilayerXbar(respSources, respManagers)
+    cmdSourceSystems.foreach { sys =>
+      val respSources = system_tups.filter(other_sys => sys._2._3.canIssueCoreCommandsTo.contains(other_sys._1.name))
+      makeTLMultilayerXbar(respSources.map(_._1.outgoingInternalResponseXbar.get), Seq(sys._2._1.incomingInternalResponseXBar.get))
+    }
   }
 
   val systems = system_tups.map(_._1)
@@ -76,11 +96,11 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   accCmd.bits.inst.xs2 := cmdRouter.io.out(1).bits.inst.xs2
   accCmd.bits.inst.opcode := cmdRouter.io.out(1).bits.inst.opcode
 
-  accCmd.bits.inst.funct := cmdRouter.io.out(1).bits.inst.funct(6-SystemIDLengthKey, 0)
-  accCmd.bits.inst.system_id := cmdRouter.io.out(1).bits.inst.funct(6, 6-SystemIDLengthKey+1)
+  accCmd.bits.inst.funct := cmdRouter.io.out(1).bits.inst.funct(6 - SystemIDLengthKey, 0)
+  accCmd.bits.inst.system_id := cmdRouter.io.out(1).bits.inst.funct(6, 6 - SystemIDLengthKey + 1)
 
-  accCmd.bits.getCoreID := cmdRouter.io.out(1).bits.rs1(63, 64-CoreIDLengthKey)
-  accCmd.bits.payload1 := cmdRouter.io.out(1).bits.rs1(63-CoreIDLengthKey, 0)
+  accCmd.bits.getCoreID := cmdRouter.io.out(1).bits.rs1(63, 64 - CoreIDLengthKey)
+  accCmd.bits.payload1 := cmdRouter.io.out(1).bits.rs1(63 - CoreIDLengthKey, 0)
   accCmd.bits.payload2 := cmdRouter.io.out(1).bits.rs2
 
   val system_id = accCmd.bits.inst.system_id
@@ -88,7 +108,7 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
 
   val waitingToFlush = RegInit(false.B)
   cmdRouter.io.out(0).ready := !waitingToFlush
-  when (cmdRouter.io.out(0).fire) {
+  when(cmdRouter.io.out(0).fire) {
     waitingToFlush := true.B
   }
 
@@ -101,7 +121,7 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
     // enqueue commands from software
     sys_queue.io.enq.valid := accCmd.valid && sys_idx.U === system_id
     sys_queue.io.enq.bits := accCmd.bits
-    when (system_id === sys_idx.U) {
+    when(system_id === sys_idx.U) {
       accCmd.ready := sys_queue.io.enq.ready
     }
 
@@ -134,22 +154,33 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
 
 class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
   val nMemChannels = p(ExtMem).get.nMemoryChannels
-  val crossbarModule = LazyModule(new TLXbar())
 
   val acc = LazyModule(new ComposerAcc())
 
   val mem = if (acc.mems.nonEmpty) {
-    Seq.fill(nMemChannels) { TLIdentityNode() }
-  } else {
-    Seq()
-  }
+    val nEndpoints = if (p(HasDisjointMemoryControllers)) Math.min(nMemChannels, acc.mems.length)
+    else nMemChannels
+    val mem = Seq.fill(nEndpoints)(TLIdentityNode())
 
-  val crossbar = crossbarModule.node
-
-  if (acc.mems.nonEmpty) {
-    acc.mems foreach (crossbar := _)
-    mem.foreach(_ := crossbar)
-  }
+    if (p(HasDisjointMemoryControllers)) {
+      // disjoint memory controllers go to different addresses. The redirection to the correct controller
+      // happens at the crossbar level, so we join all transactions at a single crossbar and then feed out to the
+      // individual channels
+      val crossbarModule = LazyModule(new TLXbar())
+      val crossbar = crossbarModule.node
+      acc.mems foreach (crossbar := _)
+      mem.foreach(_ := crossbar)
+    } else {
+      // controllers can all access the same addresses! Split up end points to be able to access these addresses in
+      // parallel
+      val nondisjointXbars = Seq.fill(nMemChannels)(LazyModule(new TLXbar()))
+      acc.mems.zipWithIndex foreach { case (m, idx) =>
+        nondisjointXbars(idx % nMemChannels).node := m
+      }
+      mem zip nondisjointXbars foreach { case (m, xb) => m := xb.node }
+    }
+    mem
+  } else Seq()
 
   lazy val module = new ComposerAccSystemModule(this)
 }

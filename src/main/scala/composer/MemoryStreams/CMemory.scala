@@ -3,19 +3,20 @@ package composer.MemoryStreams
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import composer.MemoryStreams.CMemory.{bram_used, uram_used}
-import composer.{ComposerBuild, ComposerConstraintHint, ComposerQuiet, ConstraintHintsKey, PlatformNBRAM, PlatformNURAM}
+import composer.MemoryStreams.CMemory._
+import composer._
+import composer.Generation.CppGeneration.safe_join
 
 import java.io.FileWriter
 import scala.annotation.tailrec
 
 object CMemory {
-  def apply(latency: Int, dataWidth: Int, nRows: Int, forceURAM: Boolean)(implicit p: Parameters): () => CMemory = {
-    () => new CMemory(latency, dataWidth, nRows, forceURAM)
+  def apply(latency: Int, dataWidth: Int, nRows: Int)(implicit p: Parameters): () => CMemory = {
+    () => new CFPGAMemory(latency, dataWidth, nRows)
   }
 
-  private[CMemory] var bram_used = 0
-  private[CMemory] var uram_used = 0
+  private[CFPGAMemory] var bram_used = 0
+  private[CFPGAMemory] var uram_used = 0
 }
 
 /**
@@ -25,9 +26,8 @@ object CMemory {
  * 1 WRITE PORT
  * 1 READ PORT
  */
-//noinspection ScalaUnusedSymbol
-class CMemory(latency: Int, dataWidth: Int, nRows: Int, forceURAM: Boolean = false)(implicit p: Parameters) extends BlackBox {
-  require(latency >= 1, "Scratchpad latency must be at least 1. Found " + latency)
+
+abstract class CMemory(dataWidth: Int, nRows: Int)(implicit p: Parameters) extends BlackBox {
   private val addrWidth = log2Up(nRows)
   val io = IO(new Bundle() {
     val clk = Input(Clock())
@@ -40,10 +40,15 @@ class CMemory(latency: Int, dataWidth: Int, nRows: Int, forceURAM: Boolean = fal
     val r_dout = Output(UInt(dataWidth.W))
 
     // write port
-    val w_mem_en = Input(Bool())
+    val w_mem_en = Input(UInt((dataWidth / 8).W))
     val w_din = Input(UInt(dataWidth.W))
     val w_addr = Input(UInt(addrWidth.W))
   })
+}
+//noinspection ScalaUnusedSymbol
+private[MemoryStreams] class CFPGAMemory(latency: Int, dataWidth: Int, nRows: Int)(implicit p: Parameters) extends CMemory(dataWidth, nRows) {
+  require(latency >= 1, "Scratchpad latency must be at least 1. Found " + latency)
+  private val addrWidth = log2Up(nRows)
 
   private val bram_dwidth = List(1, 2, 4, 9, 18, 36)
   private val bram_maxdwidth = 36
@@ -76,9 +81,7 @@ class CMemory(latency: Int, dataWidth: Int, nRows: Int, forceURAM: Boolean = fal
   }
   val dname_prefix = s"CMemoryL${latency}DW${dataWidth}R$nRows"
   val (memoryAnnotations, dname_suffix) = {
-    if (forceURAM) {
-      ("(* ram_style = \"ultra\" *)", "furam")
-    } else if (p(ConstraintHintsKey).contains(ComposerConstraintHint.MemoryConstrained)) {
+    if (p(ConstraintHintsKey).contains(ComposerConstraintHint.MemoryConstrained)) {
       if (nRows > 4 * 1024 && dataWidth < 64) {
         if (!p(ComposerQuiet)) System.err.println(
           s"One of the memory modules has a data width less than 64 ($dataWidth) but has a total\n" +
@@ -117,6 +120,8 @@ class CMemory(latency: Int, dataWidth: Int, nRows: Int, forceURAM: Boolean = fal
 
   ComposerBuild.addSource(component)
 
+  val dataWidthBlockWidth = dataWidth / 8
+
   val src =
     f"""
        |module $desiredName (
@@ -131,8 +136,8 @@ class CMemory(latency: Int, dataWidth: Int, nRows: Int, forceURAM: Boolean = fal
        |  input [${dataWidth - 1}:0] w_din,
        |  input [${addrWidth - 1}:0] w_addr);
        |
-       |${memoryAnnotations}
-       |reg [${dataWidth - 1}:0] mem [${nRows - 1}:0];        // Memory Declaration
+       |$memoryAnnotations
+       |reg [7:0] mem [${nRows - 1}:0][$dataWidthBlockWidth];        // Memory Declaration
        |reg [${dataWidth - 1}:0] memreg;
        |reg [${dataWidth - 1}:0] mem_pipe_reg [${latency - 1}:0];    // Pipelines for memory
        |reg [$latency:0] mem_en_pipe_reg;                // Pipelines for memory enable
@@ -141,14 +146,16 @@ class CMemory(latency: Int, dataWidth: Int, nRows: Int, forceURAM: Boolean = fal
        |always @ (posedge clk)
        |begin
        |  if(r_mem_en) begin
-       |    memreg <= mem[r_addr];
+       |    memreg <= {${safe_join((0 until dataWidthBlockWidth).reverse map (a => f"mem[r_addr][$a]"), ", ")}};
        |  end
        |end
        |
        |always @ (posedge clk)
        |begin
-       |  if(w_mem_en) begin
-       |    mem[w_addr] <= w_din;
+       |  for (i = 0; i < $dataWidthBlockWidth; i = i + 1) begin
+       |    if(w_mem_en[i]) begin
+       |      mem[w_addr][i] <= w_din[(i+1)*8 -1: i*8];
+       |    end
        |  end
        |end
        |
@@ -192,4 +199,9 @@ class CMemory(latency: Int, dataWidth: Int, nRows: Int, forceURAM: Boolean = fal
   val fw = new FileWriter(component.toString())
   fw.write(src)
   fw.close()
+}
+
+private[MemoryStreams] class CASICMemory(dataWidth: Int, nRows: Int)(implicit p: Parameters) extends CMemory(dataWidth, nRows) {
+  // figure out
+
 }

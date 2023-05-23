@@ -24,9 +24,9 @@ class ComposerCommandBundler[T1 <: ComposerCommand, T2 <: ComposerUserResponse](
 
   val s_req_idle :: s_done :: Nil = Enum(2)
   val req_state = RegInit(s_req_idle)
-  var reqCounter = RegInit(0.U(log2Up(bundleIn.getNBeats() + 1).W))
+  var reqCounter = RegInit(0.U(log2Up(bundleIn.getNBeats + 1).W))
 
-  val nReqBeatsRequired = bundleIn.getNBeats()
+  val nReqBeatsRequired = bundleIn.getNBeats
   val reqPayload = Reg(Vec(nReqBeatsRequired, UInt(128.W)))
 
   io.req.valid := req_state === s_done
@@ -51,7 +51,7 @@ class ComposerCommandBundler[T1 <: ComposerCommand, T2 <: ComposerUserResponse](
       val lowPayload = range._2 / 128
       field := (if (crossesBoundary(range._1, range._2)) {
         Cat(reqPayload(lowPayload + 1)(range._1 % 128, 0), reqPayload(lowPayload)(127, range._2 % 128))
-      } else reqPayload(lowPayload)(range._1, range._2))
+      } else reqPayload(lowPayload)(range._1 % 128, range._2 % 128))
     }
     when(io.req.fire) {
       reqCounter := 0.U

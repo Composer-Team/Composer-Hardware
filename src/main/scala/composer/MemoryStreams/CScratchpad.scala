@@ -142,7 +142,7 @@ class CScratchpadImp(supportWriteback: Boolean,
   memory.io.r_addr := access.readReq.bits
   memory.io.r_regce := true.B
 
-  memory.io.w_mem_en := access.writeReq.valid
+  memory.io.w_mem_en := Fill(memory.io.w_mem_en.getWidth, access.writeReq.valid)
   memory.io.w_addr := access.writeReq.bits.addr
   memory.io.w_din := access.writeReq.bits.data
 
@@ -439,3 +439,4 @@ class CScratchpadImp(supportWriteback: Boolean,
         "asserted or that the config promises writeback support.")
   }
 }
+

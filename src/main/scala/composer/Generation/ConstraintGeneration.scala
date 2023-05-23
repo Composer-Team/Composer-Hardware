@@ -46,32 +46,35 @@ object ConstraintGeneration {
   def canDistributeOverSLRs()(implicit p: Parameters): Boolean = p(ConstraintHintsKey).contains(ComposerConstraintHint.DistributeCoresAcrossSLRs) && p(PlatformNumSLRs) > 1
 
   def writeConstraints()(implicit p: Parameters): Unit = {
-    if (!canDistributeOverSLRs()) return
+    p(PlatformTypeKey) match {
+      case PlatformType.FPGA =>
+        if (!canDistributeOverSLRs()) return
 
-    val path = Path(ComposerBuild.composerGenDir)
-    os.makeDir.all(path)
-    val f = new FileWriter((path / "user_constraints.xdc").toString())
+        val path = Path(ComposerBuild.composerGenDir)
+        os.makeDir.all(path)
+        val f = new FileWriter((path / "user_constraints.xdc").toString())
 
-    val slrs = p(PlatformSLRs).get
-    val id2Name = if (p(IsAWS)) {
-      Map.from((0 until p(PlatformNumSLRs)).map(i => (i, slrs(i).name)))
-    } else Map.from((0 until p(PlatformNumSLRs)).map(i => (i, "composer_slr" + slrs(i).name)))
-    if (!p(IsAWS)) {
-      // AWS constraints are appended to existing constraint file which already defines pblock names, no need to
-      // redefine
-      slrs.indices.foreach { i =>
-        f.write(f"create_pblock ${id2Name(i)}\n" +
-          f"resize_pblock -add SLR$i ${id2Name(i)} \n")
-      }
+        val slrs = p(PlatformSLRs).get
+        val id2Name = if (p(IsAWS)) {
+          Map.from((0 until p(PlatformNumSLRs)).map(i => (i, slrs(i).name)))
+        } else Map.from((0 until p(PlatformNumSLRs)).map(i => (i, "composer_slr" + slrs(i).name)))
+        if (!p(IsAWS)) {
+          // AWS constraints are appended to existing constraint file which already defines pblock names, no need to
+          // redefine
+          slrs.indices.foreach { i =>
+            f.write(f"create_pblock ${id2Name(i)}\n" +
+              f"resize_pblock -add SLR$i ${id2Name(i)} \n")
+          }
+        }
+
+        (0 until p(PlatformNumSLRs)).foreach { slrID =>
+          val cells = slrMappings.filter(_._2 == slrID)
+          val plist = cells.map(_._1 + "*").reduce(_ + " " + _)
+          f.write(f"add_cells_to_pblock ${id2Name(slrID)} [get_cells -hierarchical [list " + plist + " ] ]\n")
+        }
+        f.close()
+      case PlatformType.ASIC => ;
     }
-
-    (0 until p(PlatformNumSLRs)).foreach { slrID =>
-      val cells = slrMappings.filter(_._2 == slrID)
-      val plist = cells.map(_._1 + "*").reduce(_ + " " + _)
-      f.write(f"add_cells_to_pblock ${id2Name(slrID)} [get_cells -hierarchical [list " + plist + " ] ]\n")
-    }
-
-    f.close()
   }
 }
 
@@ -150,6 +153,6 @@ abstract class LazyModuleWithSLRs()(implicit p: Parameters) extends LazyModule {
         ConstraintGeneration.addToSLR(name, a)
         lazyClockMap = (lm, slrId.get) :: lazyClockMap
     }
-    annotations.foldRight(lm){case ( annot: AssignmentAnnotation, cs: T) => annot.transform(cs)}
+    annotations.foldRight(lm) { case (annot: AssignmentAnnotation, cs: T) => annot.transform(cs) }
   }
 }

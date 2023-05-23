@@ -5,7 +5,7 @@ import chipsalliance.rocketchip.config._
 
 import chisel3.util._
 import chisel3._
-import composer.AXILSlaveBeatBytes
+import composer.FrontBusBeatBytes
 import freechips.rocketchip.tile.RoCCResponse
 
 class RoccToAXIL(implicit val p: Parameters) extends Module {

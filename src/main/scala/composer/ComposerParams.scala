@@ -15,6 +15,8 @@ import freechips.rocketchip.tile._
 // Composer-system parameters
 case object ComposerSystemsKey extends Field[List[ComposerSystemParams]]
 case object SystemName2IdMapKey extends Field[Map[String, Int]]
+case object SystemName2ICMPMapKey extends Field[Map[String, AddressSet]]
+case object BaseICMPSizeKey extends Field[Long]
 
 case object DRAMBankBytes extends Field[Int]
 case object ComposerQuiet extends Field[Boolean]
@@ -25,7 +27,6 @@ case object ComposerQuiet extends Field[Boolean]
 case object TLInterconnectWidthBytes extends Field[Int]
 // if we support a dedicated DMA port, provide the number of ID bits
 case object CXbarMaxDegree extends Field[Int]
-case object RequireInternalCommandRouting extends Field[Boolean]
 case object CmdRespBusWidthBytes extends Field[Int]
 case object PlatformPhysicalMemoryBytes extends Field[Long]
 case object MaxInFlightMemTxsPerSource extends Field[Int]
@@ -47,7 +48,8 @@ case class ComposerSystemParams(nCores: Int,
                                 coreParams: ComposerCoreParams = ComposerCoreParams(),
                                 channelQueueDepth: Int = 32,
                                 canReceiveSoftwareCommands: Boolean = true,
-                                canIssueCoreCommands: Boolean = false
+                                canIssueCoreCommandsTo: Seq[String] = Seq.empty,
+                                canSendDataTo: Seq[String] = Seq.empty
                                )
 
 object ComposerConstraintHint extends Enumeration {
@@ -106,7 +108,7 @@ class WithComposer(constraintHints: List[ComposerConstraintHint] = List.empty, q
   )
   case MonitorsEnabled => false
   case TileKey => RocketTileParams()
-  case MaxInFlightMemTxsPerSource => 8
+  case MaxInFlightMemTxsPerSource => 1
   case DRAMBankBytes => 4 * 1024
 })
 

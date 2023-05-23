@@ -50,12 +50,12 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     cmdArbiter.io.in(idx) <> src
   }
 
-  val internalReturnDestinations = if (p(RequireInternalCommandRouting)) Some(VecInit(Seq.fill(outer.nCores)(Reg(new Bundle() {
+  val internalReturnDestinations = if (outer.canBeIntaCoreCommandEndpoint) Some(VecInit(Seq.fill(outer.nCores)(Reg(new Bundle() {
     val sys = UInt(SystemIDLengthKey.W)
     val core = UInt(CoreIDLengthKey.W)
   })))) else None
 
-  if (p(RequireInternalCommandRouting)) {
+  if (outer.canBeIntaCoreCommandEndpoint) {
     val a_in = outer.internalCommandManager.get.in(0)._1.a.bits.data
     val routingPayload = a_in(a_in.getWidth - 1, ComposerRoccCommand.packLengthBytes * 8)
     val fromCore = routingPayload(CoreIDLengthKey - 1, 0)
@@ -111,7 +111,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
 
   val respQ = Queue(resp)
 
-  val internalRespDispatchModule = if (p(RequireInternalCommandRouting)) {
+  val internalRespDispatchModule = if (outer.canBeIntaCoreCommandEndpoint) {
     val wire = Wire(new ComposerInternallyRoutedRoccResponse())
     wire.getDataField := respQ.bits.getDataField
 //    wire.rd := respQ.bits.rd
@@ -128,7 +128,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   } else None
 
 
-  if (outer.systemParams.canReceiveSoftwareCommands && p(RequireInternalCommandRouting)) {
+  if (outer.systemParams.canReceiveSoftwareCommands && outer.canBeIntaCoreCommandEndpoint) {
     val swio = sw_io.get
 
     val readyDisp = Wire(Bool())
@@ -161,14 +161,14 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   } else if (outer.systemParams.canReceiveSoftwareCommands) {
     // simple case!
     sw_io.get.resp <> respQ
-  } else if (p(RequireInternalCommandRouting)) {
+  } else if (outer.canBeIntaCoreCommandEndpoint) {
     respQ.ready := internalRespDispatchModule.get.io.ready
     internalRespDispatchModule.get.io.valid := respQ.valid
   } else {
     throw new Exception("System unreachable!")
   }
 
-  if (outer.systemParams.canIssueCoreCommands) {
+  if (outer.systemParams.canIssueCoreCommandsTo.nonEmpty) {
     val managerNode = outer.incomingInternalResponseManager.get
     val (mBundle, mEdge) = managerNode.in(0)
     val responseManager = ModuleWithSLR(new TLManagerModule(mBundle, mEdge))

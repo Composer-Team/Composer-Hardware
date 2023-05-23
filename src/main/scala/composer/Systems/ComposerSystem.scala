@@ -11,15 +11,20 @@ import freechips.rocketchip.tilelink._
 
 
 
-class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)(implicit p: Parameters) extends LazyModuleWithSLRs {
+class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int, val canBeIntaCoreCommandEndpoint: Boolean)(implicit p: Parameters) extends LazyModuleWithSLRs {
   val nCores = systemParams.nCores
   val coreParams = systemParams.coreParams
   val distributeCores = ConstraintGeneration.canDistributeOverSLRs()
   implicit val baseName = systemParams.name
 
   val cores = List.tabulate(nCores) { core_idx: Int =>
-    implicit val slrId = if (distributeCores) Some(core_idx % p(PlatformNumSLRs)) else None
-    (core_idx % p(PlatformNumSLRs), LazyModuleWithSLR(new ComposerCoreWrapper(systemParams, core_idx, system_id)))
+    p(PlatformTypeKey) match {
+      case PlatformType.ASIC => (core_idx, LazyModule(new ComposerCoreWrapper(systemParams, core_idx, system_id)))
+      case PlatformType.FPGA =>
+        implicit val slrId = if (distributeCores) Some(core_idx % p(PlatformNumSLRs)) else None
+        (core_idx % p(PlatformNumSLRs), LazyModuleWithSLR(new ComposerCoreWrapper(systemParams, core_idx, system_id)))
+      case _ => throw new Exception()
+    }
   }
 
   // we want to avoid high-degree xbars. Recursively make multi-stage xbar network
@@ -86,7 +91,8 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
   /* SEND OUT STUFF*/
 
   // ROUTE OUTGOING COMMANDS THROUGH HERE
-  val outgoingCommandXbar = if (systemParams.canIssueCoreCommands) {
+  val canIssueCoreCommands = systemParams.canIssueCoreCommandsTo.nonEmpty
+  val outgoingCommandXbar = if (canIssueCoreCommands) {
     val xbar = LazyModuleWithSLR(new TLXbar())
     cores.foreach(xbar.node := TLBuffer() := _._2.externalCoreCommNodes.get)
     Some(xbar.node)
@@ -94,12 +100,11 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
   // cores have their own independent command client nodes
 
   // SEND OUT COMMAND RESPONSES FROM A SYSTEM HERE
-  val (outgoingInternalResponseClient, outgoingInternalResponseXbar) = if (p(RequireInternalCommandRouting)) {
+  val (outgoingInternalResponseClient, outgoingInternalResponseXbar) = if (canBeIntaCoreCommandEndpoint) {
     val client = TLClientNode(Seq(TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
         name = s"InternalReponseNode_${systemParams.name}",
         sourceId = IdRange(0, 1),
-        // TODO this only needs 20B but we ask for 32 - wasteful?
         supportsProbe = TransferSizes(1 << log2Up(ComposerRoccResponse.getWidthBytes)),
         supportsPutFull = TransferSizes(1 << log2Up(ComposerRoccResponse.getWidthBytes))
       )))))
@@ -111,7 +116,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
   /* RECIEVE STUFF */
 
   // INTERNAL COMMAND MANAGER NODE
-  val (internalCommandManager, incomingInternalCommandXbar) = if (p(RequireInternalCommandRouting)) {
+  val (internalCommandManager, incomingInternalCommandXbar) = if (canBeIntaCoreCommandEndpoint) {
     val l2u_crc = 1 << log2Up(ComposerRoccCommand.packLengthBytes)
 
     val manager = TLManagerNode(Seq(TLSlavePortParameters.v1(
@@ -127,7 +132,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int)
     (Some(manager), Some(xbar.node))
   } else (None, None)
 
-  val (incomingInternalResponseManager, incomingInternalResponseXBar) = if (systemParams.canIssueCoreCommands) {
+  val (incomingInternalResponseManager, incomingInternalResponseXBar) = if (systemParams.canIssueCoreCommandsTo.nonEmpty) {
     val manager = TLManagerNode(
       Seq(TLSlavePortParameters.v1(
         managers = Seq(TLSlaveParameters.v1(

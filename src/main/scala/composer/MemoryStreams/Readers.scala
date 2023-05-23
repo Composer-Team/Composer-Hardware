@@ -108,7 +108,7 @@ class CReader(dataBytes: Int,
     prefetch_buffers.io.r_mem_en := false.B
     prefetch_buffers.io.r_regce := true.B
     prefetch_buffers.io.w_addr := DontCare
-    prefetch_buffers.io.w_mem_en := false.B
+    prefetch_buffers.io.w_mem_en := 0.U
     prefetch_buffers.io.w_din := DontCare
 
     val prefetch_buffers_valid = Reg(Vec(prefetchRows, Bool()))

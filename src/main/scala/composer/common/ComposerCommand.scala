@@ -109,3 +109,4 @@ class ComposerRoccCommand() extends AbstractComposerCommand {
 object ComposerRoccCommand {
   val packLengthBytes = 160 / 8
 }
+

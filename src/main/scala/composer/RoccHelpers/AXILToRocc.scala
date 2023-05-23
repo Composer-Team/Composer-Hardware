@@ -2,7 +2,7 @@ package composer.RoccHelpers
 
 import chisel3._
 import chisel3.util._
-import composer.{AXILSlaveBeatBytes, CmdRespBusWidthBytes}
+import composer.{FrontBusBeatBytes, CmdRespBusWidthBytes}
 import chipsalliance.rocketchip.config._
 
 import freechips.rocketchip.rocket.MStatus

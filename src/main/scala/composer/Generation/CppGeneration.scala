@@ -105,7 +105,7 @@ object CppGeneration {
       }.reduce(_ + "\n" + _) + "\n};"
   }
 
-  private def safe_join(s: Seq[String], sep: String = "\n"): String = if (s.isEmpty) "" else if (s.length == 1) s(0) else s.reduce(_ + sep + _)
+  private[composer] def safe_join(s: Seq[String], sep: String = "\n"): String = if (s.isEmpty) "" else if (s.length == 1) s(0) else s.reduce(_ + sep + _)
 
   def customCommandToCpp(sysName: String, cc: AbstractComposerCommand, resp: ComposerUserResponse): (String, String) = {
     val sub_signature = cc.realElements.sortBy(_._1).map { pa =>
@@ -255,7 +255,7 @@ object CppGeneration {
       case None =>
         "// No memory detected, not defining Address Sim Dtype"
     }
-    val mmio_addr = "const uint64_t ComposerMMIOOffset = " + p(MMIOBaseAddress) + "L;"
+    val mmio_addr = "const uint64_t ComposerMMIOOffset = " + p(FrontBusBaseAddress) + "L;"
 
     val header = new FileWriter((path / "composer_allocator_declaration.h").toString())
     header.write(
@@ -267,7 +267,7 @@ object CppGeneration {
          |#include <cinttypes>
          |#ifndef COMPOSER_ALLOCATOR_GEN
          |#define COMPOSER_ALLOCATOR_GEN
-         |#define AXIL_BUS_WIDTH ${p(AXILSlaveBeatBytes) * 8}
+         |#define AXIL_BUS_WIDTH ${p(FrontBusBeatBytes) * 8}
          |
          |// allocator declarations backends that do not have discrete memory or for simulator
          |$allocator

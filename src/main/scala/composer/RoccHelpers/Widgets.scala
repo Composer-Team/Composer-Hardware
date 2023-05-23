@@ -5,8 +5,8 @@ import chisel3.util._
 import composer._
 import freechips.rocketchip.amba.axi4._
 import chipsalliance.rocketchip.config._
-
 import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.tilelink.TLIdentityNode
 
 import java.io.FileWriter
 
@@ -14,7 +14,7 @@ import java.io.FileWriter
  * This file seems to handle memory-mapped IO
  */
 abstract class Widget(implicit p: Parameters) extends LazyModule {
-  val node = AXI4IdentityNode()
+  val node = TLIdentityNode()
   val crFile: MCRFile
   val module: WidgetModule
 }

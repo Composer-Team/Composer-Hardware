@@ -8,7 +8,7 @@ import composer.MemoryStreams._
 import composer.RoccHelpers._
 import composer.TLManagement.{ComposerRespConverter, MultiBeatCommandEmitter, TLClientModule}
 import composer.common._
-import composer.{ComposerConstructor, ComposerSystemParams, SystemName2IdMapKey}
+import composer.{BaseICMPSizeKey, ComposerConstructor, ComposerSystemParams, ComposerSystemsKey, SystemName2ICMPMapKey, SystemName2IdMapKey}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
@@ -26,11 +26,12 @@ class DataChannelIO(dataBytes: Int, vlen: Int = 1) extends Bundle {
   val in_progress = Output(Bool())
 }
 
+
 class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val core_id: Int, val system_id: Int)(implicit p: Parameters) extends LazyModule {
   val coreParams = composerSystemParams.coreParams.copy(core_id = core_id, system_id = system_id)
   val blockBytes = p(CacheBlockBytes)
 
-  val CacheNodes = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.CacheChannel) map (_.asInstanceOf[CCachedReadChannelParams]) map {
+  val CacheNodes = coreParams.memoryChannelParams.filter(_.isInstanceOf[CCachedReadChannelParams]) map (_.asInstanceOf[CCachedReadChannelParams]) map {
     par =>
       val param = par.cacheParams
       val cache = TLCache(param.sizeBytes,
@@ -50,7 +51,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
         TLBuffer() := req_xbar.node
       (par.name, (cache, rnodes))
   }
-  val unCachedReaders = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.ReadChannel).map { para =>
+  val unCachedReaders = coreParams.memoryChannelParams.filter(_.isInstanceOf[CReadChannelParams]).map { para =>
     val param: CReadChannelParams = para.asInstanceOf[CReadChannelParams]
     (param.name, List.tabulate(para.nChannels) { i =>
       TLClientNode(List(TLMasterPortParameters.v1(
@@ -62,7 +63,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
         )))))
     })
   }
-  val writers = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.WriteChannel).map { mcp =>
+  val writers = coreParams.memoryChannelParams.filter(_.isInstanceOf[CWriteChannelParams]).map { mcp =>
     val para = mcp.asInstanceOf[CWriteChannelParams]
     (para.name, List.tabulate(para.nChannels) { i =>
       TLClientNode(List(TLMasterPortParameters.v1(
@@ -74,7 +75,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
           supportsProbe = TransferSizes(1, p(CacheBlockBytes)))))))
     })
   }
-  val scratch_mod = coreParams.memoryChannelParams.filter(_.channelType == CChannelType.Scratchpad).map(_.asInstanceOf[CScratchpadChannelParams]).map {
+  val scratch_mod = coreParams.memoryChannelParams.filter(_.isInstanceOf[CScratchpadChannelParams]).map(_.asInstanceOf[CScratchpadChannelParams]).map {
     param =>
       lazy val mod = LazyModule(param.make)
       mod.suggestName(param.name)
@@ -82,7 +83,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
   }
   val readerNodes = unCachedReaders ++ CacheNodes.map(i => (i._1, i._2._2))
 
-  val externalCoreCommNodes = if (composerSystemParams.canIssueCoreCommands) {
+  val externalCoreCommNodes = if (composerSystemParams.canIssueCoreCommandsTo.nonEmpty) {
     Some(TLClientNode(Seq(TLMasterPortParameters.v1(clients = Seq(TLMasterParameters.v1(
       s"${composerSystemParams.name}_core${core_id}_toOtherCores",
       supportsProbe = TransferSizes(1 << log2Up(ComposerRoccCommand.packLengthBytes)),
@@ -96,6 +97,23 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
       writers ++
       scratch_mod.map(i => (i._1, List(i._2.mem)))
     ).flatMap(_._2)
+
+  val intraCoreMemNodes = coreParams.memoryChannelParams.filter(_.isInstanceOf[CIntraCoreMemoryPort]).map {
+    r =>
+      val sys_baseAS = p(SystemName2ICMPMapKey)(composerSystemParams.name)
+      val mp = r.asInstanceOf[CIntraCoreMemoryPort]
+      val address = AddressSet(sys_baseAS.base + core_id * p(BaseICMPSizeKey), sys_baseAS.mask)
+      val intraCoreMemManager = TLManagerNode(Seq(TLSlavePortParameters.v1(
+        managers = Seq(TLSlaveParameters.v1(
+          address = Seq(address),
+          regionType = RegionType.UNCACHED,
+          supportsPutFull = TransferSizes(mp.dataWidthBits.intValue() / 8)
+        )), beatBytes = mp.dataWidthBits.intValue() / 8
+      )))
+      val intraCoreMemXbar = TLXbar()
+      intraCoreMemManager := intraCoreMemXbar
+      (mp.name, intraCoreMemXbar, intraCoreMemManager, mp)
+  }
 
   lazy val module = composerSystemParams.buildCore(ComposerConstructor(composerSystemParams.coreParams, this), p)
 }
@@ -118,6 +136,11 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
           (outer.unCachedReaders.map(_._1) ++ outer.CacheNodes.map(_._1)))
     }
   }
+
+//  def getIntraCoreMem(name: String): CScratchpadAccessBundle = {
+//
+//    val ic_scratchpad = Module(new CScratchpad())
+//  }
 
   /**
    * Declare reader module implementations associated with a certain channel name.
@@ -214,13 +237,12 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     (mod.req, mod.access)
   }
 
-  private[composer] val composer_response_io_ = if (outer.composerSystemParams.canIssueCoreCommands) {
+  private[composer] val composer_response_io_ = if (outer.composerSystemParams.canIssueCoreCommandsTo.nonEmpty) {
     Some(IO(Flipped(Decoupled(new ComposerInternallyRoutedRoccResponse()))))
   } else None
 
-  
 
-  def composer_response_io[T <: ComposerUserResponse](gen: T = new ComposerUserResponse): DecoupledIO[T] = {
+  def composer_response_io[T <: ComposerUserResponse](gen: T = new ComposerRoccUserResponse): DecoupledIO[T] = {
     val raw_io = composer_response_io_.getOrElse {
       throw new Exception("Attempted to get internal response IO but core was declared as not being able to issue core commands")
     }
@@ -234,7 +256,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   }
 
 
-  private val composer_command_io_ = if (outer.composerSystemParams.canIssueCoreCommands) {
+  private val composer_command_io_ = if (outer.composerSystemParams.canIssueCoreCommandsTo.nonEmpty) {
     val node = outer.externalCoreCommNodes.get
     val mod = Module(new TLClientModule(node))
     node.out(0)._1 <> mod.tl
