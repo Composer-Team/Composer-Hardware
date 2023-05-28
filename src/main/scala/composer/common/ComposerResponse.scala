@@ -48,6 +48,7 @@ trait hasDataField {
 }
 
 class ComposerUserResponse extends Bundle with hasAccessibleUserSubRegions with hasDataField {
+  override def sortedElements: Seq[(String, Data)] = elements.toSeq.sortBy(_._1)
   override val reservedNames: Seq[String] = Seq()
   private[composer] def getDataField: UInt = {
     val datacat = Cat(realElements.map(_._2.asUInt).reverse)

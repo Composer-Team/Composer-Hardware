@@ -8,7 +8,7 @@ lazy val composer = (project in file(".")).settings(
   name := "composer-hardware",
   libraryDependencies ++= Seq(
     "edu.berkeley.cs" %% "chisel3" % "3.5.5",
-    "edu.duke.cs.apex" %% "rocketchip-rocketchip-fork" % "0.1.5"
+    "edu.duke.cs.apex" %% "rocketchip-rocketchip-fork" % "0.1.6"
   ),
   resolvers += ("reposilite-repository-releases" at "http://oak.cs.duke.edu:8080/releases").withAllowInsecureProtocol(true),
   publishTo := Some(("reposilite-repository" at "http://oak.cs.duke.edu:8080/releases/").withAllowInsecureProtocol(true)),

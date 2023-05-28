@@ -15,9 +15,6 @@ import freechips.rocketchip.tile._
 // Composer-system parameters
 case object ComposerSystemsKey extends Field[List[ComposerSystemParams]]
 case object SystemName2IdMapKey extends Field[Map[String, Int]]
-case object SystemName2ICMPMapKey extends Field[Map[String, AddressSet]]
-case object BaseICMPSizeKey extends Field[Long]
-
 case object DRAMBankBytes extends Field[Int]
 case object ComposerQuiet extends Field[Boolean]
 

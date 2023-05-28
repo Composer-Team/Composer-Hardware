@@ -2,7 +2,7 @@ package composer
 
 import chipsalliance.rocketchip.config._
 import chisel3.stage._
-import composer.ComposerBuild.sourceList
+import composer.ComposerBuild.{sourceList, symbolicResources}
 import composer.Generation.ExportCSymbolPhase
 import composer.Systems.ComposerTop
 import firrtl.{AnnotationSeq, CustomDefaultMemoryEmission, CustomDefaultRegisterEmission, MemoryNoInit}
@@ -64,10 +64,16 @@ object ComposerBuild {
 
   private[composer] val memory_dir: Path = os.pwd / ".memories"
 
+  private[composer] var symbolicResources: Seq[Path] = Seq.empty
+
   private[composer] var sourceList: Seq[Path] = Seq.empty
 
   private[composer] def addSource(p: Path): Unit = {
     sourceList = sourceList :+ p
+  }
+
+  private[composer] def addSymbolicResource(p: Path): Unit = {
+    symbolicResources = symbolicResources :+ p
   }
 }
 
@@ -115,8 +121,12 @@ class ComposerBuild(config: Config) {
     }
     os.move(targetDir / "ComposerTop.v", outputFile, replaceExisting = true)
     appendSrcsTo(os.pwd / ".fpnew_cache", outputFile)
-    sourceList foreach { src =>
-      os.write.append(outputFile, os.read(src))
+    sourceList.map(_.toString()).distinct foreach { src =>
+      os.write.append(outputFile, os.read(Path(src)))
+    }
+    symbolicResources.foreach { sr =>
+      val basename = sr.baseName
+      println(basename)
     }
     config(PostProcessorMacro)() // do post-processing per backend
   }

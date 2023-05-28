@@ -8,11 +8,10 @@ import composer.MemoryStreams._
 import composer.RoccHelpers._
 import composer.TLManagement.{ComposerRespConverter, MultiBeatCommandEmitter, TLClientModule}
 import composer.common._
-import composer.{BaseICMPSizeKey, ComposerConstructor, ComposerSystemParams, ComposerSystemsKey, SystemName2ICMPMapKey, SystemName2IdMapKey}
+import composer._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util._
 
 class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2) extends Bundle {
   val req: DecoupledIO[T1] = DecoupledIO(bundleIn.cloneType)
@@ -75,13 +74,20 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
           supportsProbe = TransferSizes(1, p(CacheBlockBytes)))))))
     })
   }
-  val scratch_mod = coreParams.memoryChannelParams.filter(_.isInstanceOf[CScratchpadChannelParams]).map(_.asInstanceOf[CScratchpadChannelParams]).map {
+  val scratch_mod = coreParams.memoryChannelParams.filter(_.isInstanceOf[CScratchpadParams]).map(_.asInstanceOf[CScratchpadParams]).map {
     param =>
       lazy val mod = LazyModule(param.make)
       mod.suggestName(param.name)
       (param.name, mod)
   }
   val readerNodes = unCachedReaders ++ CacheNodes.map(i => (i._1, i._2._2))
+  // these go to external memory
+  val mem_nodes = (
+    CacheNodes.map(i => (i._1, i._2._2)) ++
+      unCachedReaders ++
+      writers ++
+      scratch_mod.map(i => (i._1, List(i._2.mem_master_node).filter(_.isDefined).map(_.get)))
+    ).flatMap(_._2)
 
   val externalCoreCommNodes = if (composerSystemParams.canIssueCoreCommandsTo.nonEmpty) {
     Some(TLClientNode(Seq(TLMasterPortParameters.v1(clients = Seq(TLMasterParameters.v1(
@@ -90,30 +96,54 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
       supportsPutFull = TransferSizes(1 << log2Up(ComposerRoccCommand.packLengthBytes))
     ))))))
   } else None
-
-  val mem_nodes = (
-    CacheNodes.map(i => (i._1, i._2._2)) ++
-      unCachedReaders ++
-      writers ++
-      scratch_mod.map(i => (i._1, List(i._2.mem)))
-    ).flatMap(_._2)
-
-  val intraCoreMemNodes = coreParams.memoryChannelParams.filter(_.isInstanceOf[CIntraCoreMemoryPort]).map {
+  val intraCoreMemSlaveNodes = coreParams.memoryChannelParams.filter(_.isInstanceOf[CIntraCoreMemoryPortIn]).map {
     r =>
-      val sys_baseAS = p(SystemName2ICMPMapKey)(composerSystemParams.name)
-      val mp = r.asInstanceOf[CIntraCoreMemoryPort]
-      val address = AddressSet(sys_baseAS.base + core_id * p(BaseICMPSizeKey), sys_baseAS.mask)
-      val intraCoreMemManager = TLManagerNode(Seq(TLSlavePortParameters.v1(
+      val mp = r.asInstanceOf[CIntraCoreMemoryPortIn]
+      val memManagerParams = Seq.fill(mp.nChannels)(TLSlavePortParameters.v1(
         managers = Seq(TLSlaveParameters.v1(
-          address = Seq(address),
-          regionType = RegionType.UNCACHED,
+          address = Seq(AddressSet(0, mp.nDatas.intValue() * mp.dataWidthBits.intValue() / 8 - 1)),
+          regionType = RegionType.IDEMPOTENT,
           supportsPutFull = TransferSizes(mp.dataWidthBits.intValue() / 8)
         )), beatBytes = mp.dataWidthBits.intValue() / 8
-      )))
-      val intraCoreMemXbar = TLXbar()
-      intraCoreMemManager := intraCoreMemXbar
-      (mp.name, intraCoreMemXbar, intraCoreMemManager, mp)
+      ))
+      val xbar_sp_pairs = memManagerParams map { mm_param =>
+        val intraCoreMemXbar = TLXbar()
+        val sp = LazyModule(new CScratchpad(
+          supportWriteback = false,
+          asMemorySlave = Some(mm_param),
+          dataWidthBits = mp.dataWidthBits,
+          nDatas = mp.nDatas,
+          latency = mp.latency,
+          specialization = CScratchpadSpecialization.flatPacked))
+        sp.mem_slave_node.get := intraCoreMemXbar
+        (intraCoreMemXbar, sp)
+      }
+      val xbars = xbar_sp_pairs.map(_._1)
+      val sps = xbar_sp_pairs.map(_._2)
+
+      (mp.name, xbars, mp, sps)
   }
+  val intraCoreMemMasters = coreParams.memoryChannelParams.filter(_.isInstanceOf[CIntraCoreMemoryPortOut]).map {
+    r =>
+      val mp = r.asInstanceOf[CIntraCoreMemoryPortOut]
+      val (otherSystemParams, otherSPParams) = try {
+        val otherS = p(ComposerSystemsKey).filter(_.name == mp.toSystem)(0)
+        val otherSP = otherS.coreParams.memoryChannelParams.filter(_.name == mp.toMemoryPort)(0)
+        (otherS, otherSP.asInstanceOf[CIntraCoreMemoryPortIn])
+      } catch {
+        case a: Exception =>
+          System.err.println("Could not properly find system and memory port given by outward memory port params.")
+          throw a
+      }
+      val memMasters = Seq.fill(otherSystemParams.nCores, mp.nChannels)(TLClientNode(Seq(TLMasterPortParameters.v1(
+        clients = Seq(TLMasterParameters.v1(
+          f"intraCoreMemPortOut_${mp.toSystem}_to_${mp.toMemoryPort}",
+          supportsProbe = TransferSizes(otherSPParams.dataWidthBits.intValue() / 8),
+          supportsPutFull = TransferSizes(otherSPParams.dataWidthBits.intValue() / 8)
+        ))))))
+      (mp, memMasters, otherSPParams)
+  }
+
 
   lazy val module = composerSystemParams.buildCore(ComposerConstructor(composerSystemParams.coreParams, this), p)
 }
@@ -137,10 +167,95 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     }
   }
 
-//  def getIntraCoreMem(name: String): CScratchpadAccessBundle = {
-//
-//    val ic_scratchpad = Module(new CScratchpad())
-//  }
+  def getIntraCoreMemIn(name: String, idx: Int): CScratchpadAccessBundle = {
+    val params = outer.intraCoreMemSlaveNodes.filter(_._1 == name)
+    if (params.isEmpty) throw new Exception(s"Attempting to access intraCoreMem \"$name\" which we can't find in the config.")
+    val ic_scratchpad = params(0)
+    ic_scratchpad._4(idx).module.access
+  }
+
+  def getIntraCoreMemOut(name: String, idx: Int = 0)(implicit valName: ValName): Vec[MemWritePort] = {
+    val params = try {
+      outer.intraCoreMemMasters.filter(_._1.name == name)(0)
+    } catch {
+      case e: Exception =>
+        System.err.println("You may be trying to access a intra core mem port by the wrong name. Check your config.")
+        throw e
+    }
+    val (outs, o_edges) = {
+      val q = params._2.map(_(idx).out(0))
+      (q.map(_._1), q.map(_._2))
+    }
+
+    val intracore_ios = outs.indices.map{
+      core_id =>
+        val w = Wire(new MemWritePort(log2Up(params._3.nDatas.intValue()), params._3.dataWidthBits.intValue()))
+        w.suggestName(valName.name + "_" + core_id)
+        w
+    }
+    intracore_ios.lazyZip(outs).lazyZip(o_edges) foreach { case (io, o, oe) =>
+      o.a.bits := oe.Put(
+        fromSource = 0.U,
+        toAddress = if (params._3.dataWidthBits.intValue() == 8) io.bits.addr else Cat(io.bits.addr, 0.U(log2Up(params._3.dataWidthBits.intValue() / 8).W)),
+        lgSize = CLog2Up(params._3.dataWidthBits.intValue() / 8).U,
+        data = io.bits.data
+      )._2
+      o.a.valid := io.valid
+      io.ready := o.a.ready
+      o.d.ready := true.B
+    }
+    VecInit(intracore_ios)
+  }
+  class CCoreChannelMultiAccessBundle[T <: Data](gen: T, nChannels: Int, nCores: Int) extends Bundle {
+    val dats = Vec(nCores, Vec(nChannels, gen))
+    def getCoreSlice(core: Int): Vec[T] = dats(core)
+    def getChannelSlice(channel: Int): Vec[T] = VecInit(dats.map(_(channel)))
+  }
+
+  object CCoreChannelMultiAccessBundle {
+    def apply[T <: Data](gen: Vec[Vec[T]])(implicit valName: ValName, nameHint: Option[String] = None): CCoreChannelMultiAccessBundle[T] = {
+      val w = Wire(new CCoreChannelMultiAccessBundle(gen(0)(0), gen(0).length, gen.length))
+      w.suggestName(nameHint.getOrElse(valName.name))
+      w.dats := gen
+      w
+    }
+  }
+
+  object CCoreChannelMultiAccessBundleChannelMajor {
+    def apply[T <: Data](gen: Vec[Vec[T]])(implicit valName: ValName, nameHint: Option[String] = None): CCoreChannelMultiAccessBundle[T] = {
+      val t = gen.transpose
+      val re_vectorize = VecInit(t.map(VecInit(_)))
+      CCoreChannelMultiAccessBundle(re_vectorize)
+    }
+  }
+
+
+  def getIntraCoreMemOuts(name: String)(implicit valName: ValName): CCoreChannelMultiAccessBundle[MemWritePort] = {
+    val params = try {
+      outer.intraCoreMemMasters.filter(_._1.name == name)(0)
+    } catch {
+      case e: Exception =>
+        System.err.println("You may be trying to access a intra core mem port by the wrong name. Check your config.")
+        throw e
+    }
+    implicit val nameHint = Some(valName.name)
+    val q = VecInit((0 until params._1.nChannels) map (getIntraCoreMemOut(name, _)))
+    CCoreChannelMultiAccessBundleChannelMajor(q)
+
+  }
+
+  def getIntraCoreMemIns(name: String)(implicit valName: ValName): CCoreChannelMultiAccessBundle[MemWritePort] = {
+    val params = try {
+      outer.intraCoreMemMasters.filter(_._1.name == name)(0)
+    } catch {
+      case e: Exception =>
+        System.err.println("You may be trying to access a intra core mem port by the wrong name. Check your config.")
+        throw e
+    }
+    implicit val nameHint = Some(valName.name)
+    CCoreChannelMultiAccessBundleChannelMajor(VecInit((0 until params._1.nChannels) map (getIntraCoreMemOut(name, _))))
+  }
+
 
   /**
    * Declare reader module implementations associated with a certain channel name.
@@ -162,8 +277,8 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     val mod = idx match {
       case Some(id_unpack) =>
         val clients = getTLClients(name, outer.readerNodes)
-        List(Module(new CReader(dataBytes, vlen, clients(id_unpack))))
-      case None => getTLClients(name, outer.readerNodes).map(tab_id => Module(new CReader(dataBytes, vlen, tab_id)))
+        List(Module(new CReader(dataBytes, vlen, clients(id_unpack), debugName = Some(name))))
+      case None => getTLClients(name, outer.readerNodes).map(tab_id => Module(new CReader(dataBytes, vlen, tab_id, debugName = Some(name))))
     }
     //noinspection DuplicatedCode
     mod foreach { m =>

@@ -3,6 +3,9 @@ package composer
 import chipsalliance.rocketchip.config._
 import composer.FrontBusProtocol.FrontBusProtocol
 import composer.PlatformType.PlatformType
+import composer.ProcessCorner.ProcessCorner
+import composer.ProcessTemp.{ProcessTemp}
+import composer.ProcessVoltageThreshold.{ProcessVoltageThreshold}
 import freechips.rocketchip.subsystem._
 
 object PlatformType extends Enumeration {
@@ -149,6 +152,23 @@ object SLRConstants {
   final val DEFAULT_SLR = 0
 }
 
+object ProcessCorner extends Enumeration {
+  val Typical, Fast, Slow = Value
+  type ProcessCorner = Value
+}
+
+object ProcessTemp extends Enumeration {
+  val C25, CM40, C125 = Value
+  type ProcessTemp = Value
+}
+
+object ProcessVoltageThreshold extends Enumeration {
+  val High, Regular, Low, SuperLow = Value
+  type ProcessVoltageThreshold = Value
+}
+
+case class ProcessAttributes(corner: ProcessCorner, temp: ProcessTemp, threshold: ProcessVoltageThreshold, clockRateMHz: Float = 1000)
+
 class WithChipKitPlatform extends Config((_, _, _) => {
   case ExtMem => Some(MemoryPortParams(MasterPortParams(
     base = 0,
@@ -171,7 +191,9 @@ class WithChipKitPlatform extends Config((_, _, _) => {
   case DefaultClockRateKey => 100
 
   case IsAWS => false
-  case PostProcessorMacro => () => ;
+  case PostProcessorMacro => () => {
+
+  }
   case HasDisjointMemoryControllers => false
 
 })

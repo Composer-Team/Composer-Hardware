@@ -37,8 +37,8 @@ class MultiBeatCommandEmitter[T <: ComposerCommand](gen: T) extends Module {
       out.bits.inst.xd := beatCount === (nBeats-1).U
       out.bits.inst.opcode := ACCEL
       out.bits.inst.funct := 0.U
-      out.bits.inst.core_id := in.bits.getCoreID
-      out.bits.inst.system_id := in.bits.getSystemID
+      out.bits.inst.core_id := command.getCoreID
+      out.bits.inst.system_id := command.getSystemID
       out.valid := true.B
       when (out.fire) {
         beatCount := beatCount + 1.U

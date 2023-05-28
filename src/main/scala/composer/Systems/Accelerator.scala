@@ -3,8 +3,6 @@ package composer.Systems
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
-import composer.MemoryStreams.CIntraCoreMemoryPort
 import composer.TLManagement.makeTLMultilayerXbar
 import composer.common._
 import composer._
@@ -20,33 +18,34 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
   val name2Id = scala.collection.immutable.Map.from(configs.zipWithIndex.map(a => (a._1.name, a._2)))
   val requireInternalCmdRouting = configs.map(_.canIssueCoreCommandsTo).foldLeft(false)(_ || _.nonEmpty)
 
-  // preprocess intra-core memory IOs and pass through param object
-  val largestMM = p(ComposerSystemsKey).flatMap(_.coreParams.memoryChannelParams).filter(_.isInstanceOf[CIntraCoreMemoryPort]).map(_.asInstanceOf[CIntraCoreMemoryPort]).map(a => a.dataWidthBits.longValue() / 8 * a.nDatas.intValue()).fold(0L)(_ + _)
-  val mm_algsz = log2Up(largestMM)
-  val mm_off = 1L << mm_algsz
-  val system2ICMPOffset = {
-    val mm_amask = mm_off - 1
-    val systems_sorted_with_n_icmp = configs.filter(_.coreParams.memoryChannelParams.count(_.isInstanceOf[CIntraCoreMemoryPort]) > 0).sortBy(cs => name2Id(cs.name)) map (cs => (cs, 1 << log2Up(cs.coreParams.memoryChannelParams.count(_.isInstanceOf[CIntraCoreMemoryPort]))))
-    Map.from(systems_sorted_with_n_icmp.map(_._1) zip systems_sorted_with_n_icmp.map(_._2).scan(0)(_ + _) map {
-      case (sys, off_mul) =>
-        (sys.name, AddressSet(off_mul * mm_off, mm_amask))
-    })
-  }
-
 
   val system_tups = name2Id.keys.map { name =>
     val id = name2Id(name)
     val config = configs(id)
     val pWithMap = p.alterPartial({
       case SystemName2IdMapKey => name2Id
-      case SystemName2ICMPMapKey => system2ICMPOffset
-      case BaseICMPSizeKey => mm_off
     })
     (LazyModule(new ComposerSystem(config, id, configs.flatMap(_.canIssueCoreCommandsTo).contains(name))(pWithMap)), id, config)
   }.toSeq
 
 
   system_tups.foreach(a => a._1.suggestName(a._3.name))
+
+  // tie together intra-core memory ports in one system to core/channel sps individually in another system
+  system_tups.foreach { case (sys, _, _) =>
+    sys.cores.foreach { case (_, core) =>
+      core.intraCoreMemMasters.foreach { case (pparams, clients, _) =>
+        val assoc_endpoints = system_tups.filter(_._3.name == pparams.toSystem)(0)._1.cores.map(_._2.intraCoreMemSlaveNodes.filter(_._1 == pparams.toMemoryPort)(0)).map(_._2)
+        require(clients.length == assoc_endpoints.length, "sanity - if this doesn't work, somethign bad has happened")
+        clients.flatten zip assoc_endpoints.flatten foreach { case (c, e) =>
+          val buffer = TLBuffer()
+          e := buffer
+          buffer := c
+        }
+
+      }
+    }
+  }
 
   if (requireInternalCmdRouting) {
     // for each system that can issue commands, connect them to the target systems in the accelerator
@@ -89,20 +88,7 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   val accCmd = Wire(Decoupled(new ComposerRoccCommand)) //CUSTOM3, used for everything else
   accCmd.valid := cmdRouter.io.out(1).valid
   cmdRouter.io.out(1).ready := accCmd.ready
-  accCmd.bits.inst.core_id := Cat(cmdRouter.io.out(1).bits.inst.rs1, cmdRouter.io.out(1).bits.inst.rs2)
-  accCmd.bits.inst.rd := cmdRouter.io.out(1).bits.inst.rd
-  accCmd.bits.inst.xd := cmdRouter.io.out(1).bits.inst.xd
-  accCmd.bits.inst.xs1 := cmdRouter.io.out(1).bits.inst.xs1
-  accCmd.bits.inst.xs2 := cmdRouter.io.out(1).bits.inst.xs2
-  accCmd.bits.inst.opcode := cmdRouter.io.out(1).bits.inst.opcode
-
-  accCmd.bits.inst.funct := cmdRouter.io.out(1).bits.inst.funct(6 - SystemIDLengthKey, 0)
-  accCmd.bits.inst.system_id := cmdRouter.io.out(1).bits.inst.funct(6, 6 - SystemIDLengthKey + 1)
-
-  accCmd.bits.getCoreID := cmdRouter.io.out(1).bits.rs1(63, 64 - CoreIDLengthKey)
-  accCmd.bits.payload1 := cmdRouter.io.out(1).bits.rs1(63 - CoreIDLengthKey, 0)
-  accCmd.bits.payload2 := cmdRouter.io.out(1).bits.rs2
-
+  accCmd <> cmdRouter.io.out(1).map(ComposerRoccCommand.fromRoccCommand)
   val system_id = accCmd.bits.inst.system_id
   accCmd.ready := false.B //base case
 
@@ -185,7 +171,9 @@ class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
   lazy val module = new ComposerAccSystemModule(this)
 }
 
+
 class ComposerAccSystemModule(outer: ComposerAccSystem)(implicit p: Parameters) extends LazyModuleImp(outer) {
+  //noinspection ScalaUnusedSymbol
   val io = IO(new Bundle {
     val cmd = Flipped(Decoupled(new RoCCCommand()))
     val resp = Decoupled(new RoCCResponse())

@@ -104,28 +104,32 @@ case class CCachedReadChannelParams(name: String, nChannels: Int, cacheParams: C
 }
 
 
-case class CScratchpadChannelParams(name: String,
-                                    supportWriteback: Boolean,
-                                    dataWidthBits: Number,
-                                    nDatas: Number,
-                                    forceURAM: Boolean = false,
-                                    latency: Number = 2,
-                                    specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked)
+case class CScratchpadParams(name: String,
+                             supportWriteback: Boolean,
+                             dataWidthBits: Number,
+                             nDatas: Number,
+                             latency: Number = 2,
+                             specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked)
   extends CChannelParams {
   override val nChannels: Int = 1
 
   private[composer] def make(implicit p: Parameters): CScratchpad = {
-    new CScratchpad(
-      supportWriteback,
-      dataWidthBits, nDatas, latency, forceURAM, specialization)
+    new CScratchpad(supportWriteback, None, dataWidthBits, nDatas, latency, specialization)
   }
 }
 
-case class CIntraCoreMemoryPort(name: String,
-                                dataWidthBits: Number,
-                                nDatas: Number,
-                                latency: Number = 2) extends CChannelParams {
-  override val nChannels: Int = 1
+case class CIntraCoreMemoryPortIn(name: String,
+                                  nChannels: Int,
+                                  dataWidthBits: Number,
+                                  nDatas: Number,
+                                  latency: Number = 2) extends CChannelParams {
   require(isPow2(dataWidthBits.intValue()) && dataWidthBits.intValue() >= 8, "the width of CIntraCoreMemory ports is" +
     "currently restricted to power-of-2 sizes. If you need this changed, please contact developer.")
+}
+
+case class CIntraCoreMemoryPortOut(name: String,
+                                   toSystem: String,
+                                   toMemoryPort: String) extends CChannelParams {
+  // this has to be a bit special because this port is coupled to another existing port declared somewhere else
+  override val nChannels: Int = -1
 }

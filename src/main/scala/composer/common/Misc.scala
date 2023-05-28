@@ -10,7 +10,9 @@ trait hasAccessibleUserSubRegions {
 
   val elements: SeqMap[String, Data]
 
-  private[composer] def realDatas: SeqMap[String, Data] = elements.filter(ele => !reservedNames.contains(ele._1))
+  def sortedElements: Seq[(String, Data)]
+
+  private[composer] def realDatas: Seq[(String, Data)] = sortedElements.filter(ele => !reservedNames.contains(ele._1))
 
   private[composer] def realElements: Seq[(String, Data)] = realDatas.toSeq.map(a => (a._1, a._2))
 

@@ -110,7 +110,7 @@ object CppGeneration {
   def customCommandToCpp(sysName: String, cc: AbstractComposerCommand, resp: ComposerUserResponse): (String, String) = {
     val sub_signature = cc.realElements.sortBy(_._1).map { pa =>
       val isSigned = pa._2.isInstanceOf[SInt]
-      getCType(pa._1, pa._2.getWidth, isSigned) + " " + pa._1
+      getCType(pa._1, pa._2.getWidth, !isSigned) + " " + pa._1
     }
     val signature = if (sub_signature.isEmpty) "" else {
       sub_signature.reduce(_ + ", " + _)
@@ -130,15 +130,20 @@ object CppGeneration {
       val bitsLeftInPayload = 64 - payloadLocalOffset
       if (bitsLeftInPayload < width) {
         // we're going to roll over!
-        Seq((payloadId, f"((uint64_t)($name & ${intToHexFlag((1 << bitsLeftInPayload) - 1)}L) << $payloadLocalOffset)"),
-          (payloadId + 1, f"(((uint64_t)$name >> $bitsLeftInPayload) & ${intToHexFlag((1 << (width - bitsLeftInPayload)) - 1)}L)")
+        Seq((payloadId, f"((uint64_t)($name & ${intToHexFlag((1L << bitsLeftInPayload) - 1)}L) << $payloadLocalOffset)"),
+          (payloadId + 1, f"(((uint64_t)$name >> $bitsLeftInPayload) & ${intToHexFlag((1L << (width - bitsLeftInPayload)) - 1)}L)")
         )
       } else {
         Seq((payloadId, f"((uint64_t)$name << $payloadLocalOffset)"))
       }
     }
     val assignments = (0 until (numCommands * 2)) map { payloadIdx =>
-      f"  payloads[$payloadIdx] = ${safe_join(payloads.filter(_._1 == payloadIdx).map(_._2), " | ")};";
+      val pl = {
+        val sj = safe_join(payloads.filter(_._1 == payloadIdx).map(_._2), " | ")
+        if (sj == "") "0"
+        else sj
+      }
+      f"  payloads[$payloadIdx] = $pl;";
     }
 
     val structName = f"${sysName}Response_t"
@@ -170,9 +175,9 @@ object CppGeneration {
          |""".stripMargin + (if (assignments.length == 1) assignments(0) + "\n" else assignments.reduce(_ + "\n" + _)) +
         f"""
            |  for (int i = 0; i < ${numCommands - 1}; ++i) {
-           |    composer::rocc_cmd::start_cmd(${sysName}_ID, false, 0, false, false, core_id, payloads[i*2], payloads[i*2+1]).send();
+           |    composer::rocc_cmd::start_cmd(${sysName}_ID, false, 0, false, false, core_id, payloads[i*2+1], payloads[i*2]).send();
            |  }
-           |  return composer::rocc_cmd::start_cmd(${sysName}_ID, true, 0, false, false, core_id, payloads[${numCommands - 1}*2 + 1], payloads[${numCommands - 1}*2]).send().to<$structName>();
+           |  return composer::rocc_cmd::start_cmd(${sysName}_ID, true, 0, false, false, core_id, payloads[${(numCommands - 1) *2 + 1}], payloads[${(numCommands - 1)*2}]).send().to<$structName>();
            |}
            |""".stripMargin
     val declaration =
@@ -196,10 +201,10 @@ object CppGeneration {
          |#ifdef SIM
          |#define NUM_DDR_CHANNELS ${mem.nMemoryChannels}
          |#endif
-         |using composer_allocator=composer::device_allocator<${p(PlatformPhysicalMemoryBytes)}>;
+         |using composer_allocator=composer::device_allocator<0x${p(PlatformPhysicalMemoryBytes).toHexString}>;
          |${if (!p(HasDiscreteMemory)) "#ifdef SIM" else ""}
-         |""".stripMargin + (if (p(HasDiscreteMemory)) "#define COMPOSER_USE_CUSTOM_ALLOC\n" else "") +
-        (if (!p(HasDiscreteMemory)) "#ifdef SIM" else "")
+         |""".stripMargin + "#define COMPOSER_USE_CUSTOM_ALLOC\n" +
+        (if (!p(HasDiscreteMemory)) "#endif" else "")
 
     val addrBits = s"const uint8_t composerNumAddrBits = ${log2Up(mem.master.size)};"
     val defines = safe_join(user_defs map { deff => s"const ${deff.ty} ${deff.name} = ${deff.value};" })

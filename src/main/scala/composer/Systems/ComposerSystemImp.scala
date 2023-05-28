@@ -28,11 +28,6 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     managerNode.in(0)._1 <> manager.tl
 
     val cmdIO = manager.io.map(r => hasAccessibleUserSubRegions[ComposerRoccCommand](r, new ComposerRoccCommand))
-//    Wire(Flipped(Decoupled(new ComposerRoccCommand())))
-//    manager.io.ready := cmdIO.ready
-//    cmdIO.valid := manager.io.valid
-//    cmdIO.bits := ComposerRoccCommand(manager.io.bits)
-
     Some(cmdIO)
   } else None
 
@@ -57,11 +52,10 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
 
   if (outer.canBeIntaCoreCommandEndpoint) {
     val a_in = outer.internalCommandManager.get.in(0)._1.a.bits.data
-    val routingPayload = a_in(a_in.getWidth - 1, ComposerRoccCommand.packLengthBytes * 8)
+    val routingPayload = a_in(a_in.getWidth - 1, (new ComposerRoccCommand).getWidth)
     val fromCore = routingPayload(CoreIDLengthKey - 1, 0)
     val fromSys = routingPayload(CoreIDLengthKey + SystemIDLengthKey - 1, CoreIDLengthKey)
     val intCmd = icmAsCmdSrc.get
-    dontTouch(intCmd)
 
     // arbiter is choosing this one
     when(intCmd.fire && intCmd.bits.inst.xd) {
@@ -191,7 +185,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
       coreCmdQueue.io.deq <> core.io_declaration.req
       coreCmdQueue.io.enq.ready
     } else {
-      core.io_declaration.req.valid := cmd.valid
+      core.io_declaration.req.valid := cmd.valid && coreSelect === core.getCoreID.U
       core.io_declaration.req.bits := cmd.bits
       core.io_declaration.req.ready
     }

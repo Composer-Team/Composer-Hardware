@@ -3,6 +3,8 @@ package composer.common
 import chisel3._
 import chisel3.util._
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
+import composer.RoccHelpers.ComposerConsts
+import freechips.rocketchip.tile.RoCCCommand
 
 sealed abstract class AbstractComposerCommand extends Bundle with hasAccessibleUserSubRegions {
 
@@ -42,6 +44,8 @@ class ComposerCommand extends AbstractComposerCommand {
   private[composer] val __core_id = UInt(CoreIDLengthKey.W)
   private[composer] val __system_id = UInt(SystemIDLengthKey.W)
 
+  override def sortedElements: Seq[(String, Data)] = elements.toSeq.sortBy(_._1)
+
   def getCoreID: UInt = __core_id
 
   def getSystemID: UInt = __system_id
@@ -68,9 +72,12 @@ object ComposerCommand {
 //noinspection ScalaUnusedSymbol
 class ComposerRoccCommand() extends AbstractComposerCommand {
   override val reservedNames = Seq()
+
+  override def sortedElements: Seq[(String, Data)] = elements.toSeq
   // DO NOT CHANGE OPERAND ORDERING
   val inst = new Bundle with hasAccessibleUserSubRegions {
     override val reservedNames: Seq[String] = Seq.empty
+    override def sortedElements: Seq[(String, Data)] = elements.toSeq
     val rd = UInt(5.W)
     val core_id = UInt(CoreIDLengthKey.W)
     val xd = Bool()
@@ -108,5 +115,19 @@ class ComposerRoccCommand() extends AbstractComposerCommand {
 
 object ComposerRoccCommand {
   val packLengthBytes = 160 / 8
+  def fromRoccCommand(gen: RoCCCommand): ComposerRoccCommand = {
+    val wr = Wire(new ComposerRoccCommand)
+    wr.inst.xd := gen.inst.xd
+    wr.inst.funct := gen.inst.funct.tail(SystemIDLengthKey)
+    wr.inst.system_id := gen.inst.funct.head(SystemIDLengthKey)
+    wr.inst.core_id := Cat(gen.inst.rs1, gen.inst.rs2)
+    wr.inst.opcode := gen.inst.opcode
+    wr.inst.xs1 := gen.inst.xs1
+    wr.inst.xs2 := gen.inst.xs2
+    wr.payload1 := gen.rs1
+    wr.payload2 := gen.rs2
+    wr.inst.rd := gen.inst.rd
+    wr
+  }
 }
 
