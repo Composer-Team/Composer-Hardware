@@ -18,14 +18,16 @@ class TLClientModule(tlclient: TLClientNode) extends Module {
   val state = RegInit(s_canEmit)
 
   tl.a.valid := io.valid
-  tl.a.bits := tledge.Put(
-    fromSource = 0.U,
-    toAddress = io.bits.addr,
-    lgSize = log2Up(tlbundle.params.dataBits / 8).U,
-    data = io.bits.dat
-  )._2
+  tl.a.bits := tledge
+    .Put(
+      fromSource = 0.U,
+      toAddress = io.bits.addr,
+      lgSize = log2Up(tlbundle.params.dataBits / 8).U,
+      data = io.bits.dat
+    )
+    ._2
 
-  when (tl.d.fire) {
+  when(tl.d.fire) {
     state := s_canEmit
   }
 

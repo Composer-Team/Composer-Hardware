@@ -48,11 +48,16 @@ object ConstraintGeneration {
   def writeConstraints()(implicit p: Parameters): Unit = {
     p(PlatformTypeKey) match {
       case PlatformType.FPGA =>
-        if (!canDistributeOverSLRs()) return
 
         val path = Path(ComposerBuild.composerGenDir)
+        val outPath = path / "user_constraints.xdc"
+        if (!canDistributeOverSLRs()) {
+          os.write.over(outPath, "")
+          return
+        }
+
         os.makeDir.all(path)
-        val f = new FileWriter((path / "user_constraints.xdc").toString())
+        val f = new FileWriter(outPath.toString())
 
         val slrs = p(PlatformSLRs).get
         val id2Name = if (p(IsAWS)) {

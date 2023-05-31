@@ -109,12 +109,13 @@ case class CScratchpadParams(name: String,
                              dataWidthBits: Number,
                              nDatas: Number,
                              latency: Number = 2,
+                             nPorts: Int = 2,
                              specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked)
   extends CChannelParams {
   override val nChannels: Int = 1
 
   private[composer] def make(implicit p: Parameters): CScratchpad = {
-    new CScratchpad(supportWriteback, None, dataWidthBits, nDatas, latency, specialization)
+    new CScratchpad(supportWriteback, None, dataWidthBits, nDatas, latency, nPorts, specialization)
   }
 }
 

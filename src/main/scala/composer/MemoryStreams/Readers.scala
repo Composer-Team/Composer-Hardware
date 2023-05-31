@@ -111,8 +111,8 @@ class CReader(dataBytes: Int,
           Module(new CFPGAMemory(prefetch_blatency - 2, beatBytes * 8, prefetchRows, debugName = debugName.getOrElse("") + "_prefetchBuffer"))
       }
     }
-    prefetch_buffers.io.CE1 := clock
-    prefetch_buffers.io.CE2 := clock
+    prefetch_buffers.io.CE1 := clock.asBool
+    prefetch_buffers.io.CE2 := clock.asBool
     // USING PORT1 AS DEDICATED READ
     // USING PORT2 AS DEDICATED WRITE
     prefetch_buffers.io.A1 := DontCare

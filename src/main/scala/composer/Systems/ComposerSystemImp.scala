@@ -6,7 +6,7 @@ import chisel3._
 import composer.ComposerParams._
 import composer.Generation.LazyModuleImpWithSLRs
 import composer.MemoryStreams.ChannelTransactionBundle
-import composer._
+import composer.{common, _}
 import composer.RoccHelpers._
 import composer.TLManagement._
 import composer.common._
@@ -87,7 +87,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     val resp_queue = Module(new Queue[ComposerRoccResponse](new ComposerRoccResponse(), entries = 2))
     resp_queue.io.enq.bits.system_id := outer.system_id.U
     resp_queue.io.enq.bits.core_id := c.composerConstructor.composerCoreWrapper.core_id.U
-    resp_queue.io.enq.bits.rd.get := lastRecievedRd
+    resp_queue.io.enq.bits.rd := lastRecievedRd
     resp_queue.io.enq.bits.getDataField := c.io_declaration.resp.bits.getDataField
     resp_queue.io.enq.valid := c.io_declaration.resp.valid
     c.io_declaration.resp.ready := resp_queue.io.enq.ready
@@ -97,7 +97,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   respArbiter.io.in <> coreResps
   val resp = Wire(Decoupled(new ComposerRoccResponse()))
   resp.valid := respArbiter.io.out.valid
-  resp.bits.rd.get := respArbiter.io.out.bits.rd.get
+  resp.bits.rd := respArbiter.io.out.bits.rd
   resp.bits.core_id := respArbiter.io.chosen // .io.out.bits.core_id
   resp.bits.getDataField := respArbiter.io.out.bits.getDataField
   resp.bits.system_id := outer.system_id.U
@@ -106,11 +106,12 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   val respQ = Queue(resp)
 
   val internalRespDispatchModule = if (outer.canBeIntaCoreCommandEndpoint) {
-    val wire = Wire(new ComposerInternallyRoutedRoccResponse())
+    val wire = Wire(new ComposerRoccResponse())
     wire.getDataField := respQ.bits.getDataField
 //    wire.rd := respQ.bits.rd
     wire.system_id := internalReturnDestinations.get(respQ.bits.core_id).sys
     wire.core_id := internalReturnDestinations.get(respQ.bits.core_id).core
+    wire.rd := 0.U
 
     val respClient = outer.outgoingInternalResponseClient.get
     val internalRespDispatcher = ModuleWithSLR(new TLClientModule(respClient))
@@ -162,21 +163,21 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     throw new Exception("System unreachable!")
   }
 
-  if (outer.systemParams.canIssueCoreCommandsTo.nonEmpty) {
-    val managerNode = outer.incomingInternalResponseManager.get
+  outer.systemParams.canIssueCoreCommandsTo.foreach { target =>
+    val manager = outer.incomingInternalResponseHandlers(target)
+    val managerNode = manager._1
     val (mBundle, mEdge) = managerNode.in(0)
     val responseManager = ModuleWithSLR(new TLManagerModule(mBundle, mEdge))
-    responseManager.tl <> outer.incomingInternalResponseManager.get.in(0)._1
-    val response = ComposerInternallyRoutedRoccResponse(responseManager.io.bits)
+    responseManager.tl <> managerNode.in(0)._1
+    val response = hasRoccResponseFields[ComposerRoccResponse](new ComposerRoccResponse, responseManager.io.bits)
 
     cores.zipWithIndex.foreach { case (core, core_idx) =>
-      core.composer_response_io_.get.valid := responseManager.io.valid && response.core_id === core_idx.U
-      core.composer_response_io_.get.bits := response
+      core.composer_response_ios_(target).valid := responseManager.io.valid && response.core_id === core_idx.U
+      core.composer_response_ios_(target).bits := response
     }
 
-    responseManager.io.ready := VecInit(cores.map(_.composer_response_io_.get.ready))(response.core_id)
+    responseManager.io.ready := VecInit(cores.map(_.composer_response_ios_(target).ready))(response.core_id)
   }
-
   val core_readys = cores.map { core =>
     if (p(CoreCommandLatency) > 0) {
       val coreCmdQueue = Module(new Queue[ComposerRoccCommand](new ComposerRoccCommand, 2))

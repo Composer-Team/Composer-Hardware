@@ -6,32 +6,64 @@ import chisel3.util._
 import composer._
 import composer.Generation._
 import composer.MemoryStreams.Loaders.CScratchpadPackedSubwordLoader
-import composer.common.{CLog2Up, ShiftReg}
+import composer.common.ShiftReg
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 
 import scala.annotation.tailrec
 
-class CScratchpadAccessPort(scReqBits: Int, dataWidthBits: Int) extends Bundle {
+class CScratchpadDualAccessPort(val scReqBits: Int, val dataWidthBits: Int) extends Bundle {
+  val port1 = new CScratchpadAccessPort(scReqBits, dataWidthBits)
+  val port2 = new CScratchpadAccessPort(scReqBits, dataWidthBits)
+  def ports = Seq(port1, port2)
+}
+
+object CScratchpadDualAccessPort {
+  def apply(port1: CScratchpadAccessPort, port2: CScratchpadAccessPort): CScratchpadDualAccessPort = {
+    val w = Wire(new CScratchpadDualAccessPort(port1.scReqBits, port1.dataWidthBits))
+    w.port1 <> port1
+    w.port2 <> port2
+    w
+  }
+}
+
+class CScratchpadAccessPort(val scReqBits: Int, val dataWidthBits: Int) extends Bundle {
   val req = Flipped(Decoupled(new Bundle() {
     val addr = UInt(scReqBits.W)
     val data = UInt(dataWidthBits.W)
     val write_enable = Bool()
   }))
   val res = ValidIO(UInt(dataWidthBits.W))
+
+  def write(toAddr: UInt, withData: UInt): Bool = {
+    this.req.bits.addr := toAddr
+    this.req.bits.data := withData
+    this.req.bits.write_enable := true.B
+    this.req.valid := true.B
+    this.req.fire
+  }
+
+  def read(toAddr: UInt): Bool = {
+    this.req.bits.addr := toAddr
+    this.req.bits.data := DontCare
+    this.req.bits.write_enable := false.B
+    this.req.valid := true.B
+    this.req.fire
+  }
+
+  def read(toAddr: UInt, enable: Bool): Bool = {
+    when (enable) {
+      this.read(toAddr)
+    }
+    this.req.fire
+  }
 }
 
 class MemWritePort(addrBits: Int, dataBits: Int) extends DecoupledIO(new Bundle() {
   val data = UInt(dataBits.W)
   val addr = UInt(addrBits.W)
 })
-
-class CScratchpadAccessBundle(scReqBits: Int, dataWidthBits: Int) extends Bundle {
-  val port1 = new CScratchpadAccessPort(scReqBits, dataWidthBits)
-  val port2 = new CScratchpadAccessPort(scReqBits, dataWidthBits)
-
-}
 
 class CScratchpadInitReqIO(mem_out: Option[TLBundle], nDatas: Int, memLenBits: Int) extends Bundle {
   val progress = Output(UInt((log2Up(nDatas) + 1).W))
@@ -55,6 +87,7 @@ class CScratchpad(supportWriteback: Boolean,
                   dataWidthBits: Number,
                   nDatas: Number,
                   latency: Number,
+                  nPorts: Int,
                   specialization: CScratchpadSpecialization)(implicit p: Parameters) extends LazyModule {
   require(dataWidthBits.intValue() > 0)
   require(nDatas.intValue() > 0)
@@ -77,7 +110,7 @@ class CScratchpad(supportWriteback: Boolean,
       channelBytes = TLChannelBeatBytes(channelWidthBytes)))))
   } else None
 
-  lazy val module = new CScratchpadImp(supportWriteback, asMemorySlave = asMemorySlave.isDefined, dataWidthBits.intValue(), nDatas.intValue(), latency.intValue(), specialization, this)
+  lazy val module = new CScratchpadImp(supportWriteback, asMemorySlave = asMemorySlave.isDefined, dataWidthBits.intValue(), nDatas.intValue(), latency.intValue(), nPorts, specialization, this)
 
   dataWidthBits match {
     case a: BaseTunable if !a.isIdentity =>
@@ -91,6 +124,7 @@ class CScratchpadImp(supportWriteback: Boolean,
                      dataWidthBits: Int,
                      nDatas: Int,
                      latency: Int,
+                     nPorts: Int,
                      specialization: CScratchpadSpecialization,
                      outer: CScratchpad) extends LazyModuleImp(outer) {
   private val scReqBits = log2Up(nDatas)
@@ -106,32 +140,55 @@ class CScratchpadImp(supportWriteback: Boolean,
     else nestPipeline(RegNext(a), depth - 1)
   }
 
-  private val memory = CMemory(latency, dataWidth = dataWidthBits, nRows = nDatas, debugName = Some(outer.name))
+  val nDuplicates = (nPorts.toFloat / 2).ceil.toInt
 
-  memory.CE1 := clock.asBool
-  memory.CE2 := clock.asBool
+  private val memory = Seq.fill(nDuplicates)(CMemory(latency, dataWidth = dataWidthBits, nRows = nDatas, debugName = Some(outer.name)))
 
-  val access = IO(new CScratchpadAccessBundle(scReqBits, dataWidthBits))
+  val dual_port_IOs = Seq.fill(nDuplicates)(IO(new CScratchpadDualAccessPort(scReqBits, dataWidthBits)))
+  def access: Seq[CScratchpadAccessPort] = Seq.tabulate(nPorts)(idx => if (idx % 2 == 0) dual_port_IOs(idx / 2).port1 else dual_port_IOs(idx / 2).port2)
 
   val memoryLengthBits = log2Up(nDatas * outer.channelWidthBytes) + 1
 
   val req = IO(new CScratchpadInitReqIO(if (outer.mem_master_node.isDefined) Some(outer.mem_master_node.get.out(0)._1) else None, nDatas, memoryLengthBits))
-  memory.A1 := access.port1.req.bits.addr
-  memory.CSB1 := access.port1.req.valid
-  memory.OEB1 := !access.port1.req.bits.write_enable
-  memory.WEB1 := access.port1.req.bits.write_enable
-  memory.I1 := access.port1.req.bits.data
-  access.port1.res.valid := ShiftReg(access.port1.req.valid && !access.port1.req.bits.write_enable, latency)
-  access.port1.res.bits := memory.O1
 
-  memory.A2 := access.port2.req.bits.addr
-  memory.CSB2 := access.port2.req.valid
-  memory.OEB2 := !access.port2.req.bits.write_enable
-  memory.WEB2 := access.port2.req.bits.write_enable
-  memory.I2 := access.port2.req.bits.data
-  val output_enable = ShiftReg(access.port2.req.valid && !access.port2.req.bits.write_enable, latency)
-  access.port2.res.valid := output_enable
-  access.port2.res.bits := memory.O2
+  access.grouped(2) zip memory foreach{ case (access_group, mem) =>
+    val port1 = access_group(0)
+    mem.CE1 := clock.asBool
+    mem.CE2 := clock.asBool
+    mem.A1 := port1.req.bits.addr
+    mem.CSB1 := port1.req.valid
+    mem.OEB1 := !port1.req.bits.write_enable
+    mem.WEB1 := port1.req.bits.write_enable
+    mem.I1 := port1.req.bits.data
+    port1.res.valid := ShiftReg(port1.req.valid && !port1.req.bits.write_enable, latency)
+    port1.res.bits := mem.O1
+
+    if (access_group.nonEmpty) {
+      val port2 = access_group(1)
+      mem.A2 := port2.req.bits.addr
+      mem.CSB2 := port2.req.valid
+      mem.OEB2 := !port2.req.bits.write_enable
+      mem.WEB2 := port2.req.bits.write_enable
+      mem.I2 := port2.req.bits.data
+      port2.res.valid := ShiftReg(port2.req.valid && !port2.req.bits.write_enable, latency)
+      port2.res.bits := mem.O2
+    } else {
+      mem.A2 := DontCare
+      mem.CSB2 := false.B
+      mem.OEB2 := DontCare
+      mem.WEB2 := DontCare
+      mem.I2 := DontCare
+
+    }
+  }
+
+  if (nPorts > 2) {
+    access foreach { acc =>
+      when (acc.req.fire) {
+        assert(!acc.req.bits.write_enable, "currently don't support writeback into >2 ported memories")
+      }
+    }
+  }
 
   if (outer.mem_master_node.isDefined) {
 
@@ -377,12 +434,15 @@ class CScratchpadImp(supportWriteback: Boolean,
     }
 
     when(loader.io.sp_write_out.valid) {
-      memory.CSB2 := true.B
-      memory.WEB2 := true.B
-      memory.OEB2 := false.B
-      memory.I2 := loader.io.sp_write_out.bits.dat
-      memory.A2 := loader.io.sp_write_out.bits.idx
-      access.port2.req.ready := false.B
+      memory.foreach { mem =>
+        mem.CSB2 := true.B
+        mem.WEB2 := true.B
+        mem.OEB2 := false.B
+        mem.I2 := loader.io.sp_write_out.bits.dat
+        mem.A2 := loader.io.sp_write_out.bits.idx
+
+      }
+      access.foreach { _.req.ready := false.B }
       perSourceProgress(loaderSource).progress := loader.io.sp_write_out.bits.idx +& 1.U
     }
 
@@ -411,10 +471,10 @@ class CScratchpadImp(supportWriteback: Boolean,
       val channel = writer.io.channel
       val writebackIdx, written = Reg(UInt(log2Up(nDatas).W))
 
-      channel.data.valid := output_enable && wb_state === wb_read
-      channel.data.bits := memory.O2
+      channel.data.valid := ShiftReg(memory(0).OEB2, latency) && wb_state === wb_read
+      channel.data.bits := memory(0).O2
       when (wb_state =/= wb_idle) {
-        Seq(access.port1, access.port2) foreach (port => port.req.ready := false.B )
+        access foreach (port => port.req.ready := false.B )
       }
 
       switch(wb_state) {
@@ -427,10 +487,10 @@ class CScratchpadImp(supportWriteback: Boolean,
         }
         is(wb_read) {
           req.request.ready := false.B
-          memory.CSB2 := true.B
-          memory.OEB2 := true.B
-          memory.WEB2 := false.B
-          memory.A2 := writebackIdx
+          memory(0).CSB2 := true.B
+          memory(0).OEB2 := true.B
+          memory(0).WEB2 := false.B
+          memory(0).A2 := writebackIdx
 
           when(channel.data.fire) {
             written := written + 1.U
@@ -474,15 +534,18 @@ class CScratchpadImp(supportWriteback: Boolean,
     in.d <> responseQ.map { source => edge.AccessAck(source, log2Up(in.params.dataBits / 8).U) }
 
     when(in.a.valid) {
-      access.port2.req.ready := false.B
-      memory.WEB2 := true.B
-      memory.OEB2 := false.B
-      memory.CSB2 := true.B
-      // trim off the bottom bits that need to be removed due to alignment.
+      access.foreach { _.req.ready := false.B }
       val off = log2Up(dataWidthBits / 8)
       val bot_addr = in.a.bits.address(log2Up(nDatas) - 1 + off, off)
-      memory.A2 := bot_addr
-      memory.I2 := in.a.bits.data
+
+      memory foreach { mem =>
+        mem.WEB2 := true.B
+        mem.OEB2 := false.B
+        mem.CSB2 := true.B
+        // trim off the bottom bits that need to be removed due to alignment.
+        mem.A2 := bot_addr
+        mem.I2 := in.a.bits.data
+      }
     }
   }
 }

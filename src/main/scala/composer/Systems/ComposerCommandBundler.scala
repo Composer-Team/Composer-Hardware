@@ -18,6 +18,7 @@ class ComposerCommandBundler[T1 <: ComposerCommand, T2 <: ComposerUserResponse](
   io.req.bits.__core_id := composerCoreWrapper.core_id.U
 
   cio.resp.valid := io.resp.valid
+  cio.resp.bits.rd := 0.U
   io.resp.ready := cio.resp.ready
   cio.resp.bits.getDataField := io.resp.bits.getDataField
 
@@ -49,9 +50,18 @@ class ComposerCommandBundler[T1 <: ComposerCommand, T2 <: ComposerUserResponse](
       val range = sr._2
       val field = io.req.bits.elements(sr._1)
       val lowPayload = range._2 / 128
-      field := (if (crossesBoundary(range._1, range._2)) {
-        Cat(reqPayload(lowPayload + 1)(range._1 % 128, 0), reqPayload(lowPayload)(127, range._2 % 128))
-      } else reqPayload(lowPayload)(range._1 % 128, range._2 % 128))
+      field := {
+        val flat = if (crossesBoundary(range._1, range._2)) {
+          Cat(reqPayload(lowPayload + 1)(range._1 % 128, 0), reqPayload(lowPayload)(127, range._2 % 128))
+        } else reqPayload(lowPayload)(range._1 % 128, range._2 % 128)
+        field match {
+          case fieldS: Vec[Data] =>
+            val divs = fieldS.length
+            val divSize = flat.getWidth / divs
+            VecInit(Seq.tabulate(divs){idx => flat((idx + 1) * divSize - 1, idx * divSize)})
+          case _ => flat
+        }
+      }
     }
     when(io.req.fire) {
       reqCounter := 0.U

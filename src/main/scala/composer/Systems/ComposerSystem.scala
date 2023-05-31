@@ -92,11 +92,11 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int,
 
   // ROUTE OUTGOING COMMANDS THROUGH HERE
   val canIssueCoreCommands = systemParams.canIssueCoreCommandsTo.nonEmpty
-  val outgoingCommandXbar = if (canIssueCoreCommands) {
+  val outgoingCmdXBars = Map.from(systemParams.canIssueCoreCommandsTo.map { target =>
     val xbar = LazyModuleWithSLR(new TLXbar())
-    cores.foreach(xbar.node := TLBuffer() := _._2.externalCoreCommNodes.get)
-    Some(xbar.node)
-  } else None
+    cores.map(_._2.externalCoreCommNodes(target)).foreach{ core_target_source => xbar.node := TLBuffer() := core_target_source}
+    (target, xbar.node)
+  })
   // cores have their own independent command client nodes
 
   // SEND OUT COMMAND RESPONSES FROM A SYSTEM HERE
@@ -132,18 +132,18 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int,
     (Some(manager), Some(xbar.node))
   } else (None, None)
 
-  val (incomingInternalResponseManager, incomingInternalResponseXBar) = if (systemParams.canIssueCoreCommandsTo.nonEmpty) {
+  val incomingInternalResponseHandlers = Map.from (systemParams.canIssueCoreCommandsTo.map { target =>
     val manager = TLManagerNode(
       Seq(TLSlavePortParameters.v1(
         managers = Seq(TLSlaveParameters.v1(
           Seq(ComposerConsts.getInternalCmdRoutingAddressSet(system_id)),
-          supportsPutFull = TransferSizes(ComposerInternallyRoutedRoccResponse.getWidthBytes)
-        )), beatBytes = ComposerInternallyRoutedRoccResponse.getWidthBytes
+          supportsPutFull = TransferSizes(ComposerRoccResponse.getPow2Bytes)
+        )), beatBytes = ComposerRoccResponse.getPow2Bytes
       )))
     val xbar = LazyModuleWithSLR(new TLXbar())
     manager := xbar.node
-    (Some(manager), Some(xbar.node))
-  } else (None, None)
+    (target, (manager,xbar.node))
+  })
 
   lazy val module = new ComposerSystemImp(this)
 }

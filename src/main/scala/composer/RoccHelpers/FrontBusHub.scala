@@ -5,6 +5,7 @@ import chisel3.util._
 import freechips.rocketchip.amba.axi4._
 import chipsalliance.rocketchip.config._
 import composer._
+import composer.common.ComposerRoccResponse
 import freechips.rocketchip.amba.ahb.{AHBMasterIdentityNode, AHBSlaveIdentityNode, AHBToTL}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tile.{RoCCCommand, RoCCResponse, TileVisibilityNodeKey}
@@ -37,7 +38,7 @@ class FrontBusHub(implicit p: Parameters) extends LazyModule {
 class AXILHubModule(outer: FrontBusHub)(implicit p: Parameters) extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
     val rocc_in = Decoupled(new RoCCCommand)
-    val rocc_out = Flipped(Decoupled(new RoCCResponse))
+    val rocc_out = Flipped(Decoupled(new ComposerRoccResponse))
   })
   val axil_widget = outer.widget.module
 

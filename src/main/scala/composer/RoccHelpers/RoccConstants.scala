@@ -1,5 +1,6 @@
 package composer.RoccHelpers
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3.UInt
 import chisel3.util.log2Up
 import composer.common.ComposerRoccCommand
@@ -13,12 +14,12 @@ object ComposerOpcode extends Enumeration {
 }
 
 object ComposerConsts {
-  val InternalCommandWidth = log2Up(ComposerRoccCommand.packLengthBytes)
+  def InternalCommandWidth(implicit p: Parameters): Int = log2Up(ComposerRoccCommand.packLengthBytes)
 
-  def getInternalCmdRoutingAddressSet(systemID: Int): AddressSet =
+  def getInternalCmdRoutingAddressSet(systemID: Int)(implicit p: Parameters): AddressSet =
     AddressSet(systemID << InternalCommandWidth, (1 << InternalCommandWidth) - 1)
 
-  def getInternalCmdRoutingAddress(systemID: UInt): UInt =
+  def getInternalCmdRoutingAddress(systemID: UInt)(implicit p: Parameters): UInt =
     (systemID << InternalCommandWidth).asUInt
 
 }

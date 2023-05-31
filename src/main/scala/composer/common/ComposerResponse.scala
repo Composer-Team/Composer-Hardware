@@ -1,135 +1,83 @@
 package composer.common
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.internal.sourceinfo.SourceInfoTransform
 import chisel3.util._
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
+import freechips.rocketchip.tile.XLen
 
 import scala.language.experimental.macros
 
-
-//class ComposerResponse extends Bundle with hasRoccResponseFields {
-//  val __system_id = UInt(SystemIDLengthKey.W)
-//  val __core_id = UInt(CoreIDLengthKey.W)
-//  val __rd = UInt(5.W)
-//
-//  override def system_id: UInt = __system_id
-//
-//  override def core_id: UInt = __core_id
-//
-//  override def rd: UInt = __rd
-//
-//  val reservedNames = Seq("__system_id", "__core_id", "__rd")
-//
-//}
-
 object hasRoccResponseFields {
-  def apply[T <: hasRoccResponseFields with Bundle](gen: T, in: UInt): T = {
+  /** 96                 64                    0
+   * | --C_ID, S_ID, RD |------ data ---------|
+   */
+  def apply[T <: hasRoccResponseFields with Bundle](gen: T, in: UInt)(implicit p: Parameters): T = {
     val wire = Wire(gen)
-    // unpack from @pack
     val fsrs = gen.fieldSubranges
     fsrs.foreach { case (name: String, (high: Int, low: Int)) =>
       wire.elements(name) := in(high, low)
     }
-    wire.rd match {
-      case Some(real_rd) =>
-        real_rd := in(68, 64)
-      case None => ;
-    }
-    wire.core_id := in(63 - SystemIDLengthKey, 64 - SystemIDLengthKey - CoreIDLengthKey)
-    wire.system_id := in(63, 64 - SystemIDLengthKey)
+    val xlen = p(XLen)
+    wire.rd := in(xlen+5 - 1, xlen)
+    wire.system_id := in(xlen - 1 + 5 + SystemIDLengthKey, xlen + 5)
+    wire.core_id := in(xlen - 1 + 5 + SystemIDLengthKey + CoreIDLengthKey, xlen + 5 + SystemIDLengthKey)
     wire
   }
 }
 
 trait hasDataField {
-  val nDataBits = 64 - SystemIDLengthKey - CoreIDLengthKey
+  def nDataBits(implicit p: Parameters): Int = p(XLen)
   private[composer] def getDataField: UInt
 }
 
-class ComposerUserResponse extends Bundle with hasAccessibleUserSubRegions with hasDataField {
+trait hasRDField {
+  val rd: UInt
+}
+
+class ComposerUserResponse(implicit p: Parameters) extends Bundle with hasAccessibleUserSubRegions with hasDataField with hasRDField {
   override def sortedElements: Seq[(String, Data)] = elements.toSeq.sortBy(_._1)
-  override val reservedNames: Seq[String] = Seq()
+  override val reservedNames: Seq[String] = Seq("rd")
+  val rd = UInt(5.W)
   private[composer] def getDataField: UInt = {
     val datacat = Cat(realElements.map(_._2.asUInt).reverse)
-    require(datacat.getWidth <= 50, "Defined response is too large to fit in return payload")
-    if (datacat.getWidth < 50) {
-      Cat(0.U((50-datacat.getWidth).W), datacat)
+    require(datacat.getWidth <= nDataBits, "Defined response is too large to fit in return payload.\n" +
+      "Consider redefining the XLen parameter if this behavior is necessary.")
+    if (datacat.getWidth < nDataBits) {
+      Cat(0.U((nDataBits-datacat.getWidth).W), datacat)
     } else datacat
   }
 }
 
 trait hasRoccResponseFields extends hasAccessibleUserSubRegions with hasDataField {
-  def system_id: UInt
+  val system_id: UInt
 
-  def core_id: UInt
+  val core_id: UInt
 
-  def rd: Option[UInt]
+  val rd: UInt
 
 
-  private[composer] def packRocc(): UInt = {
-    require(getDataField.getWidth == 50)
-    rd match {
-      case Some(real_rd) =>
-        val rd_ext = Cat(0.U((32 - real_rd.getWidth).W), real_rd)
-        Cat(rd_ext, system_id, core_id, getDataField)
-      case None =>
-        Cat(system_id, core_id, getDataField)
-    }
+  private[composer] def packRocc()(implicit p: Parameters): UInt = {
+    require(getDataField.getWidth == nDataBits)
+    Cat(core_id, system_id, rd, getDataField)
   }
 }
 
-class ComposerRoccUserResponse extends ComposerUserResponse {
-  override val reservedNames: Seq[String] = Seq()
-  /**
-   * Typically 50 bits
-   */
-  val data = UInt((64 - SystemIDLengthKey - CoreIDLengthKey).W)
+class ComposerRoccUserResponse(implicit p: Parameters) extends ComposerUserResponse {
+  override val reservedNames: Seq[String] = Seq("rd")
+  val data = UInt(p(XLen).W)
 
   override def getDataField: UInt = data
 }
 
-class ComposerRoccResponse() extends ComposerRoccUserResponse with hasRoccResponseFields {
+class ComposerRoccResponse(implicit p: Parameters) extends ComposerRoccUserResponse with hasRoccResponseFields {
   override val reservedNames: Seq[String] = Seq("system_id", "core_id", "rd")
-  val system_id = UInt(SystemIDLengthKey.W)
-  val core_id = UInt(CoreIDLengthKey.W)
-  val rd = Some(UInt(5.W))
-}
-
-class ComposerInternallyRoutedRoccResponse() extends ComposerRoccUserResponse with hasRoccResponseFields {
-  override val rd: Option[UInt] = None
-  override val reservedNames: Seq[String] = Seq("system_id", "core_id")
   val system_id = UInt(SystemIDLengthKey.W)
   val core_id = UInt(CoreIDLengthKey.W)
 }
 
 object ComposerRoccResponse {
-  def apply(a: UInt): ComposerRoccResponse = {
-    require(a.getWidth == 32 * 3)
-    // unpack from @pack
-    val wire = Wire(new ComposerRoccResponse())
-    wire.getDataField := a(63 - SystemIDLengthKey - CoreIDLengthKey, 0)
-    wire.rd.get := a(68, 64)
-    wire.core_id := a(63 - SystemIDLengthKey, 64 - SystemIDLengthKey - CoreIDLengthKey)
-    wire.system_id := a(63, 64 - SystemIDLengthKey)
-    wire
-  }
-
-  val getWidthBits: Int = 32 * 3
-  val getWidthBytes: Int = getWidthBits / 8
-}
-
-object ComposerInternallyRoutedRoccResponse {
-  val getWidthBits: Int = 32 * 2
-  val getWidthBytes: Int = getWidthBits / 8
-
-  def apply(a: UInt): ComposerInternallyRoutedRoccResponse = {
-    // unpack from @pack
-    val wire = Wire(new ComposerInternallyRoutedRoccResponse())
-    wire.getDataField := a(63 - SystemIDLengthKey - CoreIDLengthKey, 0)
-    wire.core_id := a(63 - SystemIDLengthKey, 64 - SystemIDLengthKey - CoreIDLengthKey)
-    wire.system_id := a(63, 64 - SystemIDLengthKey)
-    wire
-  }
-
+  def getWidthBits(implicit p: Parameters): Int = p(XLen) + 32
+  def getWidthBytes(implicit p: Parameters): Int = getWidthBits / 8
+  def getPow2Bytes(implicit p: Parameters): Int = 1 << log2Up(getWidthBytes)
 }

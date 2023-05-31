@@ -1,11 +1,10 @@
 package composer.RoccHelpers
 
 import chipsalliance.rocketchip.config._
-
-
 import chisel3.util._
 import chisel3._
 import composer.FrontBusBeatBytes
+import composer.common.{ComposerRoccResponse, hasRoccResponseFields}
 import freechips.rocketchip.tile.RoCCResponse
 
 class RoccToAXIL(implicit val p: Parameters) extends Module {
@@ -14,7 +13,7 @@ class RoccToAXIL(implicit val p: Parameters) extends Module {
 
   val io = IO(new Bundle {
     val out = Decoupled(UInt(bus_bits.W))
-    val rocc = Flipped(Decoupled(new RoCCResponse))
+    val rocc = Flipped(Decoupled(new ComposerRoccResponse))
   })
 
   val nBeats = 3 // (io.rocc.bits.getWidth.toFloat / bus_bits).ceil.toInt
@@ -25,10 +24,10 @@ class RoccToAXIL(implicit val p: Parameters) extends Module {
     else Cat(0.U((l - a.getWidth).W), a)
   }
 
-  val buffer = Reg(UInt(io.rocc.bits.data.getWidth.W))
+  val buffer = Reg(new ComposerRoccResponse())
 
   val rd = Reg(UInt(5.W))
-  val wholePayload = padTo(Cat(padTo(rd, 32), buffer(31, 0), buffer(63, 32)), bus_bits * nBeats)
+  val wholePayload = padTo(buffer.packRocc(), bus_bits * nBeats)
   val beats = VecInit((0 until nBeats) map { i =>
     wholePayload((i + 1) * bus_bits - 1, i * bus_bits)
   })
@@ -42,8 +41,7 @@ class RoccToAXIL(implicit val p: Parameters) extends Module {
   switch(state) {
     is(sIdle) {
       when(io.rocc.fire) {
-        buffer := io.rocc.bits.data
-        rd := io.rocc.bits.rd
+        buffer := io.rocc.bits
         state := sSend
         beatCounter := 0.U
       }

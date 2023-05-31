@@ -36,7 +36,7 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
     sys.cores.foreach { case (_, core) =>
       core.intraCoreMemMasters.foreach { case (pparams, clients, _) =>
         val assoc_endpoints = system_tups.filter(_._3.name == pparams.toSystem)(0)._1.cores.map(_._2.intraCoreMemSlaveNodes.filter(_._1 == pparams.toMemoryPort)(0)).map(_._2)
-        require(clients.length == assoc_endpoints.length, "sanity - if this doesn't work, somethign bad has happened")
+        require(clients.flatten.length == assoc_endpoints.flatten.length, "sanity - if this doesn't work, somethign bad has happened")
         clients.flatten zip assoc_endpoints.flatten foreach { case (c, e) =>
           val buffer = TLBuffer()
           e := buffer
@@ -50,15 +50,15 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
   if (requireInternalCmdRouting) {
     // for each system that can issue commands, connect them to the target systems in the accelerator
     // Seq of tuple of (target name, src xbar)
-    val cmdSourceSystems = system_tups.filter(_._3.canIssueCoreCommandsTo.nonEmpty).flatMap(a => a._3.canIssueCoreCommandsTo.map(b => (b, a)))
-    system_tups.filter(_._1.incomingInternalCommandXbar.isDefined).foreach { sys =>
-      val origins = cmdSourceSystems.filter(_._1 == sys._1.name).map(_._2)
-      makeTLMultilayerXbar(origins.map(_._1.outgoingCommandXbar.get), Seq(sys._1.incomingInternalCommandXbar.get))
-    }
+    system_tups.foreach{ sys =>
+      sys._1.outgoingCmdXBars.foreach { case (target, source_xbar) =>
+        val targetSys = system_tups(name2Id(target))
+        val cmd_endpoint = targetSys._1.incomingInternalCommandXbar.get
+        cmd_endpoint := source_xbar
 
-    cmdSourceSystems.foreach { sys =>
-      val respSources = system_tups.filter(other_sys => sys._2._3.canIssueCoreCommandsTo.contains(other_sys._1.name))
-      makeTLMultilayerXbar(respSources.map(_._1.outgoingInternalResponseXbar.get), Seq(sys._2._1.incomingInternalResponseXBar.get))
+        val resp_source = targetSys._1.outgoingInternalResponseXbar.get
+        sys._1.incomingInternalResponseHandlers(target)._2 := resp_source
+      }
     }
   }
 
@@ -71,7 +71,7 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
 class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
     val cmd = Flipped(Decoupled(new RoCCCommand))
-    val resp = Decoupled(new RoCCResponse)
+    val resp = Decoupled(new ComposerRoccResponse)
   })
 
   val cmd = Queue(io.cmd)
@@ -126,13 +126,10 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
     io.resp.valid := false.B
     io.resp.bits := DontCare
   } else {
-    val respArbiter = Module(new RRArbiter[RoCCResponse](new RoCCResponse, systemSoftwareResps.size))
+    val respArbiter = Module(new RRArbiter[ComposerRoccResponse](new ComposerRoccResponse, systemSoftwareResps.size))
     respArbiter.io.in.zip(systemSoftwareResps).foreach { case (arbio, sysio) =>
       // these commands are being routed back to the sw so they need to be full Rocc
-      arbio.bits.data := sysio.bits.packRocc
-      arbio.bits.rd := sysio.bits.rd.get
-      arbio.valid := sysio.valid
-      sysio.ready := arbio.ready
+      arbio <> sysio
     }
     respArbiter.io.out <> io.resp
   }
@@ -176,7 +173,7 @@ class ComposerAccSystemModule(outer: ComposerAccSystem)(implicit p: Parameters) 
   //noinspection ScalaUnusedSymbol
   val io = IO(new Bundle {
     val cmd = Flipped(Decoupled(new RoCCCommand()))
-    val resp = Decoupled(new RoCCResponse())
+    val resp = Decoupled(new ComposerRoccResponse())
   })
 
   outer.acc.module.io.cmd <> io.cmd

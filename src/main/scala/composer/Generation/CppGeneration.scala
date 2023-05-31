@@ -10,6 +10,7 @@ import composer.Systems.{ComposerAcc, ComposerTop}
 import composer._
 import composer.common.{AbstractComposerCommand, ComposerUserResponse}
 import freechips.rocketchip.subsystem.ExtMem
+import freechips.rocketchip.tile.XLen
 import os.Path
 
 import java.io.FileWriter
@@ -273,6 +274,7 @@ object CppGeneration {
          |#ifndef COMPOSER_ALLOCATOR_GEN
          |#define COMPOSER_ALLOCATOR_GEN
          |#define AXIL_BUS_WIDTH ${p(FrontBusBeatBytes) * 8}
+         |#define XLEN ${p(XLen)}
          |
          |// allocator declarations backends that do not have discrete memory or for simulator
          |$allocator

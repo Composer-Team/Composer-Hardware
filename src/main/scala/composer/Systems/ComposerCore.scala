@@ -6,16 +6,21 @@ import chisel3.util._
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import composer.MemoryStreams._
 import composer.RoccHelpers._
-import composer.TLManagement.{ComposerRespConverter, MultiBeatCommandEmitter, TLClientModule}
-import composer.common._
+import composer.TLManagement.{ComposerIntraCoreIOModule, TLClientModule}
 import composer._
+import composer.common._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 
 class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2) extends Bundle {
-  val req: DecoupledIO[T1] = DecoupledIO(bundleIn.cloneType)
-  val resp: DecoupledIO[T2] = Flipped(DecoupledIO(bundleOut.cloneType))
+  val req: DecoupledIO[T1] = DecoupledIO(bundleIn)
+  val resp: DecoupledIO[T2] = Flipped(DecoupledIO(bundleOut))
+}
+
+class CustomIOWithRouting[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2) extends Bundle {
+  val req: DecoupledIOWithCRouting[T1] = DecoupledIOWithCRouting(bundleIn)
+  val resp: DecoupledIO[T2] = Flipped(DecoupledIO(bundleOut))
 }
 
 class ComposerCoreIO(implicit p: Parameters) extends CustomIO[ComposerRoccCommand, ComposerRoccUserResponse](new ComposerRoccCommand, new ComposerRoccUserResponse)
@@ -27,9 +32,9 @@ class DataChannelIO(dataBytes: Int, vlen: Int = 1) extends Bundle {
 
 
 class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val core_id: Int, val system_id: Int)(implicit p: Parameters) extends LazyModule {
+  lazy val module = composerSystemParams.buildCore(ComposerConstructor(composerSystemParams.coreParams, this), p)
   val coreParams = composerSystemParams.coreParams.copy(core_id = core_id, system_id = system_id)
   val blockBytes = p(CacheBlockBytes)
-
   val CacheNodes = coreParams.memoryChannelParams.filter(_.isInstanceOf[CCachedReadChannelParams]) map (_.asInstanceOf[CCachedReadChannelParams]) map {
     par =>
       val param = par.cacheParams
@@ -45,9 +50,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
         ))))))
 
       rnodes foreach (req_xbar.node := _)
-      cache.mem_reqs :=
-        //        TLBuffer() := TLWidthWidget(blockBytes) :=
-        TLBuffer() := req_xbar.node
+      cache.mem_reqs := TLBuffer() := req_xbar.node
       (par.name, (cache, rnodes))
   }
   val unCachedReaders = coreParams.memoryChannelParams.filter(_.isInstanceOf[CReadChannelParams]).map { para =>
@@ -88,14 +91,13 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
       writers ++
       scratch_mod.map(i => (i._1, List(i._2.mem_master_node).filter(_.isDefined).map(_.get)))
     ).flatMap(_._2)
-
-  val externalCoreCommNodes = if (composerSystemParams.canIssueCoreCommandsTo.nonEmpty) {
-    Some(TLClientNode(Seq(TLMasterPortParameters.v1(clients = Seq(TLMasterParameters.v1(
-      s"${composerSystemParams.name}_core${core_id}_toOtherCores",
+  val externalCoreCommNodes = Map.from(composerSystemParams.canIssueCoreCommandsTo.map { targetSys =>
+    (targetSys, TLClientNode(Seq(TLMasterPortParameters.v1(clients = Seq(TLMasterParameters.v1(
+      s"${composerSystemParams.name}_core${core_id}_to${targetSys}",
       supportsProbe = TransferSizes(1 << log2Up(ComposerRoccCommand.packLengthBytes)),
       supportsPutFull = TransferSizes(1 << log2Up(ComposerRoccCommand.packLengthBytes))
     ))))))
-  } else None
+  })
   val intraCoreMemSlaveNodes = coreParams.memoryChannelParams.filter(_.isInstanceOf[CIntraCoreMemoryPortIn]).map {
     r =>
       val mp = r.asInstanceOf[CIntraCoreMemoryPortIn]
@@ -114,6 +116,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
           dataWidthBits = mp.dataWidthBits,
           nDatas = mp.nDatas,
           latency = mp.latency,
+          nPorts = 2,
           specialization = CScratchpadSpecialization.flatPacked))
         sp.mem_slave_node.get := intraCoreMemXbar
         (intraCoreMemXbar, sp)
@@ -135,7 +138,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
           System.err.println("Could not properly find system and memory port given by outward memory port params.")
           throw a
       }
-      val memMasters = Seq.fill(otherSystemParams.nCores, mp.nChannels)(TLClientNode(Seq(TLMasterPortParameters.v1(
+      val memMasters = Seq.fill(otherSystemParams.nCores, otherSPParams.nChannels)(TLClientNode(Seq(TLMasterPortParameters.v1(
         clients = Seq(TLMasterParameters.v1(
           f"intraCoreMemPortOut_${mp.toSystem}_to_${mp.toMemoryPort}",
           supportsProbe = TransferSizes(otherSPParams.dataWidthBits.intValue() / 8),
@@ -143,38 +146,53 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
         ))))))
       (mp, memMasters, otherSPParams)
   }
-
-
-  lazy val module = composerSystemParams.buildCore(ComposerConstructor(composerSystemParams.coreParams, this), p)
 }
 
-class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Parameters) extends
-  LazyModuleImp(composerConstructor.composerCoreWrapper) {
-
+class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Parameters) extends LazyModuleImp(composerConstructor.composerCoreWrapper) {
   private val outer = composerConstructor.composerCoreWrapper
+  val composer_response_ios_ = Map.from(outer.composerSystemParams.canIssueCoreCommandsTo.map { target =>
+    (target, {
+      val io = IO(Flipped(Decoupled(new ComposerRoccResponse())))
+      io.suggestName(s"ComposerIntraCoreResponsePort_$target")
+      io
+    })
+  })
+  private val composer_command_ios_ = outer.externalCoreCommNodes.map { case (target, node) =>
+    val mod = Module(new TLClientModule(node))
+    node.out(0)._1 <> mod.tl
+    val wire = Wire(Decoupled(new ComposerRoccCommand))
+    wire.ready := mod.io.ready
+    mod.io.valid := wire.valid
+    // NEED TO TELL OTHER CORE HOW TO SEND RESPONSE BACK
+    val returnRoutingPayload = Cat(outer.system_id.U(SystemIDLengthKey.W), getCoreID.U(CoreIDLengthKey.W))
+    mod.io.bits.dat := wire.bits.pack(withRoutingPayload = Some(returnRoutingPayload))
+    val permAddress = getSystemID(target)
+    when(mod.io.fire) {
+      assert(permAddress === wire.bits.getSystemID, "system provided through intra-core comm hardware does not match system used to fetch interface")
+    }
+    mod.io.bits.addr := ComposerConsts.getInternalCmdRoutingAddress(getSystemID(target))
+    (target, wire)
+  }
+  private[composer] val io_declaration = IO(Flipped(new ComposerCoreIO()))
+  private var using_custom = custom_usage.unused
 
   def getCoreID: Int = composerConstructor.composerCoreWrapper.core_id
 
-
-  private def getTLClients(name: String, listList: List[(String, List[TLClientNode])]): List[TLClientNode] = {
-    listList.filter(_._1 == name) match {
-      case first :: rst =>
-        require(rst.isEmpty)
-        first._2
-      case _ =>
-        throw new Exception(s"getReaderModules failed. Tried to fetch a channel set with a name($name) that doesn't exist. Declared names: " +
-          (outer.unCachedReaders.map(_._1) ++ outer.CacheNodes.map(_._1)))
+  def getIntraCoreMemOuts(name: String)(implicit valName: ValName): CCoreChannelMultiAccessBundle[MemWritePort] = {
+    val params = try {
+      outer.intraCoreMemMasters.filter(_._1.name == name)(0)
+    } catch {
+      case e: Exception =>
+        System.err.println("You may be trying to access a intra core mem port by the wrong name. Check your config.")
+        throw e
     }
+
+    implicit val nameHint = Some(valName.name)
+    val q = params._2(0).indices map (getIntraCoreMemOut(name, _))
+    CCoreChannelMultiAccessBundleChannelMajor(q)
   }
 
-  def getIntraCoreMemIn(name: String, idx: Int): CScratchpadAccessBundle = {
-    val params = outer.intraCoreMemSlaveNodes.filter(_._1 == name)
-    if (params.isEmpty) throw new Exception(s"Attempting to access intraCoreMem \"$name\" which we can't find in the config.")
-    val ic_scratchpad = params(0)
-    ic_scratchpad._4(idx).module.access
-  }
-
-  def getIntraCoreMemOut(name: String, idx: Int = 0)(implicit valName: ValName): Vec[MemWritePort] = {
+  def getIntraCoreMemOut(name: String, idx: Int = 0)(implicit valName: ValName): Seq[MemWritePort] = {
     val params = try {
       outer.intraCoreMemMasters.filter(_._1.name == name)(0)
     } catch {
@@ -187,12 +205,13 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       (q.map(_._1), q.map(_._2))
     }
 
-    val intracore_ios = outs.indices.map{
+    val intracore_ios = outs.indices.map {
       core_id =>
         val w = Wire(new MemWritePort(log2Up(params._3.nDatas.intValue()), params._3.dataWidthBits.intValue()))
         w.suggestName(valName.name + "_" + core_id)
         w
     }
+
     intracore_ios.lazyZip(outs).lazyZip(o_edges) foreach { case (io, o, oe) =>
       o.a.bits := oe.Put(
         fromSource = 0.U,
@@ -204,58 +223,35 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       io.ready := o.a.ready
       o.d.ready := true.B
     }
-    VecInit(intracore_ios)
-  }
-  class CCoreChannelMultiAccessBundle[T <: Data](gen: T, nChannels: Int, nCores: Int) extends Bundle {
-    val dats = Vec(nCores, Vec(nChannels, gen))
-    def getCoreSlice(core: Int): Vec[T] = dats(core)
-    def getChannelSlice(channel: Int): Vec[T] = VecInit(dats.map(_(channel)))
+    intracore_ios
   }
 
-  object CCoreChannelMultiAccessBundle {
-    def apply[T <: Data](gen: Vec[Vec[T]])(implicit valName: ValName, nameHint: Option[String] = None): CCoreChannelMultiAccessBundle[T] = {
-      val w = Wire(new CCoreChannelMultiAccessBundle(gen(0)(0), gen(0).length, gen.length))
-      w.suggestName(nameHint.getOrElse(valName.name))
-      w.dats := gen
-      w
-    }
-  }
-
-  object CCoreChannelMultiAccessBundleChannelMajor {
-    def apply[T <: Data](gen: Vec[Vec[T]])(implicit valName: ValName, nameHint: Option[String] = None): CCoreChannelMultiAccessBundle[T] = {
-      val t = gen.transpose
-      val re_vectorize = VecInit(t.map(VecInit(_)))
-      CCoreChannelMultiAccessBundle(re_vectorize)
-    }
-  }
-
-
-  def getIntraCoreMemOuts(name: String)(implicit valName: ValName): CCoreChannelMultiAccessBundle[MemWritePort] = {
+  def getIntraCoreMemIns(name: String)(implicit valName: ValName): Seq[CScratchpadDualAccessPort] = {
     val params = try {
-      outer.intraCoreMemMasters.filter(_._1.name == name)(0)
+      outer.intraCoreMemSlaveNodes.filter(_._1 == name)(0)
     } catch {
       case e: Exception =>
-        System.err.println("You may be trying to access a intra core mem port by the wrong name. Check your config.")
+        System.err.println(s"You may be trying to access a intra core mem port by the wrong name($name). Check your config.")
         throw e
     }
     implicit val nameHint = Some(valName.name)
-    val q = VecInit((0 until params._1.nChannels) map (getIntraCoreMemOut(name, _)))
-    CCoreChannelMultiAccessBundleChannelMajor(q)
-
+    VecInit((0 until params._3.nChannels) map (getIntraCoreMemIn(name, _)))
   }
 
-  def getIntraCoreMemIns(name: String)(implicit valName: ValName): CCoreChannelMultiAccessBundle[MemWritePort] = {
-    val params = try {
-      outer.intraCoreMemMasters.filter(_._1.name == name)(0)
-    } catch {
-      case e: Exception =>
-        System.err.println("You may be trying to access a intra core mem port by the wrong name. Check your config.")
-        throw e
-    }
-    implicit val nameHint = Some(valName.name)
-    CCoreChannelMultiAccessBundleChannelMajor(VecInit((0 until params._1.nChannels) map (getIntraCoreMemOut(name, _))))
+  def getIntraCoreMemIn(name: String, idx: Int): CScratchpadDualAccessPort = {
+    val params = outer.intraCoreMemSlaveNodes.filter(_._1 == name)
+    if (params.isEmpty) throw new Exception(s"Attempting to access intraCoreMem \"$name\" which we can't find in the config.")
+    val ic_scratchpad = params(0)
+    ic_scratchpad._4(idx).module.dual_port_IOs(0)
   }
 
+  def getReaderModule(name: String,
+                      dataBytes: Int,
+                      vlen: Int,
+                      idx: Int): (DecoupledIO[ChannelTransactionBundle], DataChannelIO) = {
+    val a = getReaderModules(name, dataBytes, vlen, Some(idx))
+    (a._1(0), a._2(0))
+  }
 
   /**
    * Declare reader module implementations associated with a certain channel name.
@@ -297,12 +293,20 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     ret
   }
 
-  def getReaderModule(name: String,
+  def getWriterModule(name: String,
                       dataBytes: Int,
-                      vlen: Int,
-                      idx: Int): (DecoupledIO[ChannelTransactionBundle], DataChannelIO) = {
-    val a = getReaderModules(name, dataBytes, vlen, Some(idx))
+                      idx: Int): (DecoupledIO[ChannelTransactionBundle], WriterDataChannelIO) = {
+    val a = getWriterModules(name, dataBytes, Some(idx))
     (a._1(0), a._2(0))
+  }
+
+  def getScratchpad(name: String): (CScratchpadInitReqIO, Seq[CScratchpadAccessPort]) = {
+    val outer = composerConstructor.composerCoreWrapper
+    val lm = outer.scratch_mod.filter(_._1 == name)(0)._2
+    lm.suggestName(name)
+    val mod = lm.module
+
+    (mod.req, mod.access)
   }
 
   def getWriterModules(name: String,
@@ -335,75 +339,35 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     ret
   }
 
-  def getWriterModule(name: String,
-                      dataBytes: Int,
-                      idx: Int): (DecoupledIO[ChannelTransactionBundle], WriterDataChannelIO) = {
-    val a = getWriterModules(name, dataBytes, Some(idx))
-    (a._1(0), a._2(0))
+  def ComposerIntraCoreIO[Tcmd <: ComposerCommand, Tresp <: ComposerUserResponse](endpoint: String,
+                                                                                  genCmd: Tcmd = new ComposerRoccCommand,
+                                                                                  genResp: Tresp = new ComposerRoccUserResponse): CustomIOWithRouting[Tcmd, Tresp] = {
+    val converter = Module(new ComposerIntraCoreIOModule(endpoint, genCmd, genResp))
+    converter.respIO <> composer_response_ios_(endpoint)
+    converter.cmdIO <> composer_command_ios_(endpoint)
+    TransitName(converter.out, converter)
   }
 
-
-  def getScratchpad(name: String): (CScratchpadInitReqIO, CScratchpadAccessBundle) = {
-    val outer = composerConstructor.composerCoreWrapper
-    val lm = outer.scratch_mod.filter(_._1 == name)(0)._2
-    lm.suggestName(name)
-    val mod = lm.module
-
-    (mod.req, mod.access)
+  def ComposerIO[T1 <: ComposerCommand](bundleIn: T1): CustomIO[T1, ComposerRoccUserResponse] = {
+    ComposerIO[T1, ComposerRoccUserResponse](bundleIn, new ComposerRoccUserResponse)
   }
-
-  private[composer] val composer_response_io_ = if (outer.composerSystemParams.canIssueCoreCommandsTo.nonEmpty) {
-    Some(IO(Flipped(Decoupled(new ComposerInternallyRoutedRoccResponse()))))
-  } else None
-
-
-  def composer_response_io[T <: ComposerUserResponse](gen: T = new ComposerRoccUserResponse): DecoupledIO[T] = {
-    val raw_io = composer_response_io_.getOrElse {
-      throw new Exception("Attempted to get internal response IO but core was declared as not being able to issue core commands")
-    }
-    if (gen.isInstanceOf[ComposerRoccResponse]) {
-      raw_io.asInstanceOf[DecoupledIO[T]]
-    } else {
-      val conv_module = Module(new ComposerRespConverter[T, ComposerInternallyRoutedRoccResponse](gen, new ComposerInternallyRoutedRoccResponse))
-      conv_module.in <> raw_io
-      conv_module.out
-    }
-  }
-
-
-  private val composer_command_io_ = if (outer.composerSystemParams.canIssueCoreCommandsTo.nonEmpty) {
-    val node = outer.externalCoreCommNodes.get
-    val mod = Module(new TLClientModule(node))
-    node.out(0)._1 <> mod.tl
-    val wire = Wire(Decoupled(new ComposerRoccCommand))
-    wire.ready := mod.io.ready
-    mod.io.valid := wire.valid
-    // NEED TO TELL OTHER CORE HOW TO SEND RESPONSE BACK
-    val returnRoutingPayload = Cat(outer.system_id.U(SystemIDLengthKey.W), getCoreID.U(CoreIDLengthKey.W))
-    mod.io.bits.dat := wire.bits.pack(withRoutingPayload = Some(returnRoutingPayload))
-    mod.io.bits.addr := ComposerConsts.getInternalCmdRoutingAddress(wire.bits.inst.system_id)
-    Some(wire)
-  } else None
-
-  def composer_command_io[T <: ComposerCommand](gen: T = new ComposerRoccCommand): DecoupledIO[T] = {
-    val raw_io = composer_command_io_.get
-    val multiBeatCommandMod = Module(new MultiBeatCommandEmitter(gen))
-    raw_io <> multiBeatCommandMod.out
-    multiBeatCommandMod.in
-  }
+  //  (outer.composerSystemParams.canIssueCoreCommandsTo.nonEmpty) {
+  //    val node = outer.externalCoreCommNodes.get
+  //    val mod = Module(new TLClientModule(node))
+  //    node.out(0)._1 <> mod.tl
+  //    val wire = Wire(Decoupled(new ComposerRoccCommand))
+  //    wire.ready := mod.io.ready
+  //    mod.io.valid := wire.valid
+  //    // NEED TO TELL OTHER CORE HOW TO SEND RESPONSE BACK
+  //    val returnRoutingPayload = Cat(outer.system_id.U(SystemIDLengthKey.W), getCoreID.U(CoreIDLengthKey.W))
+  //    mod.io.bits.dat := wire.bits.pack(withRoutingPayload = Some(returnRoutingPayload))
+  //    mod.io.bits.addr := ComposerConsts.getInternalCmdRoutingAddress(wire.bits.inst.system_id)
+  //    Some(wire)
+  //  } else None
 
   def getSystemID(name: String): UInt = p(SystemName2IdMapKey)(name).U
 
   def addrBits: Int = log2Up(p(ExtMem).get.master.size)
-
-  private object custom_usage extends Enumeration {
-    //noinspection ScalaUnusedSymbol
-    type custom_usage = Value
-    val unused, default, custom = Value
-  }
-
-  private var using_custom = custom_usage.unused
-  private[composer] val io_declaration = IO(Flipped(new ComposerCoreIO()))
 
   def ComposerIO[T1 <: ComposerCommand, T2 <: ComposerUserResponse](bundleIn: T1, bundleOut: T2): CustomIO[T1, T2] = {
     if (using_custom == custom_usage.default) {
@@ -413,13 +377,20 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     val composerCustomCommandManager = Module(new ComposerCommandBundler[T1, T2](bundleIn, bundleOut, composerConstructor.composerCoreWrapper))
     composerCustomCommandManager.suggestName(composerConstructor.composerCoreWrapper.composerSystemParams.name + "CustomCommand")
     composerCustomCommandManager.cio <> io_declaration
-    composerCustomCommandManager.io
+    composerCustomCommandManager.io.resp.bits.rd := 0.U
+    TransitName(composerCustomCommandManager.io, composerCustomCommandManager)
   }
 
-  def ComposerIO[T1 <: ComposerCommand](bundleIn: T1): CustomIO[T1, ComposerRoccUserResponse] = {
-    ComposerIO[T1, ComposerRoccUserResponse](bundleIn, new ComposerRoccUserResponse)
+  private def getTLClients(name: String, listList: List[(String, List[TLClientNode])]): List[TLClientNode] = {
+    listList.filter(_._1 == name) match {
+      case first :: rst =>
+        require(rst.isEmpty)
+        first._2
+      case _ =>
+        throw new Exception(s"getReaderModules failed. Tried to fetch a channel set with a name($name) that doesn't exist. Declared names: " +
+          (outer.unCachedReaders.map(_._1) ++ outer.CacheNodes.map(_._1)))
+    }
   }
-
 
   def ComposerIO(): ComposerCoreIO = {
     if (using_custom == custom_usage.custom) {
@@ -428,9 +399,28 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     using_custom = custom_usage.default
     io_declaration
   }
+
+  case class CCoreChannelMultiAccessBundle[T](dats: Seq[Seq[T]]) {
+    def getCoreSlice(core: Int): Seq[T] = dats(core)
+
+    def getChannelSlice(channel: Int): Seq[T] = dats.map(_(channel))
+  }
+
+  class CCoreChannelMultiAccessBundleChannelMajor[T](dat: Seq[Seq[T]]) extends CCoreChannelMultiAccessBundle(dat.transpose) {}
+
+  object CCoreChannelMultiAccessBundleChannelMajor {
+    def apply[T](dat: Seq[Seq[T]]): CCoreChannelMultiAccessBundleChannelMajor[T] =
+      new CCoreChannelMultiAccessBundleChannelMajor(dat)
+  }
+
+  private object custom_usage extends Enumeration {
+    //noinspection ScalaUnusedSymbol
+    type custom_usage = Value
+    val unused, default, custom = Value
+  }
 }
 
-class ComposerSystemIO extends Bundle {
+class ComposerSystemIO(implicit p: Parameters) extends Bundle {
   val cmd = Flipped(Decoupled(new ComposerRoccCommand))
   val resp = Decoupled(new ComposerRoccResponse())
 }

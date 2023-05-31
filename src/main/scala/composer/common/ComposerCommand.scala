@@ -1,12 +1,12 @@
 package composer.common
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
-import composer.RoccHelpers.ComposerConsts
-import freechips.rocketchip.tile.RoCCCommand
+import freechips.rocketchip.tile.{RoCCCommand, XLen}
 
-sealed abstract class AbstractComposerCommand extends Bundle with hasAccessibleUserSubRegions {
+sealed abstract class AbstractComposerCommand(implicit p: Parameters) extends Bundle with hasAccessibleUserSubRegions {
 
   def getCoreID: UInt
   def getSystemID: UInt
@@ -20,7 +20,7 @@ sealed abstract class AbstractComposerCommand extends Bundle with hasAccessibleU
 
   private[composer] def getNBeats: Int = {
     val real_width = realElements.map(_._2.getWidth).sum
-    (real_width.toFloat / 128).ceil.toInt
+    (real_width.toFloat / (2*p(XLen))).ceil.toInt
   }
 
   /**
@@ -29,9 +29,10 @@ sealed abstract class AbstractComposerCommand extends Bundle with hasAccessibleU
   private[composer] def getRoccBeats: Seq[UInt] = {
     val whole = Cat(realElements.map(_._2.asUInt).reverse)
     val nBeats = getNBeats
+    val payloadWidth = 2 * p(XLen)
     (0 until nBeats) map {idx =>
-      val high = (idx + 1) * 128 - 1
-      val low = idx * 128
+      val high = (idx + 1) * payloadWidth - 1
+      val low = idx * payloadWidth
       if (high + 1 > whole.getWidth) {
         Cat(0.U((high + 1 - whole.getWidth).W), whole(whole.getWidth - 1, low))
       } else whole(high, low)
@@ -39,7 +40,7 @@ sealed abstract class AbstractComposerCommand extends Bundle with hasAccessibleU
   }
 }
 
-class ComposerCommand extends AbstractComposerCommand {
+class ComposerCommand(implicit p: Parameters) extends AbstractComposerCommand {
   override val reservedNames = Seq("__core_id", "__system_id")
   private[composer] val __core_id = UInt(CoreIDLengthKey.W)
   private[composer] val __system_id = UInt(SystemIDLengthKey.W)
@@ -52,7 +53,8 @@ class ComposerCommand extends AbstractComposerCommand {
 
   private[composer] def getRoccPayload(idx: UInt): (UInt, UInt)  = {
     val beats = VecInit(this.getRoccBeats)
-    (beats(idx)(127, 64), beats(idx)(63, 0))
+    val xlen = p(XLen)
+    (beats(idx)(2*xlen-1, xlen), beats(idx)(xlen-1, 0))
   }
 }
 
@@ -70,7 +72,7 @@ object ComposerCommand {
 }
 
 //noinspection ScalaUnusedSymbol
-class ComposerRoccCommand() extends AbstractComposerCommand {
+class ComposerRoccCommand(implicit p: Parameters) extends AbstractComposerCommand {
   override val reservedNames = Seq()
 
   override def sortedElements: Seq[(String, Data)] = elements.toSeq
@@ -87,8 +89,8 @@ class ComposerRoccCommand() extends AbstractComposerCommand {
     val system_id = UInt(SystemIDLengthKey.W)
     val funct = UInt((7 - SystemIDLengthKey).W)
   }
-  val payload1 = UInt(64.W)
-  val payload2 = UInt(64.W)
+  val payload1 = UInt(p(XLen).W)
+  val payload2 = UInt(p(XLen).W)
 
 
   def pack(bufferToPow2: Boolean = true, withRoutingPayload: Option[UInt] = None): UInt = {
@@ -114,8 +116,8 @@ class ComposerRoccCommand() extends AbstractComposerCommand {
 }
 
 object ComposerRoccCommand {
-  val packLengthBytes = 160 / 8
-  def fromRoccCommand(gen: RoCCCommand): ComposerRoccCommand = {
+  def packLengthBytes(implicit p: Parameters): Int = (32 + 2 * p(XLen)) / 8
+  def fromRoccCommand(gen: RoCCCommand)(implicit p: Parameters): ComposerRoccCommand = {
     val wr = Wire(new ComposerRoccCommand)
     wr.inst.xd := gen.inst.xd
     wr.inst.funct := gen.inst.funct.tail(SystemIDLengthKey)
@@ -128,6 +130,16 @@ object ComposerRoccCommand {
     wr.payload2 := gen.rs2
     wr.inst.rd := gen.inst.rd
     wr
+  }
+}
+
+class DecoupledIOWithCRouting[+T <: Data](gen: T) extends DecoupledIO[T](gen) {
+  val expectResponse = Output(Bool())
+}
+
+object DecoupledIOWithCRouting {
+  def apply[T <: Data](gen: T): DecoupledIOWithCRouting[T] = {
+    new DecoupledIOWithCRouting[T](gen)
   }
 }
 
