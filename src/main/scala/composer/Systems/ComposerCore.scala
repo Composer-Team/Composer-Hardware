@@ -3,11 +3,11 @@ package composer.Systems
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
+import composer._
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import composer.MemoryStreams._
 import composer.RoccHelpers._
 import composer.TLManagement.{ComposerIntraCoreIOModule, TLClientModule}
-import composer._
 import composer.common._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
@@ -35,31 +35,13 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
   lazy val module = composerSystemParams.buildCore(ComposerConstructor(composerSystemParams.coreParams, this), p)
   val coreParams = composerSystemParams.coreParams.copy(core_id = core_id, system_id = system_id)
   val blockBytes = p(CacheBlockBytes)
-  val CacheNodes = coreParams.memoryChannelParams.filter(_.isInstanceOf[CCachedReadChannelParams]) map (_.asInstanceOf[CCachedReadChannelParams]) map {
-    par =>
-      val param = par.cacheParams
-      val cache = TLCache(param.sizeBytes,
-        nClients = par.nChannels,
-        associativity = param.associativity).suggestName("TLCache")
-      val req_xbar = LazyModule(new TLXbar())
-      val rnodes = List.tabulate(par.nChannels)(i => TLClientNode(List(TLMasterPortParameters.v1(
-        clients = List(TLMasterParameters.v1(
-          name = s"CachedReadChannel_sys${system_id}_core${core_id}_${par.name}$i",
-          supportsGet = TransferSizes(1, p(CacheBlockBytes)),
-          supportsProbe = TransferSizes(1, p(CacheBlockBytes))
-        ))))))
-
-      rnodes foreach (req_xbar.node := _)
-      cache.mem_reqs := TLBuffer() := req_xbar.node
-      (par.name, (cache, rnodes))
-  }
   val unCachedReaders = coreParams.memoryChannelParams.filter(_.isInstanceOf[CReadChannelParams]).map { para =>
     val param: CReadChannelParams = para.asInstanceOf[CReadChannelParams]
     (param.name, List.tabulate(para.nChannels) { i =>
       TLClientNode(List(TLMasterPortParameters.v1(
         clients = List(TLMasterParameters.v1(
           name = s"ReadChannel_sys${system_id}_core${core_id}_${para.name}$i",
-          supportsGet = TransferSizes(1, p(CacheBlockBytes)),
+          supportsGet = TransferSizes(1,Math.max(1, param.maxInFlightTxs/2)*blockBytes),
           supportsProbe = TransferSizes(1, p(CacheBlockBytes)),
           sourceId = IdRange(0, param.maxInFlightTxs)
         )))))
@@ -83,13 +65,11 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
       mod.suggestName(param.name)
       (param.name, mod)
   }
-  val readerNodes = unCachedReaders ++ CacheNodes.map(i => (i._1, i._2._2))
+  val readerNodes = unCachedReaders
   // these go to external memory
-  val mem_nodes = (
-    CacheNodes.map(i => (i._1, i._2._2)) ++
-      unCachedReaders ++
-      writers ++
-      scratch_mod.map(i => (i._1, List(i._2.mem_master_node).filter(_.isDefined).map(_.get)))
+  val mem_nodes = (unCachedReaders ++
+    writers ++
+    scratch_mod.map(i => (i._1, List(i._2.mem_master_node).filter(_.isDefined).map(_.get)))
     ).flatMap(_._2)
   val externalCoreCommNodes = Map.from(composerSystemParams.canIssueCoreCommandsTo.map { targetSys =>
     (targetSys, TLClientNode(Seq(TLMasterPortParameters.v1(clients = Seq(TLMasterParameters.v1(
@@ -344,19 +324,6 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   def ComposerIO[T1 <: ComposerCommand](bundleIn: T1): CustomIO[T1, ComposerRoccUserResponse] = {
     ComposerIO[T1, ComposerRoccUserResponse](bundleIn, new ComposerRoccUserResponse)
   }
-  //  (outer.composerSystemParams.canIssueCoreCommandsTo.nonEmpty) {
-  //    val node = outer.externalCoreCommNodes.get
-  //    val mod = Module(new TLClientModule(node))
-  //    node.out(0)._1 <> mod.tl
-  //    val wire = Wire(Decoupled(new ComposerRoccCommand))
-  //    wire.ready := mod.io.ready
-  //    mod.io.valid := wire.valid
-  //    // NEED TO TELL OTHER CORE HOW TO SEND RESPONSE BACK
-  //    val returnRoutingPayload = Cat(outer.system_id.U(SystemIDLengthKey.W), getCoreID.U(CoreIDLengthKey.W))
-  //    mod.io.bits.dat := wire.bits.pack(withRoutingPayload = Some(returnRoutingPayload))
-  //    mod.io.bits.addr := ComposerConsts.getInternalCmdRoutingAddress(wire.bits.inst.system_id)
-  //    Some(wire)
-  //  } else None
 
   def getSystemID(name: String): UInt = p(SystemName2IdMapKey)(name).U
 
@@ -381,7 +348,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
         first._2
       case _ =>
         throw new Exception(s"getReaderModules failed. Tried to fetch a channel set with a name($name) that doesn't exist. Declared names: " +
-          (outer.unCachedReaders.map(_._1) ++ outer.CacheNodes.map(_._1)))
+          outer.unCachedReaders.map(_._1))
     }
   }
 
