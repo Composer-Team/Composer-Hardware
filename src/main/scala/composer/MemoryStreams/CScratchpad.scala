@@ -163,7 +163,7 @@ class CScratchpadImp(supportWriteback: Boolean,
     port1.res.valid := ShiftReg(port1.req.valid && !port1.req.bits.write_enable, latency)
     port1.res.bits := mem.O1
 
-    if (access_group.nonEmpty) {
+    if (access_group.length > 1) {
       val port2 = access_group(1)
       mem.A2 := port2.req.bits.addr
       mem.CSB2 := port2.req.valid
@@ -218,9 +218,6 @@ class CScratchpadImp(supportWriteback: Boolean,
       require(a.getWidth == memoryAddrBitsFAlign)
       Cat(a, 0.U(memoryAddrShAmt.W))
     }
-
-    req.request.ready := true.B
-
 
     val read_idle :: read_send :: read_process :: Nil = Enum(3)
     val mem_tx_state = RegInit(read_idle)
@@ -345,7 +342,7 @@ class CScratchpadImp(supportWriteback: Boolean,
         }
       }
     }.otherwise {
-      when(reqIdleBits.reduce(_ && _)) {
+      when(reqIdleBits.reduce(_ && _) && loader.io.cache_block_in.ready) {
         mem_tx_state := read_idle
       }
     }
@@ -440,7 +437,6 @@ class CScratchpadImp(supportWriteback: Boolean,
         mem.OEB2 := false.B
         mem.I2 := loader.io.sp_write_out.bits.dat
         mem.A2 := loader.io.sp_write_out.bits.idx
-
       }
       access.foreach { _.req.ready := false.B }
       perSourceProgress(loaderSource).progress := loader.io.sp_write_out.bits.idx +& 1.U

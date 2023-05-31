@@ -1,11 +1,10 @@
 package composer.MemoryStreams
 
-import chisel3._
+import chisel3.{Reg, _}
 import chisel3.util._
-import composer._
 import chipsalliance.rocketchip.config._
 import composer.Systems.DataChannelIO
-import freechips.rocketchip.subsystem.CacheBlockBytes
+import composer.common.ShiftReg
 import freechips.rocketchip.tilelink._
 
 class ReadChannelIO(dataBytes: Int, vlen: Int)(implicit p: Parameters) extends Bundle {
@@ -54,8 +53,8 @@ class CReader(dataBytes: Int,
   val state = RegInit(s_idle)
 
   //  val buffer = Seq.fill(channelsPerBeat)(Reg(UInt(channelWidthBits.W)))
-  val channel_buffer = Reg(Vec(vlen, UInt((dataBytes * 8).W)))
-  val channel_buffer_valid = RegInit(false.B)
+  val channel_buffer = Wire(Vec(vlen, UInt((dataBytes * 8).W)))
+  val channel_buffer_valid = Wire(Bool())
 
   io.channel.data.valid := channel_buffer_valid
   io.channel.data.bits := channel_buffer
@@ -103,38 +102,28 @@ class CReader(dataBytes: Int,
     val prefetch_readIdx, prefetch_writeIdx = Counter(prefetchRows)
 
     val prefetch_blatency = 3
-    val prefetch_buffers = {
-      p(PlatformTypeKey) match {
-        case PlatformType.ASIC =>
-          Module(new CASICMemory(prefetch_blatency, beatBytes * 8, prefetchRows))
-        case PlatformType.FPGA =>
-          Module(new CFPGAMemory(prefetch_blatency - 2, beatBytes * 8, prefetchRows, debugName = debugName.getOrElse("") + "_prefetchBuffer"))
-      }
-    }
-    prefetch_buffers.io.CE1 := clock.asBool
-    prefetch_buffers.io.CE2 := clock.asBool
+    val prefetch_buffers = CMemory(prefetch_blatency, beatBytes * 8, prefetchRows, debugName = Some(debugName.getOrElse("") + "_prefetchBuffer"))
+    prefetch_buffers.CE1 := clock.asBool
+    prefetch_buffers.CE2 := clock.asBool
     // USING PORT1 AS DEDICATED READ
     // USING PORT2 AS DEDICATED WRITE
-    prefetch_buffers.io.A1 := DontCare
-    prefetch_buffers.io.I1 := DontCare
-    prefetch_buffers.io.WEB1 := false.B
-    prefetch_buffers.io.OEB1 := true.B
-    prefetch_buffers.io.CSB1 := false.B
+    prefetch_buffers.A1 := prefetch_readIdx.value
+    prefetch_buffers.I1 := DontCare
+    prefetch_buffers.WEB1 := false.B
+    prefetch_buffers.OEB1 := true.B
+    prefetch_buffers.CSB1 := false.B
 
-    prefetch_buffers.io.CSB2 := false.B
-    prefetch_buffers.io.OEB2 := false.B
-    prefetch_buffers.io.WEB2 := true.B
-    prefetch_buffers.io.I2 := tl_out.d.bits.data
-    prefetch_buffers.io.A2 := DontCare
+    prefetch_buffers.CSB2 := false.B
+    prefetch_buffers.OEB2 := false.B
+    prefetch_buffers.WEB2 := true.B
+    prefetch_buffers.I2 := tl_out.d.bits.data
+    prefetch_buffers.A2 := DontCare
 
     val prefetch_buffers_valid = Reg(Vec(prefetchRows, Bool()))
 
     when(reset.asBool) {
       prefetch_buffers_valid.foreach(_ := false.B)
     }
-
-    val l_idle :: s_preload :: Nil = Enum(2)
-    val load_state = RegInit(l_idle)
 
     tl_out.d.ready := atLeastOneSourceActive
 
@@ -145,35 +134,9 @@ class CReader(dataBytes: Int,
       val prefetchIdx = sourceToIdx(dSource)
       prefetch_buffers_valid(prefetchIdx) := true.B
       sourceIdleBits(dSource) := true.B
-      prefetch_buffers.io.A2 := prefetchIdx
-      prefetch_buffers.io.I2 := tl_out.d.bits.data
-      prefetch_buffers.io.CSB2 := true.B
-    }
-
-    val readCycleCounter = Counter(prefetch_blatency + 4)
-    val mem_valid = RegInit(false.B)
-    switch(load_state) {
-      is(l_idle) {
-        when(!mem_valid && prefetch_buffers_valid(prefetch_readIdx.value)) {
-          load_state := s_preload
-          prefetch_buffers.io.A1 := prefetch_readIdx.value
-          prefetch_buffers.io.CSB1 := true.B
-          readCycleCounter.reset()
-        }
-      }
-      is(s_preload) {
-        readCycleCounter.inc()
-        when(readCycleCounter.value === (prefetch_blatency - 2).U) {
-          //          (0 until channelsPerBeat) foreach { ch_buffer_idx =>
-          //            val high = (ch_buffer_idx + 1) * channelWidthBits - 1
-          //            val low = channelWidthBits * ch_buffer_idx
-          //            buffer(ch_buffer_idx) := prefetch_buffers.io.r_dout(high, low)
-          //          }
-          mem_valid := true.B
-          //          prefetch_buffers_valid(prefetch_readIdx.value) := false.B
-          load_state := l_idle
-        }
-      }
+      prefetch_buffers.A2 := prefetchIdx
+      prefetch_buffers.I2 := tl_out.d.bits.data
+      prefetch_buffers.CSB2 := true.B
     }
 
     switch(state) {
@@ -209,28 +172,52 @@ class CReader(dataBytes: Int,
         }
       }
     }
+    val channel_buffer_depth = prefetch_blatency + 2
+    val channel_buffer_q = Module(new Queue(UInt((beatBytes * 8).W), channel_buffer_depth))
     val channels = VecInit(
       (0 until channelsPerBeat) map { ch_buffer_idx =>
         val high = (ch_buffer_idx + 1) * channelWidthBits - 1
         val low = channelWidthBits * ch_buffer_idx
-        prefetch_buffers.io.O1(high, low)
+        channel_buffer_q.io.deq.bits(high, low)
       })
-    when(mem_valid && (!channel_buffer_valid || io.channel.data.fire)) {
-      channel_buffer := VecInit((0 until vlen) map {vidx =>
-        val high = (vidx + 1) * dataBytes * 8 - 1
-        val low = vidx * dataBytes * 8
-        channels(data_channel_read_idx)(high, low)
-      })
+
+    channel_buffer := VecInit((0 until vlen) map { vidx =>
+      val high = (vidx + 1) * dataBytes * 8 - 1
+      val low = vidx * dataBytes * 8
+      channels(data_channel_read_idx)(high, low)
+    })
+
+
+    val read_enable_pipeline = ShiftReg(prefetch_buffers.CSB1, prefetch_blatency)
+    val reads_in_flight = RegInit(0.U(3.W))
+    val queue_occupancy = RegInit(0.U(log2Up(channel_buffer_depth+1).W))
+
+    when (prefetch_buffers_valid(prefetch_readIdx.value) && reads_in_flight + queue_occupancy < channel_buffer_depth.U) {
+      prefetch_buffers.CSB1 := true.B
+      prefetch_buffers_valid(prefetch_readIdx.value) := false.B
+      prefetch_readIdx.inc()
+    }
+
+    // maintain reads in flight
+    when(prefetch_buffers.CSB1 && read_enable_pipeline){}.elsewhen(prefetch_buffers.CSB1)
+    {reads_in_flight := reads_in_flight + 1.U}.elsewhen(read_enable_pipeline){reads_in_flight := reads_in_flight - 1.U}
+
+    // maintain queue occupancy
+    when (channel_buffer_q.io.deq.fire && channel_buffer_q.io.enq.fire)
+    {}.elsewhen(channel_buffer_q.io.deq.fire)
+    {queue_occupancy := queue_occupancy - 1.U}.elsewhen(channel_buffer_q.io.enq.fire)
+    {queue_occupancy := queue_occupancy + 1.U}
+
+    channel_buffer_q.io.enq.valid := read_enable_pipeline
+    channel_buffer_q.io.enq.bits := prefetch_buffers.O1
+    channel_buffer_q.io.deq.ready := false.B
+    channel_buffer_valid := channel_buffer_q.io.deq.valid
+    when (io.channel.data.fire) {
       data_channel_read_idx := data_channel_read_idx + 1.U
-      channel_buffer_valid := true.B
       when (data_channel_read_idx === (channelsPerBeat - 1).U) {
         data_channel_read_idx := 0.U
-        mem_valid := false.B
-        prefetch_buffers_valid(prefetch_readIdx.value) := false.B
-        prefetch_readIdx.inc()
+        channel_buffer_q.io.deq.ready := true.B
       }
-    }.elsewhen(io.channel.data.fire) {
-      channel_buffer_valid := false.B
     }
   }
   else { // else no prefetch
@@ -286,9 +273,13 @@ class CReader(dataBytes: Int,
         }
       }
     }
+    val channel_buffer_reg = Reg(Vec(vlen, UInt((dataBytes * 8).W)))
+    channel_buffer := channel_buffer_reg
+    val channel_buffer_valid_reg = RegInit(false.B)
+    channel_buffer_valid := channel_buffer_valid_reg
 
     when(bufferValid) {
-      channel_buffer_valid := true.B
+      channel_buffer_valid_reg := true.B
       for (vidx <- 0 until vlen) {
         // gather all of the bit subsets that will ever correspond to this vector element
         val selection = (0 until channelsPerBeat) map { c_idx =>
@@ -308,7 +299,7 @@ class CReader(dataBytes: Int,
       }.otherwise {
         data_channel_read_idx := data_channel_read_idx + 1.U
       }
-      channel_buffer_valid := false.B
+      channel_buffer_valid_reg := false.B
     }
   }
 }

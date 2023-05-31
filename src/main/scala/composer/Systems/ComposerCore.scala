@@ -187,12 +187,11 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
         throw e
     }
 
-    implicit val nameHint = Some(valName.name)
-    val q = params._2(0).indices map (getIntraCoreMemOut(name, _))
-    CCoreChannelMultiAccessBundleChannelMajor(q)
+    val q = params._2.indices map (getIntraCoreMemOut(name, _))
+    CCoreChannelMultiAccessBundle(q)
   }
 
-  def getIntraCoreMemOut(name: String, idx: Int = 0)(implicit valName: ValName): Seq[MemWritePort] = {
+  def getIntraCoreMemOut(name: String, core_idx: Int = 0): Seq[MemWritePort] = {
     val params = try {
       outer.intraCoreMemMasters.filter(_._1.name == name)(0)
     } catch {
@@ -200,30 +199,24 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
         System.err.println("You may be trying to access a intra core mem port by the wrong name. Check your config.")
         throw e
     }
-    val (outs, o_edges) = {
-      val q = params._2.map(_(idx).out(0))
-      (q.map(_._1), q.map(_._2))
-    }
 
-    val intracore_ios = outs.indices.map {
-      core_id =>
-        val w = Wire(new MemWritePort(log2Up(params._3.nDatas.intValue()), params._3.dataWidthBits.intValue()))
-        w.suggestName(valName.name + "_" + core_id)
-        w
-    }
-
-    intracore_ios.lazyZip(outs).lazyZip(o_edges) foreach { case (io, o, oe) =>
-      o.a.bits := oe.Put(
+    params._2(core_idx).zipWithIndex.map { case(master_singleton, channelIdx) =>
+      val master = master_singleton.out(0)
+      val port = master._1
+      val edge = master._2
+      val w = Wire(new MemWritePort(log2Up(params._3.nDatas.intValue()), params._3.dataWidthBits.intValue()))
+      w.suggestName(s"intraCoreWritePort_for$name" + "_" + channelIdx)
+      port.a.valid := w.valid
+      w.ready := port.a.ready
+      port.a.bits := edge.Put(
         fromSource = 0.U,
-        toAddress = if (params._3.dataWidthBits.intValue() == 8) io.bits.addr else Cat(io.bits.addr, 0.U(log2Up(params._3.dataWidthBits.intValue() / 8).W)),
+        toAddress = if (params._3.dataWidthBits.intValue() == 8) w.bits.addr else Cat(w.bits.addr, 0.U(log2Up(params._3.dataWidthBits.intValue() / 8).W)),
         lgSize = CLog2Up(params._3.dataWidthBits.intValue() / 8).U,
-        data = io.bits.data
+        data = w.bits.data
       )._2
-      o.a.valid := io.valid
-      io.ready := o.a.ready
-      o.d.ready := true.B
+      port.d.ready := true.B
+      w
     }
-    intracore_ios
   }
 
   def getIntraCoreMemIns(name: String)(implicit valName: ValName): Seq[CScratchpadDualAccessPort] = {

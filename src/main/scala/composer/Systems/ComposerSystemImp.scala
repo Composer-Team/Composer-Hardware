@@ -45,26 +45,6 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     cmdArbiter.io.in(idx) <> src
   }
 
-  val internalReturnDestinations = if (outer.canBeIntaCoreCommandEndpoint) Some(VecInit(Seq.fill(outer.nCores)(Reg(new Bundle() {
-    val sys = UInt(SystemIDLengthKey.W)
-    val core = UInt(CoreIDLengthKey.W)
-  })))) else None
-
-  if (outer.canBeIntaCoreCommandEndpoint) {
-    val a_in = outer.internalCommandManager.get.in(0)._1.a.bits.data
-    val routingPayload = a_in(a_in.getWidth - 1, (new ComposerRoccCommand).getWidth)
-    val fromCore = routingPayload(CoreIDLengthKey - 1, 0)
-    val fromSys = routingPayload(CoreIDLengthKey + SystemIDLengthKey - 1, CoreIDLengthKey)
-    val intCmd = icmAsCmdSrc.get
-
-    // arbiter is choosing this one
-    when(intCmd.fire && intCmd.bits.inst.xd) {
-      internalReturnDestinations.get(intCmd.bits.getCoreID).sys := fromSys
-      internalReturnDestinations.get(intCmd.bits.getCoreID).core := fromCore
-      // arbiter is consuming input and we are expecting response, so mark as cmd destination
-    }
-  }
-
   lazy val cmd = Queue(cmdArbiter.io.out)
 
   lazy val funct = cmd.bits.inst.funct
@@ -106,11 +86,29 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   val respQ = Queue(resp)
 
   val internalRespDispatchModule = if (outer.canBeIntaCoreCommandEndpoint) {
+    val internalReturnDestinations = Reg(Vec(outer.nCores, new Bundle() {
+      val sys = UInt(SystemIDLengthKey.W)
+      val core = UInt(CoreIDLengthKey.W)
+    }))
+
+    val a_in = outer.internalCommandManager.get.in(0)._1.a.bits.data
+    val routingPayload = a_in(a_in.getWidth - 1, (new ComposerRoccCommand).getWidth)
+    val fromCore = routingPayload(CoreIDLengthKey - 1, 0)
+    val fromSys = routingPayload(CoreIDLengthKey + SystemIDLengthKey - 1, CoreIDLengthKey)
+    val intCmd = icmAsCmdSrc.get
+
+    // arbiter is choosing this one
+    when(intCmd.fire && intCmd.bits.inst.xd) {
+      internalReturnDestinations(intCmd.bits.getCoreID).sys := fromSys
+      internalReturnDestinations(intCmd.bits.getCoreID).core := fromCore
+      // arbiter is consuming input and we are expecting response, so mark as cmd destination
+    }
+
     val wire = Wire(new ComposerRoccResponse())
     wire.getDataField := respQ.bits.getDataField
 //    wire.rd := respQ.bits.rd
-    wire.system_id := internalReturnDestinations.get(respQ.bits.core_id).sys
-    wire.core_id := internalReturnDestinations.get(respQ.bits.core_id).core
+    wire.system_id := internalReturnDestinations(respQ.bits.core_id).sys
+    wire.core_id := internalReturnDestinations(respQ.bits.core_id).core
     wire.rd := 0.U
 
     val respClient = outer.outgoingInternalResponseClient.get
