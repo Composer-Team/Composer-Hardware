@@ -2,6 +2,7 @@ package composer.Systems
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.experimental.FixedPoint
 import chisel3.util._
 import composer.Generation.CppGeneration
 import composer.common._
@@ -48,24 +49,36 @@ class ComposerCommandBundler[T1 <: ComposerCommand, T2 <: ComposerUserResponse](
     println(fs)
     fs foreach { sr =>
       val range = sr._2
-      val field = io.req.bits.elements(sr._1)
       val lowPayload = range._2 / 128
-      field := {
-        val flat = if (crossesBoundary(range._1, range._2)) {
-          Cat(reqPayload(lowPayload + 1)(range._1 % 128, 0), reqPayload(lowPayload)(127, range._2 % 128))
-        } else reqPayload(lowPayload)(range._1 % 128, range._2 % 128)
-        field match {
-          case fieldS: Vec[Data] =>
-            val divs = fieldS.length
-            val divSize = flat.getWidth / divs
-            VecInit(Seq.tabulate(divs){idx => flat((idx + 1) * divSize - 1, idx * divSize)})
-          case _ => flat
-        }
+      val flat = if (crossesBoundary(range._1, range._2)) {
+        Cat(reqPayload(lowPayload + 1)(range._1 % 128, 0), reqPayload(lowPayload)(127, range._2 % 128))
+      } else {
+        reqPayload(lowPayload)(range._1 % 128, range._2 % 128)
       }
+      val field = io.req.bits.elements(sr._1)
+      field := typedFlat(field, flat)
     }
     when(io.req.fire) {
       reqCounter := 0.U
       req_state := s_req_idle
+    }
+  }
+
+  def typedFlat(field: Data, flat: UInt): Data = {
+    field match {
+      case fieldS: Vec[Data] =>
+        val subField = fieldS.getElements.head
+        val divs = fieldS.length
+        val divSize = flat.getWidth / divs
+        VecInit(Seq.tabulate(divs){idx => flat((idx + 1) * divSize - 1, idx * divSize)}.map(typedFlat(subField, _)))
+      case _: UInt =>
+        flat.asUInt
+      case _: SInt =>
+        flat.asSInt
+      case fixedPoint: FixedPoint =>
+        flat.do_asFixedPoint(fixedPoint.binaryPoint)
+      case _ =>
+        throw new Exception(s"Attempting to use an unsupported type for io: $field (Currently supports UInt, SInt, FixedPoint, and Vec)")
     }
   }
 }
