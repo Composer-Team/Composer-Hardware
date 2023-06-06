@@ -157,7 +157,7 @@ object CppGeneration {
     val template_sig = f"template<> $structName composer::response_handle<$structName>::get()"
     val command_sig = f"composer::response_handle<$structName> ${sysName}Command(uint16_t core_id, $signature)"
     val template_def = resp.fieldSubranges.map { ele =>
-      val mask = (1 << (1 + ele._2._1 + ele._2._2)) - 1
+      val mask = (1L << (1 + ele._2._1 - ele._2._2)) - 1
       (ele._1, f"(resp & 0x${mask.toHexString}L) >> ${ele._2._2}")
     }.sortBy(_._1).map(_._2).reduce(_ + ", " + _)
 

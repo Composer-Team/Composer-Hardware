@@ -2,7 +2,7 @@ package composer.Systems
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.experimental.FixedPoint
+import chisel3.experimental.{FixedPoint, Interval}
 import chisel3.util._
 import composer.Generation.CppGeneration
 import composer.common._
@@ -51,21 +51,30 @@ class ComposerCommandBundler[T1 <: ComposerCommand, T2 <: ComposerUserResponse](
   val whole = Cat(reqPayload.reverse)
   io.req.bits.fieldSubranges foreach { sr =>
     val range = sr._2
+    val flat = whole(range._1, range._2)
     val field = io.req.bits.elements(sr._1)
-    val defaultCast = whole(range._1, range._2)
-    field := (field match {
-      case fieldS: Vec[Data] =>
-        val divs = fieldS.length
-        val divSize = field.getWidth / divs
-        VecInit(Seq.tabulate(divs) { idx => whole((idx+1) * divSize - 1 + range._2, idx * divSize + range._2) })
+    field := typedFlat(field, flat)
+  }
+
+  def typedFlat(field: Data, flat: UInt): Data = {
+    field match {
+      case vector: Vec[Data] =>
+        val subField = vector.getElements.head
+        val divs = vector.length
+        val divSize = flat.getWidth / divs
+        VecInit(Seq.tabulate(divs) { idx => flat((idx+1) * divSize - 1, idx * divSize)}.map(subFlat => typedFlat(subField, subFlat)))
+      case _: Bool =>
+        flat.asBool
       case _: UInt =>
-        defaultCast.asUInt
+        flat.asUInt
       case _: SInt =>
-        defaultCast.asSInt
+        flat.asSInt
       case fixedPoint: FixedPoint =>
-        defaultCast.do_asFixedPoint(fixedPoint.binaryPoint)
+        flat.asFixedPoint(fixedPoint.binaryPoint)
+      case interval: Interval =>
+        flat.asInterval(interval.range)
       case _ =>
-        defaultCast
-    })
+        flat
+    }
   }
 }
