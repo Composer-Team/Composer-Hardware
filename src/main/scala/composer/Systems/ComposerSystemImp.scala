@@ -13,43 +13,46 @@ import composer.common._
 
 import scala.annotation.tailrec
 
+class CommandSrcPair(nSources: Int)(implicit p: Parameters) extends Bundle {
+  val cmd = new ComposerRoccCommand()
+  val src = UInt(log2Up(nSources).W)
+}
+
 class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) extends LazyModuleImpWithSLRs(outer) {
   val sw_io = if (outer.systemParams.canReceiveSoftwareCommands) Some(IO(new ComposerSystemIO())) else None
   val respArbiter = ModuleWithSLR(new MultiLevelArbiter(new ComposerRoccResponse(), outer.systemParams.nCores))
   val cores = outer.cores.map(_._2.module)
 
   val validSrcs = Seq(sw_io, outer.internalCommandManager).filter(_.isDefined)
-  // if sources can come from multiple domains (sw, other systems), then we have to remember where cmds came from
-  val cmdArbiter = ModuleWithSLR(new RRArbiter(new ComposerRoccCommand(), validSrcs.length))
-  val icmAsCmdSrc = if (outer.internalCommandManager.isDefined) {
+  // if sources can come from multiple domains (sw,managerNode.portParams(0).endSinkId + 1 other systems), then we have to remember where cmds came from
+  val cmdArbiter = ModuleWithSLR(new RRArbiter(new CommandSrcPair(outer.acc.sysNCmdSourceLookup(outer.systemParams.name)), validSrcs.length))
+  val internalCmdSource = if (outer.internalCommandManager.isDefined) {
     val managerNode = outer.internalCommandManager.get
     val (b, e) = managerNode.in(0)
     val manager = ModuleWithSLR(new TLManagerModule(b, e))
     managerNode.in(0)._1 <> manager.tl
-
     val cmdIO = manager.io.map(r => hasAccessibleUserSubRegions[ComposerRoccCommand](r, new ComposerRoccCommand))
-    Some(cmdIO)
+    // 0 is always reserved for software (even if it doesn't exist)
+    Some((cmdIO, b.a.bits.source +& 1.U))
   } else None
 
-  val ioAsCmdSrc = if (sw_io.isDefined) {
-//    val cmdIO = Wire(Flipped(Decoupled(new ComposerRoccCommand())))
-//    val io_ = sw_io.get
-//    cmdIO.valid := io_.cmd.valid
-//    io_.cmd.ready := cmdIO.ready
-//    cmdIO.bits := io_.cmd.bits
-    Some(sw_io.get.cmd)
+  val swCmdSource = if (sw_io.isDefined) {
+    Some((sw_io.get.cmd, 0.U))
   } else None
 
-  val validCmdSrcs = Seq(icmAsCmdSrc, ioAsCmdSrc).filter(_.isDefined).map(_.get)
+  val validCmdSrcs = Seq(internalCmdSource, swCmdSource).filter(_.isDefined).map(_.get)
   validCmdSrcs.zipWithIndex.foreach { case (src, idx) =>
-    cmdArbiter.io.in(idx) <> src
+    cmdArbiter.io.in(idx).bits.cmd := src._1.bits
+    cmdArbiter.io.in(idx).bits.src := src._2
+    cmdArbiter.io.in(idx).valid := src._1.valid
+    src._1.ready := cmdArbiter.io.in(idx).ready
   }
 
   lazy val cmd = Queue(cmdArbiter.io.out)
 
-  lazy val funct = cmd.bits.inst.funct
+  lazy val funct = cmd.bits.cmd.inst.funct
 
-  lazy val coreSelect = cmd.bits.getCoreID
+  lazy val coreSelect = cmd.bits.cmd.getCoreID
 
   val addressBits = outer.memory_nodes map { m =>
     m.out(0)._1.params.addressBits
@@ -95,7 +98,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     val routingPayload = a_in(a_in.getWidth - 1, (new ComposerRoccCommand).getWidth)
     val fromCore = routingPayload(CoreIDLengthKey - 1, 0)
     val fromSys = routingPayload(CoreIDLengthKey + SystemIDLengthKey - 1, CoreIDLengthKey)
-    val intCmd = icmAsCmdSrc.get
+    val intCmd = internalCmdSource.get._1
 
     // arbiter is choosing this one
     when(intCmd.fire && intCmd.bits.inst.xd) {
@@ -128,9 +131,9 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     respQ.ready := readyDisp
 
     val reqCmdSourcedInternally = Reg(Vec(outer.nCores, Bool()))
-
-    when(icmAsCmdSrc.get.fire && icmAsCmdSrc.get.bits.inst.xd) {
-      reqCmdSourcedInternally(icmAsCmdSrc.get.bits.getCoreID) := true.B
+    val internalCmd = internalCmdSource.get._1
+    when(internalCmd.fire && internalCmd.bits.inst.xd) {
+      reqCmdSourcedInternally(internalCmd.bits.getCoreID) := true.B
     }
     when(swio.cmd.fire && swio.cmd.bits.inst.xd) {
       reqCmdSourcedInternally(swio.cmd.bits.getCoreID) := false.B
@@ -178,14 +181,16 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   }
   val core_readys = cores.map { core =>
     if (p(CoreCommandLatency) > 0) {
-      val coreCmdQueue = Module(new Queue[ComposerRoccCommand](new ComposerRoccCommand, 2))
+      val coreCmdQueue = Module(new Queue(new CommandSrcPair(outer.acc.sysNCmdSourceLookup(outer.systemParams.name)), 2))
       coreCmdQueue.io.enq.bits := cmd.bits
       coreCmdQueue.io.enq.valid := cmd.valid && coreSelect === core.getCoreID.U
-      coreCmdQueue.io.deq <> core.io_declaration.req
+      coreCmdQueue.io.deq.map(_.cmd) <> core.io_declaration.req
+      core.io_source := coreCmdQueue.io.deq.bits.src
       coreCmdQueue.io.enq.ready
     } else {
       core.io_declaration.req.valid := cmd.valid && coreSelect === core.getCoreID.U
-      core.io_declaration.req.bits := cmd.bits
+      core.io_declaration.req.bits := cmd.bits.cmd
+      core.io_source := cmd.bits.src
       core.io_declaration.req.ready
     }
   }

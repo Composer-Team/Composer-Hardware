@@ -126,15 +126,15 @@ private[MemoryStreams] class CFPGAMemory(
       val bram_consumption = get_n_brams(dataWidth, nRows)
       val have_enough_uram = uram_used + uram_consumption < p(PlatformNURAM)
       val have_enough_bram = bram_used + bram_consumption < p(PlatformNBRAM)
-      if (dataWidth >= 64 && nRows >= 4 * 1024 * 0.5 && have_enough_uram) {
+      val ret = if (dataWidth >= 64 && nRows >= 4 * 1024 * 0.5 && have_enough_uram) {
         uram_used = uram_used + uram_consumption
         System.err.println(
-          s"Using $uram_consumption urams for $debugName - $dname_prefix"
+          s"Using $uram_consumption urams for $debugName ($dataWidth, $nRows)- $dname_prefix"
         )
         ("(* ram_style = \"ultra\" *)", "constU")
       } else if (have_enough_bram) {
         System.err.println(
-          s"Using $bram_consumption brams for $debugName - $dname_prefix"
+          s"Using $bram_consumption brams for $debugName ($dataWidth, $nRows) - $dname_prefix"
         )
         bram_used = bram_used + bram_consumption
         ("(* ram_style = \"block\" *)", "constB")
@@ -147,6 +147,8 @@ private[MemoryStreams] class CFPGAMemory(
         )
         ("", "constX")
       }
+      System.err.println(s"Total Usage - BRAM($bram_used/${p(PlatformNBRAM)}) URAM($uram_used/${p(PlatformNURAM)})")
+      ret
     } else ("", "")
   }
   override val desiredName = f"$dname_prefix$dname_suffix"

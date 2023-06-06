@@ -11,18 +11,17 @@ import freechips.rocketchip.tilelink._
 
 
 
-class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int, val canBeIntaCoreCommandEndpoint: Boolean)(implicit p: Parameters) extends LazyModuleWithSLRs {
+class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int, val canBeIntaCoreCommandEndpoint: Boolean, val acc: ComposerAcc)(implicit p: Parameters) extends LazyModuleWithSLRs {
   val nCores = systemParams.nCores
   val coreParams = systemParams.coreParams
   val distributeCores = ConstraintGeneration.canDistributeOverSLRs()
   implicit val baseName = systemParams.name
-
   val cores = List.tabulate(nCores) { core_idx: Int =>
     p(PlatformTypeKey) match {
-      case PlatformType.ASIC => (core_idx, LazyModule(new ComposerCoreWrapper(systemParams, core_idx, system_id)))
+      case PlatformType.ASIC => (core_idx, LazyModule(new ComposerCoreWrapper(systemParams, core_idx, system_id, this)))
       case PlatformType.FPGA =>
         implicit val slrId = if (distributeCores) Some(core_idx % p(PlatformNumSLRs)) else None
-        (core_idx % p(PlatformNumSLRs), LazyModuleWithSLR(new ComposerCoreWrapper(systemParams, core_idx, system_id)))
+        (core_idx % p(PlatformNumSLRs), LazyModuleWithSLR(new ComposerCoreWrapper(systemParams, core_idx, system_id, this)))
       case _ => throw new Exception()
     }
   }
@@ -91,7 +90,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int,
   /* SEND OUT STUFF*/
 
   // ROUTE OUTGOING COMMANDS THROUGH HERE
-  val canIssueCoreCommands = systemParams.canIssueCoreCommandsTo.nonEmpty
+//  val canIssueCoreCommands = systemParams.canIssueCoreCommandsTo.nonEmpty
   val outgoingCmdXBars = Map.from(systemParams.canIssueCoreCommandsTo.map { target =>
     val xbar = LazyModuleWithSLR(new TLXbar())
     cores.map(_._2.externalCoreCommNodes(target)).foreach{ core_target_source => xbar.node := TLBuffer() := core_target_source}

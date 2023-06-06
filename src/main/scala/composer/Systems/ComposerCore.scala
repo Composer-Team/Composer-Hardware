@@ -18,6 +18,12 @@ class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2) extends 
   val resp: DecoupledIO[T2] = Flipped(DecoupledIO(bundleOut))
 }
 
+private[composer] object CustomCommandUsage extends Enumeration {
+  //noinspection ScalaUnusedSymbol
+  type custom_usage = Value
+  val unused, default, custom = Value
+}
+
 class CustomIOWithRouting[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2) extends Bundle {
   val req: DecoupledIOWithCRouting[T1] = DecoupledIOWithCRouting(bundleIn)
   val resp: DecoupledIO[T2] = Flipped(DecoupledIO(bundleOut))
@@ -31,7 +37,7 @@ class DataChannelIO(dataBytes: Int, vlen: Int = 1) extends Bundle {
 }
 
 
-class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val core_id: Int, val system_id: Int)(implicit p: Parameters) extends LazyModule {
+class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val core_id: Int, val system_id: Int, val systemRef: ComposerSystem)(implicit p: Parameters) extends LazyModule {
   lazy val module = composerSystemParams.buildCore(ComposerConstructor(composerSystemParams.coreParams, this), p)
   val coreParams = composerSystemParams.coreParams.copy(core_id = core_id, system_id = system_id)
   val blockBytes = p(CacheBlockBytes)
@@ -156,11 +162,13 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     (target, wire)
   }
   private[composer] val io_declaration = IO(Flipped(new ComposerCoreIO()))
-  private var using_custom = custom_usage.unused
+  private[composer] val io_source = IO(Input(UInt(log2Up(outer.systemRef.acc.sysNCmdSourceLookup(outer.composerSystemParams.name)).W)))
+  private[composer] var using_custom = CustomCommandUsage.unused
+  private[composer] var custom_rocc_cmd_nbeats = -1
 
   def getCoreID: Int = composerConstructor.composerCoreWrapper.core_id
 
-  def getIntraCoreMemOuts(name: String)(implicit valName: ValName): CCoreChannelMultiAccessBundle[MemWritePort] = {
+  def getIntraCoreMemOuts(name: String): CCoreChannelMultiAccessBundle[MemWritePort] = {
     val params = try {
       outer.intraCoreMemMasters.filter(_._1.name == name)(0)
     } catch {
@@ -320,7 +328,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     val converter = Module(new ComposerIntraCoreIOModule(endpoint, genCmd, genResp))
     converter.respIO <> composer_response_ios_(endpoint)
     converter.cmdIO <> composer_command_ios_(endpoint)
-    TransitName(converter.out, converter)
+    converter.out
   }
 
   def ComposerIO[T1 <: ComposerCommand](bundleIn: T1): CustomIO[T1, ComposerRoccUserResponse] = {
@@ -332,15 +340,17 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   def addrBits: Int = log2Up(p(ExtMem).get.master.size)
 
   def ComposerIO[T1 <: ComposerCommand, T2 <: ComposerUserResponse](bundleIn: T1, bundleOut: T2): CustomIO[T1, T2] = {
-    if (using_custom == custom_usage.default) {
+    if (using_custom == CustomCommandUsage.default) {
       throw new Exception("Cannot use custom io after using the default io")
     }
-    using_custom = custom_usage.custom
-    val composerCustomCommandManager = Module(new ComposerCommandBundler[T1, T2](bundleIn, bundleOut, composerConstructor.composerCoreWrapper))
+    using_custom = CustomCommandUsage.custom
+    val composerCustomCommandManager = Module(new ComposerCommandBundler[T1, T2](bundleIn, bundleOut, composerConstructor.composerCoreWrapper, outer.systemRef.acc.sysNCmdSourceLookup(outer.composerSystemParams.name)))
     composerCustomCommandManager.suggestName(composerConstructor.composerCoreWrapper.composerSystemParams.name + "CustomCommand")
-    composerCustomCommandManager.cio <> io_declaration
+    composerCustomCommandManager.cio.cmd <> io_declaration
+    composerCustomCommandManager.cio.cmd_in_source := io_source
     composerCustomCommandManager.io.resp.bits.rd := 0.U
-    TransitName(composerCustomCommandManager.io, composerCustomCommandManager)
+    custom_rocc_cmd_nbeats = bundleIn.getNBeats
+    composerCustomCommandManager.io
   }
 
   private def getTLClients(name: String, listList: List[(String, List[TLClientNode])]): List[TLClientNode] = {
@@ -355,10 +365,10 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
   }
 
   def ComposerIO(): ComposerCoreIO = {
-    if (using_custom == custom_usage.custom) {
+    if (using_custom == CustomCommandUsage.custom) {
       throw new Exception("Cannot use io after generating a custom io")
     }
-    using_custom = custom_usage.default
+    using_custom = CustomCommandUsage.default
     io_declaration
   }
 
@@ -375,11 +385,6 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
       new CCoreChannelMultiAccessBundleChannelMajor(dat)
   }
 
-  private object custom_usage extends Enumeration {
-    //noinspection ScalaUnusedSymbol
-    type custom_usage = Value
-    val unused, default, custom = Value
-  }
 }
 
 class ComposerSystemIO(implicit p: Parameters) extends Bundle {

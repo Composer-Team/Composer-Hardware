@@ -25,7 +25,7 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
     val pWithMap = p.alterPartial({
       case SystemName2IdMapKey => name2Id
     })
-    (LazyModule(new ComposerSystem(config, id, configs.flatMap(_.canIssueCoreCommandsTo).contains(name))(pWithMap)), id, config)
+    (LazyModule(new ComposerSystem(config, id, configs.flatMap(_.canIssueCoreCommandsTo).contains(name), this)(pWithMap)), id, config)
   }.toSeq
 
 
@@ -46,23 +46,28 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
       }
     }
   }
-
-  if (requireInternalCmdRouting) {
-    // for each system that can issue commands, connect them to the target systems in the accelerator
-    // Seq of tuple of (target name, src xbar)
-    system_tups.foreach{ sys =>
-      sys._1.outgoingCmdXBars.foreach { case (target, source_xbar) =>
-        val targetSys = system_tups(name2Id(target))
-        val cmd_endpoint = targetSys._1.incomingInternalCommandXbar.get
-        cmd_endpoint := source_xbar
-
-        val resp_source = targetSys._1.outgoingInternalResponseXbar.get
-        sys._1.incomingInternalResponseHandlers(target)._2 := resp_source
-      }
-    }
-  }
-
   val systems = system_tups.map(_._1)
+
+  // for each system that can issue commands, connect them to the target systems in the accelerator
+  // Seq of tuple of (target name, src xbar)
+  val sysNCmdSourceLookup =
+    Map.from(system_tups.map { case (targetSys, _, sys_param) =>
+      targetSys.incomingInternalCommandXbar match {
+        case Some(manager) =>
+          val targetName = sys_param.name
+          // find all systems that send commands here
+          (sys_param.name, systems.map { srcSys =>
+            if (srcSys.outgoingCmdXBars.isDefinedAt(targetName)) {
+              val src = srcSys.outgoingCmdXBars(targetName)
+              manager := src
+              srcSys.incomingInternalResponseHandlers(targetName)._2 := targetSys.outgoingInternalResponseXbar.get
+              srcSys.nCores + 1
+            } else 1
+          }.sum)
+        case None => (sys_param.name, 1)
+      }
+    })
+
   val mems = systems.flatMap(_.memory_nodes)
 
   lazy val module = new ComposerAccModule(this)
