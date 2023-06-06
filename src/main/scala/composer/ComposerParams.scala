@@ -16,6 +16,7 @@ case object ComposerSystemsKey extends Field[List[ComposerSystemParams]]
 case object SystemName2IdMapKey extends Field[Map[String, Int]]
 case object DRAMBankBytes extends Field[Int]
 case object ComposerQuiet extends Field[Boolean]
+case object PrefetchSourceMultiplicity extends Field[Int]
 
 // Architecture parameters
 //case object MaxChannelTransactionLenKey extends Field[Int]
@@ -68,6 +69,8 @@ class WithComposer(
       case TLInterconnectWidthBytes => 16
       case PgLevels             => 5
       case XLen                 => 64 // Applies to all cores
+      case PrefetchSourceMultiplicity => 8
+      case SimpleDRAMHintKey => false
       case CmdRespBusWidthBytes => 4
       case MaxHartIdBits =>
         1 // log2Up(site(TilesLocated(InSubsystem)).map(_.tileParams.hartId).max+1)
@@ -125,7 +128,7 @@ class WithComposer(
         )
       case MonitorsEnabled            => false
       case TileKey                    => RocketTileParams()
-      case MaxInFlightMemTxsPerSource => 1
+      case MaxInFlightMemTxsPerSource => 32
       case DRAMBankBytes              => 4 * 1024
     })
 

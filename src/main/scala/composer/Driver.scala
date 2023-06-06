@@ -2,28 +2,14 @@ package composer
 
 import chipsalliance.rocketchip.config._
 import chisel3.stage._
-import composer.ComposerBuild.{
-  MemoryGeneratorDef,
-  memoryGenerators,
-  sourceList,
-  symbolicResources
-}
+import composer.ComposerBuild._
 import composer.Generation.ExportCSymbolPhase
-import composer.Systems.ComposerTop
-import firrtl.{
-  AnnotationSeq,
-  CustomDefaultMemoryEmission,
-  CustomDefaultRegisterEmission,
-  MemoryNoInit
-}
+import firrtl._
 import firrtl.options.PhaseManager.PhaseDependency
 import firrtl.options._
 import firrtl.stage.FirrtlCli
-import freechips.rocketchip.stage.{
-  ConfigsAnnotation,
-  RocketChipCli,
-  TopModuleAnnotation
-}
+import freechips.rocketchip.stage._
+import java.nio.file
 import os._
 
 import java.io.FileWriter
@@ -79,15 +65,8 @@ object ComposerBuild {
 
   private[composer] val composerVsimDir: String =
     composerRoot() + "/Composer-Hardware/vsim/"
-
   private[composer] val composerBin: String = composerRoot() + "/bin/"
-
-  private[composer] val fpnew_dir: Path = os.pwd / ".fpnew_cache"
-
-  private[composer] val memory_dir: Path = os.pwd / ".memories"
-
-  private[composer] var symbolicResources: Seq[Path] = Seq.empty
-
+  private[composer] var symbolicMemoryResources: Seq[Path] = Seq.empty
   private[composer] var sourceList: Seq[Path] = Seq.empty
 
   private[composer] case class MemoryGeneratorDef(
@@ -97,12 +76,12 @@ object ComposerBuild {
   // allow the Driver to provide drivers after the fact
   private[composer] val memoryGenerators: Seq[MemoryGeneratorDef] = Seq.empty
 
-  private[composer] def addSource(p: Path): Unit = {
+  def addSource(p: Path): Unit = {
     sourceList = sourceList :+ p
   }
 
   private[composer] def addSymbolicResource(p: Path): Unit = {
-    symbolicResources = symbolicResources :+ p
+    symbolicMemoryResources = symbolicMemoryResources :+ p
   }
 }
 
@@ -160,12 +139,15 @@ class ComposerBuild(config: Config) {
       }
     }
     os.move(targetDir / "ComposerTop.v", outputFile, replaceExisting = true)
-    appendSrcsTo(os.pwd / ".fpnew_cache", outputFile)
 
-    sourceList.map(_.toString()).distinct foreach { src =>
-      os.write.append(outputFile, os.read(Path(src)))
+    sourceList.distinct foreach { src =>
+      if (file.Files.isRegularFile(java.nio.file.Paths.get(src.toString()))) {
+        os.write.append(outputFile, os.read(src))
+      } else {
+        os.copy.over(src, gsrc_dir / src.baseName)
+      }
     }
-    symbolicResources.foreach { sr =>
+    symbolicMemoryResources.foreach { sr =>
       val basename = sr.baseName
       println(basename)
     }

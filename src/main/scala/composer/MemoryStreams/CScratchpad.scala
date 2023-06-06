@@ -13,22 +13,24 @@ import freechips.rocketchip.tilelink._
 
 import scala.annotation.tailrec
 
-class CScratchpadDualAccessPort(val scReqBits: Int, val dataWidthBits: Int) extends Bundle {
+sealed abstract class CScratchpadPort extends Bundle {}
+
+class CScratchpadDualPortAccess(val scReqBits: Int, val dataWidthBits: Int) extends CScratchpadPort {
   val port1 = new CScratchpadAccessPort(scReqBits, dataWidthBits)
   val port2 = new CScratchpadAccessPort(scReqBits, dataWidthBits)
   def ports = Seq(port1, port2)
 }
 
-object CScratchpadDualAccessPort {
-  def apply(port1: CScratchpadAccessPort, port2: CScratchpadAccessPort): CScratchpadDualAccessPort = {
-    val w = Wire(new CScratchpadDualAccessPort(port1.scReqBits, port1.dataWidthBits))
+object CScratchpadDualPortAccess {
+  def apply(port1: CScratchpadAccessPort, port2: CScratchpadAccessPort): CScratchpadDualPortAccess = {
+    val w = Wire(new CScratchpadDualPortAccess(port1.scReqBits, port1.dataWidthBits))
     w.port1 <> port1
     w.port2 <> port2
     w
   }
 }
 
-class CScratchpadAccessPort(val scReqBits: Int, val dataWidthBits: Int) extends Bundle {
+class CScratchpadAccessPort(val scReqBits: Int, val dataWidthBits: Int) extends CScratchpadPort {
   val req = Flipped(Decoupled(new Bundle() {
     val addr = UInt(scReqBits.W)
     val data = UInt(dataWidthBits.W)
@@ -144,7 +146,7 @@ class CScratchpadImp(supportWriteback: Boolean,
 
   private val memory = Seq.fill(nDuplicates)(CMemory(latency, dataWidth = dataWidthBits, nRows = nDatas, debugName = Some(outer.name)))
 
-  val dual_port_IOs = Seq.fill(nDuplicates)(IO(new CScratchpadDualAccessPort(scReqBits, dataWidthBits)))
+  val dual_port_IOs = Seq.fill(nDuplicates)(IO(new CScratchpadDualPortAccess(scReqBits, dataWidthBits)))
   def access: Seq[CScratchpadAccessPort] = Seq.tabulate(nPorts)(idx => if (idx % 2 == 0) dual_port_IOs(idx / 2).port1 else dual_port_IOs(idx / 2).port2)
 
   val memoryLengthBits = log2Up(nDatas * outer.channelWidthBytes) + 1

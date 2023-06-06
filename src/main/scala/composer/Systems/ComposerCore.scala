@@ -41,8 +41,8 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
       TLClientNode(List(TLMasterPortParameters.v1(
         clients = List(TLMasterParameters.v1(
           name = s"ReadChannel_sys${system_id}_core${core_id}_${para.name}$i",
-          supportsGet = TransferSizes(1,Math.max(1, param.maxInFlightTxs/2)*blockBytes),
-          supportsProbe = TransferSizes(1, p(CacheBlockBytes)),
+          supportsGet = TransferSizes(1, blockBytes * p(PrefetchSourceMultiplicity)),
+          supportsProbe = TransferSizes(1, blockBytes * p(PrefetchSourceMultiplicity)),
           sourceId = IdRange(0, param.maxInFlightTxs)
         )))))
     })
@@ -97,7 +97,9 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
           nDatas = mp.nDatas,
           latency = mp.latency,
           nPorts = 2,
-          specialization = CScratchpadSpecialization.flatPacked))
+          specialization = CScratchpadSpecialization.flatPacked)(p.alterPartial {
+          case SimpleDRAMHintKey => true
+        }))
         sp.mem_slave_node.get := intraCoreMemXbar
         (intraCoreMemXbar, sp)
       }
@@ -199,7 +201,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     }
   }
 
-  def getIntraCoreMemIns(name: String)(implicit valName: ValName): Seq[CScratchpadDualAccessPort] = {
+  def getIntraCoreMemIns(name: String)(implicit valName: ValName): Seq[CScratchpadDualPortAccess] = {
     val params = try {
       outer.intraCoreMemSlaveNodes.filter(_._1 == name)(0)
     } catch {
@@ -211,7 +213,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     VecInit((0 until params._3.nChannels) map (getIntraCoreMemIn(name, _)))
   }
 
-  def getIntraCoreMemIn(name: String, idx: Int): CScratchpadDualAccessPort = {
+  def getIntraCoreMemIn(name: String, idx: Int): CScratchpadDualPortAccess = {
     val params = outer.intraCoreMemSlaveNodes.filter(_._1 == name)
     if (params.isEmpty) throw new Exception(s"Attempting to access intraCoreMem \"$name\" which we can't find in the config.")
     val ic_scratchpad = params(0)

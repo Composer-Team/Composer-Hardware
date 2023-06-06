@@ -96,7 +96,7 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
 
         if (nBytes > 1) {
           assert(io.req.bits.addr(log2Ceil(nBytes) - 1, 0) === 0.U,
-            "FixedSequentialWriteChannel: Unaligned request")
+            "FixedSequentialWriteChannel: Unaligned request to addr(%x), required alignment to %d\n", io.req.bits.addr, log2Ceil(nBytes).U)
         }
         // wait for data from the core
         state := s_data

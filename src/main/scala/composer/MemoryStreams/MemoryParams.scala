@@ -115,7 +115,9 @@ case class CScratchpadParams(name: String,
   override val nChannels: Int = 1
 
   private[composer] def make(implicit p: Parameters): CScratchpad = {
-    new CScratchpad(supportWriteback, None, dataWidthBits, nDatas, latency, nPorts, specialization)
+    new CScratchpad(supportWriteback, None, dataWidthBits, nDatas, latency, nPorts, specialization)(p.alterPartial({
+      case SimpleDRAMHintKey => false
+    }))
   }
 }
 
