@@ -61,9 +61,6 @@ class FlatPackScratchpadParams extends CScratchpadSpecialization
 /**
  * Base type for Composer Memory Channel configurations. Subtypes may include special behaviors and interfaces.
  * i.e., scratchpads and caches
- *
- * @param name      The name of the channel
- * @param nChannels number of memory access channels of this type
  */
 trait CChannelParams {
   val name: String

@@ -116,7 +116,7 @@ private[MemoryStreams] class CFPGAMemory(
       if (nRows > 4 * 1024 && dataWidth < 64) {
         if (!p(ComposerQuiet))
           System.err.println(
-            s"One of the memory modules (${debugName}) has a data width less than 64 ($dataWidth) but has a total\n" +
+            s"One of the memory modules ($debugName) has a data width less than 64 ($dataWidth) but has a total\n" +
               s"data capacity that makes it appropriate for URAM (applicable for Ultrascale+ devices)\n" +
               s"This may lead to poor URAM cascading. Consider increasing the width if possible."
           )
@@ -493,6 +493,7 @@ object SRAMBuilder {
       throw new Exception(s"Can't build memory with $nRows rows and $dataWidth columns with $latency cycles. ")
     }
 
+    @tailrec
     def getCascade(rem: Int,
                    divsRem: Int,
                    lst: List[Int] = List.empty): List[Int] = {

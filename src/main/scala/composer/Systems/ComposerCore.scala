@@ -73,7 +73,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
     ).flatMap(_._2)
   val externalCoreCommNodes = Map.from(composerSystemParams.canIssueCoreCommandsTo.map { targetSys =>
     (targetSys, TLClientNode(Seq(TLMasterPortParameters.v1(clients = Seq(TLMasterParameters.v1(
-      s"${composerSystemParams.name}_core${core_id}_to${targetSys}",
+      s"${composerSystemParams.name}_core${core_id}_to$targetSys",
       supportsProbe = TransferSizes(1 << log2Up(ComposerRoccCommand.packLengthBytes)),
       supportsPutFull = TransferSizes(1 << log2Up(ComposerRoccCommand.packLengthBytes))
     ))))))

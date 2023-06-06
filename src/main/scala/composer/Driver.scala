@@ -119,7 +119,7 @@ class ComposerBuild(config: Config) {
           new ConfigsAnnotation(Seq(full_name)),
           new OutputAnnotationFileAnnotation(outputFile.toString()),
           CustomDefaultMemoryEmission(MemoryNoInit),
-          CustomDefaultRegisterEmission(false, true)
+          CustomDefaultRegisterEmission(useInitAsPreset = false, disableRandomization = true)
         )
       )
     )
