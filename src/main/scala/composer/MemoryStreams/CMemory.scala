@@ -304,7 +304,7 @@ private[composer] object SRAMUtil {
            |do_spice=1
            |do_gds=1
            |do_logic=1
-           |do_lef=0
+           |do_lef=1
            |do_drc=0
            |do_lvs=1
            |do_cx=0

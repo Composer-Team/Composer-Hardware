@@ -3,7 +3,6 @@ package composer.Systems
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import composer.TLManagement.makeTLMultilayerXbar
 import composer.common._
 import composer._
 import freechips.rocketchip.diplomacy._
