@@ -81,7 +81,6 @@ class CReader(dataBytes: Int,
 
   io.channel.in_progress := state =/= s_idle
 
-  assert(!(io.req.valid && ((io.req.bits.len & (io.req.bits.len - 1.U)).asUInt =/= 0.U)))
   val largestRead = beatBytes * largeTxNBeats
   val lgLargestRead = log2Up(largestRead)
   println("largest read is " + largestRead)
@@ -178,6 +177,9 @@ class CReader(dataBytes: Int,
       when(io.req.fire) {
         addr := io.req.bits.addr
         len := io.req.bits.len
+        assert(io.req.bits.len(log2Up(beatBytes)-1, 0) === 0.U,
+          f"The provided length is not aligned to the data bus size. Please align to $beatBytes.\n" +
+          f"Just make sure that you always flush through the data when you're done to make the reader usable again.")
         state := s_send_mem_request
         prefetch_writeIdx := 0.U
         prefetch_readIdx := 0.U
