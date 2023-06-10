@@ -4,24 +4,27 @@ import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import composer._
-import composer.MemoryStreams.CFPGAMemory.{bram_used, uram_used}
-import composer.MemoryStreams.SRAMUtil.portTy
-import composer.MemoryStreams.SRAMUtil.portTy.portTy
+import composer.MemoryStreams.RAM.CFPGAMemory
 import freechips.rocketchip.diplomacy.ValName
 
 import java.io.FileWriter
 import scala.annotation.tailrec
 import scala.collection.SeqMap
 
+
+
 object CMemory {
   def apply(
       latency: Int,
       dataWidth: Int,
       nRows: Int,
+      nPorts: Int,
       debugName: Option[String] = None
-  )(implicit p: Parameters, valName: ValName): DPSRAMBundle = {
+  )(implicit p: Parameters, valName: ValName): CMemoryIOBundle = {
     p(PlatformTypeKey) match {
       case PlatformType.FPGA =>
+        require (nPorts <= 2, s"Trying to elaborate a $nPorts port memory. FPGA BRAM/URAM only" +
+          s"supports up to 2 ports.")
         val cmem = Module(
           new CFPGAMemory(
             latency - 2,
@@ -31,7 +34,31 @@ object CMemory {
           )
         )
         cmem.suggestName(valName.name)
-        cmem.io
+        val mio = Wire(Output(new CMemoryIOBundle(nPorts, addrBits = log2Up(nRows), dataWidth)))
+        cmem.io.I1 := mio.data_in(0)
+        cmem.io.CE1 := mio.clock.asBool
+        cmem.io.A1 := mio.addr(0)
+        cmem.io.CSB1 := mio.chip_select(0)
+        cmem.io.WEB1 := mio.write_enable(0)
+        cmem.io.OEB1 := mio.read_enable(0)
+        mio.data_out(0) := cmem.io.O1
+        cmem.io.CE2 := DontCare
+        if (nPorts == 1) {
+          cmem.io.I2 := DontCare
+          cmem.io.A2 := DontCare
+          cmem.io.CSB2 := false.B
+          cmem.io.OEB2 := DontCare
+          cmem.io.WEB2 := DontCare
+        } else {
+          cmem.io.I2 := mio.data_in(1)
+          cmem.io.CE2 := mio.clock.asBool
+          cmem.io.A2 := mio.addr(1)
+          cmem.io.CSB2 := mio.chip_select(1)
+          cmem.io.WEB2 := mio.write_enable(1)
+          cmem.io.OEB2 := mio.read_enable(1)
+          mio.data_out(1) := cmem.io.O2
+        }
+        mio
       case PlatformType.ASIC =>
         val cmem = Module(
           new CASICMemoryWithActiveHighSelects(latency, dataWidth, nRows)
@@ -42,312 +69,26 @@ object CMemory {
   }
 }
 
-object CFPGAMemory {
-  private var bram_used = 0
-  private var uram_used = 0
+class CMemoryIOBundle(val nPorts: Int, addrBits: Int, dataWidth: Int) extends Bundle {
+  val addr = Vec(nPorts, UInt(addrBits.W))
+
+  val data_in = Vec(nPorts, UInt(dataWidth.W))
+  val data_out = Vec(nPorts, UInt(dataWidth.W))
+
+  val chip_select = Vec(nPorts, Bool())
+  val read_enable = Vec(nPorts, Bool())
+  val write_enable = Vec(nPorts, Bool())
+
+  val clock = Input(Clock())
 }
 
 trait HasCMemoryIO {
-  val io: DPSRAMBundle
+  val io: CMemoryIOBundle
 }
 
-case object SimpleDRAMHintKey extends Field[Boolean]
-//noinspection ScalaUnusedSymbol
-private[MemoryStreams] class CFPGAMemory(
-                                          latency: Int,
-                                          dataWidth: Int,
-                                          nRows: Int,
-                                          debugName: String,
-                                        )(implicit p: Parameters)
-    extends BlackBox
-    with HasCMemoryIO {
-  val io = IO(new DPSRAMBundle(log2Up(nRows), dataWidth))
-  require(
-    latency >= 1,
-    "Scratchpad latency must be at least 1. Found " + latency
-  )
-  private val addrWidth = log2Up(nRows)
 
-  private val bram_dwidth = List(1, 2, 4, 9, 18, 36) ++ (if (p(SimpleDRAMHintKey)) Seq(72) else Seq())
-  private val bram_maxdwidth = if (p(SimpleDRAMHintKey)) 72 else 36
-  private val uram_dwidth = 72
-  private val uram_nrows = 4 * 1024
-  private val bram_width2rows = Map.from({
-    Seq(
-      (1, 32 * 1024),
-      (2, 16 * 1024),
-      (4, 8 * 1024),
-      (9, 4 * 1024),
-      (18, 2 * 1024),
-      (36, 1024)) ++ (if (p(SimpleDRAMHintKey)) Seq(Tuple2(72, 512)) else Seq())
-  })
 
-  @tailrec
-  private def get_bram_width(
-                              requested: Int,
-                              h: List[Int] = bram_dwidth
-                            ): Int = {
-    if (h.isEmpty) bram_maxdwidth
-    else if (requested <= h.head) h.head
-    else get_bram_width(requested, h.tail)
-  }
 
-  private def get_n_brams(widthRequested: Int, rowsRequested: Int): Int = {
-    val w = get_bram_width(widthRequested)
-    val rows_per_bram = bram_width2rows(w)
-    // if asking for a super wide BRAM, then they're likely going to be cascaded together
-    val cascade = if (widthRequested > w) {
-      (widthRequested.toFloat / w).ceil.toInt
-    } else 1
-    (rowsRequested.toFloat / rows_per_bram).ceil.toInt * cascade
-  }
-
-  private def get_n_urams(widthRequested: Int, rowsRequested: Int): Int = {
-    val row_consumption = (rowsRequested.toFloat / uram_nrows).ceil.toInt
-    val width_mult = (widthRequested.toFloat / uram_dwidth).ceil.toInt
-    width_mult * row_consumption
-  }
-
-  val dname_prefix = s"CMemoryL${latency}DW${dataWidth}R$nRows"
-  val (memoryAnnotations, dname_suffix) = {
-    if (
-      p(ConstraintHintsKey).contains(ComposerConstraintHint.MemoryConstrained)
-    ) {
-      if (nRows > 4 * 1024 && dataWidth < 64) {
-        if (!p(ComposerQuiet))
-          System.err.println(
-            s"One of the memory modules ($debugName) has a data width less than 64 ($dataWidth) but has a total\n" +
-              s"data capacity that makes it appropriate for URAM (applicable for Ultrascale+ devices)\n" +
-              s"This may lead to poor URAM cascading. Consider increasing the width if possible."
-          )
-      }
-      // appropriate data width and at least 90% capacity
-      val uram_consumption = get_n_urams(dataWidth, nRows)
-      val bram_consumption = get_n_brams(dataWidth, nRows)
-      val have_enough_uram = uram_used + uram_consumption < p(PlatformNURAM)
-      val have_enough_bram = bram_used + bram_consumption < p(PlatformNBRAM)
-      val ret = if (dataWidth >= 64 && nRows >= 4 * 1024 * 0.5 && have_enough_uram) {
-        uram_used = uram_used + uram_consumption
-        System.err.println(
-          s"Using $uram_consumption urams for $debugName ($dataWidth, $nRows)- $dname_prefix"
-        )
-        ("(* ram_style = \"ultra\" *)", "constU")
-      } else if (have_enough_bram) {
-        System.err.println(
-          s"Using $bram_consumption brams for $debugName ($dataWidth, $nRows) - $dname_prefix"
-        )
-        bram_used = bram_used + bram_consumption
-        ("(* ram_style = \"block\" *)", "constB")
-      } else {
-        System.err.println(
-          "Memory Constrained Hint Warning: URAM and BRAM may be entirely consumed by requested\n" +
-            "memory. Design may be too big for given platform.\n" +
-            s"BRAM Used: $bram_used/${p(PlatformNBRAM)}\n" +
-            s"URAM Used: $uram_used/${p(PlatformNURAM)}"
-        )
-        ("", "constX")
-      }
-      System.err.println(s"Total Usage - BRAM($bram_used/${p(PlatformNBRAM)}) URAM($uram_used/${p(PlatformNURAM)})")
-      ret
-    } else ("", "")
-  }
-  override val desiredName = f"$dname_prefix$dname_suffix"
-
-  private val memoryRoot = os.pwd / ".memories"
-  if (!os.exists(memoryRoot)) os.makeDir(memoryRoot)
-
-  private val component = memoryRoot / f"$desiredName.v"
-
-  ComposerBuild.addSource(component)
-
-  val src =
-    f"""
-       |module $desiredName (
-       |  input CE1,
-       |  input CE2,
-       |  input WEB1,
-       |  input WEB2,
-       |  input OEB1,
-       |  input OEB2,
-       |  output reg [${dataWidth - 1}:0] O1,
-       |  input [${dataWidth - 1}:0] I1,
-       |  input [${addrWidth - 1}:0] A1,
-       |  output reg [${dataWidth - 1}:0] O2,
-       |  input [${dataWidth - 1}:0] I2,
-       |  input [${addrWidth - 1}:0] A2,
-       |  input CSB1,
-       |  input CSB2);
-       |
-       |$memoryAnnotations
-       |reg [${dataWidth - 1}:0] mem [${nRows - 1}:0];        // Memory Declaration
-       |reg [${dataWidth - 1}:0] memreg1;
-       |reg [${dataWidth - 1}:0] memreg2;
-       |reg [${dataWidth - 1}:0] mem_pipe_reg1 [${latency - 1}:0];    // Pipelines for memory
-       |reg [${dataWidth - 1}:0] mem_pipe_reg2 [${latency - 1}:0];    // Pipelines for memory
-       |reg [$latency:0] mem_en_pipe_reg1;                // Pipelines for memory enable
-       |reg [$latency:0] mem_en_pipe_reg2;                // Pipelines for memory enable
-       |
-       |integer          i;
-       |always @ (posedge CE1)
-       |begin
-       |  if(CSB1) begin
-       |    if (WEB1) begin
-       |      mem[A1] <= I1;
-       |    end
-       |    if (OEB1) begin
-       |      memreg1 <= mem[A1];
-       |    end
-       |  end
-       |end
-       |
-       |always @ (posedge CE1)
-       |begin
-       |  if(CSB2) begin
-       |    if (WEB2) begin
-       |      mem[A2] <= I2;
-       |    end
-       |    if (OEB2) begin
-       |      memreg2 <= mem[A2];
-       |    end
-       |  end
-       |end
-       |
-       |always @ (posedge CE1)
-       |begin
-       |  mem_en_pipe_reg1[0] <= CSB1 && OEB1;
-       |  for (i=0; i<$latency; i=i+1) begin
-       |    mem_en_pipe_reg1[i+1] <= mem_en_pipe_reg1[i];
-       |  end
-       |
-       |  mem_en_pipe_reg2[0] <= CSB2 && OEB2;
-       |  for (i=0; i<$latency; i=i+1) begin
-       |    mem_en_pipe_reg2[i+1] <= mem_en_pipe_reg2[i];
-       |  end
-       |
-       |end
-       |
-       |// RAM output data goes through a pipeline.
-       |always @ (posedge CE1)
-       |begin
-       |  if (mem_en_pipe_reg1[0]) begin
-       |    mem_pipe_reg1[0] <= memreg1;
-       |  end
-       |  if (mem_en_pipe_reg2[0]) begin
-       |    mem_pipe_reg2[0] <= memreg2;
-       |  end
-       |
-       |end
-       |
-       |always @ (posedge CE1)
-       |begin
-       |  for (i = 0; i < $latency-1; i = i+1) begin
-       |    if (mem_en_pipe_reg1[i+1]) begin
-       |      mem_pipe_reg1[i+1] <= mem_pipe_reg1[i];
-       |    end
-       |    if (mem_en_pipe_reg2[i+1]) begin
-       |      mem_pipe_reg2[i+1] <= mem_pipe_reg2[i];
-       |    end
-       |
-       |  end
-       |end
-       |
-       |// Final output register gives user the option to add a reset and
-       |// an additional enable signal just for the data ouptut
-       |always @ (posedge CE1)
-       |begin
-       |  if (mem_en_pipe_reg1[$latency]) begin
-       |    O1 <= mem_pipe_reg1[$latency-1];
-       |  end
-       |  if (mem_en_pipe_reg2[$latency]) begin
-       |    O2 <= mem_pipe_reg2[$latency-1];
-       |  end
-       |
-       |end
-       |endmodule
-       |
-       |""".stripMargin
-
-  val fw = new FileWriter(component.toString())
-  fw.write(src)
-  fw.close()
-
-}
-
-private[composer] object SRAMUtil {
-  object portTy extends Enumeration {
-    val dual, single = Value
-    type portTy = Value
-  }
-
-  // return name of SRAM
-  def generateSRAM(pt: portTy, rows: Int, cols: Int)(implicit p: Parameters): String = {
-    if (rows < 4 || rows > 1024) {
-      throw new Exception(f"Memory config not available ${rows}x$cols")
-    }
-    val name = "SRAM" + (pt match {
-      case portTy.dual => "2RW"
-      case portTy.single => "1RW"
-    }) + rows + "x" + cols
-    //    return name
-    val run_root = os.root / "usr" / "xtmp" / "cmk91" / "install" / "saed_mc_v3_0_1" / "saed_mc"
-    val outputDir = run_root / name
-    if (!os.exists(run_root))
-      throw new Exception("Unable to find memory compiler...")
-    if (!os.exists(outputDir / f"$name.v")) {
-      val configname = f"${name}_config.cfg"
-      val config = run_root / configname
-      os.write.over(
-        config,
-        f"""mem_type=${if (pt == portTy.dual) "dual" else "single"}_14
-           |word_count=$rows
-           |word_bits=$cols
-           |do_spice=1
-           |do_gds=1
-           |do_logic=1
-           |do_lef=1
-           |do_drc=0
-           |do_lvs=1
-           |do_cx=0
-           |do_rcx=0
-           |do_lib_nldm=1
-           |do_mw=0
-           |do_ndm=1
-           |work_dir=$name
-           |do_toolchoose=icv""".stripMargin
-      )
-      println(config.toString())
-      val proc = os
-        .proc(
-          Seq("bash", "run_me.sh", (os.home / ".bashrc").toString(), configname)
-        )
-        .call(run_root, stdout = os.Inherit)
-      if (proc.exitCode != 0) throw new Exception("FAILED")
-    }
-    if (!p(BuildSynthesisKey)) {
-      ComposerBuild.addSource(outputDir / f"$name.v")
-    }
-    ComposerBuild.addSymbolicResource(outputDir)
-    name
-  }
-}
-
-class DPSRAMBundle(val addrBits: Int, dataBits: Int) extends Bundle {
-  val A1 = Input(UInt(addrBits.W))
-  val CE1 = Input(Bool())
-  val WEB1 = Input(Bool())
-  val OEB1 = Input(Bool())
-  val CSB1 = Input(Bool())
-  val I1 = Input(UInt(dataBits.W))
-  val O1 = Output(UInt(dataBits.W))
-
-  val A2 = Input(UInt(addrBits.W))
-  val CE2 = Input(Bool())
-  val WEB2 = Input(Bool())
-  val OEB2 = Input(Bool())
-  val CSB2 = Input(Bool())
-  val I2 = Input(UInt(dataBits.W))
-  val O2 = Output(UInt(dataBits.W))
-}
 
 trait withSupportForwarding {
   val elements: SeqMap[String, Data]
@@ -364,48 +105,34 @@ trait withSupportForwarding {
   }
 }
 
-trait withDPForwarding extends withSupportForwarding {
-  val addrBits: Int
-  val A1_FW = Output(UInt(addrBits.W))
-  val CSB1_FW = Output(Bool())
-  val OEB1_FW = Output(Bool())
-  val WEB1_FW = Output(Bool())
-
-  val A2_FW = Output(UInt(addrBits.W))
-  val CSB2_FW = Output(Bool())
-  val OEB2_FW = Output(Bool())
-  val WEB2_FW = Output(Bool())
-}
-
 trait withSPForwarding extends withSupportForwarding {
   val addrBits: Int
-  val A_FW = Output(UInt(addrBits.W))
-  val CSB_FW = Output(Bool())
-  val OEB_FW = Output(Bool())
-  val WEB_FW = Output(Bool())
+  val nPorts: Int
+  val addr_FW = Output(Vec(nPorts, UInt(addrBits.W)))
+  val chip_select_FW = Output(Vec(nPorts, Bool()))
+  val read_enable_FW = Output(Vec(nPorts, Bool()))
+  val write_enable_FW = Output(Vec(nPorts, Bool()))
 }
 
-private class CMemoryDPSRAM(rows: Int, dataBits: Int)(implicit p: Parameters) extends BlackBox {
-  override val desiredName = SRAMUtil.generateSRAM(portTy.dual, rows, dataBits)
-  val addrBits = log2Up(rows)
-  val io = IO(new DPSRAMBundle(addrBits, dataBits))
+trait HasMemoryInterface {
+  def data_in: Seq[UInt]
+  def data_out: Seq[UInt]
+
+  def addr: Seq[UInt]
+
+  def chip_select: Seq[Bool]
+  def read_enable: Seq[Bool]
+  def write_enable: Seq[Bool]
+  def clocks: Seq[Bool]
 }
 
-class SPSRAMBundle(val addrBits: Int, dataBits: Int) extends Bundle {
-  val A = Input(UInt(addrBits.W))
-  val CE = Input(Bool())
-  val WEB = Input(Bool())
-  val OEB = Input(Bool())
-  val CSB = Input(Bool())
-  val I = Input(UInt(dataBits.W))
-  val O = Output(UInt(dataBits.W))
-}
-
-private class CMemorySPSRAM(rows: Int, dataBits: Int)(implicit p: Parameters) extends BlackBox {
-  override val desiredName =
-    SRAMUtil.generateSRAM(portTy.single, rows, dataBits)
-  val addrBits = log2Up(rows)
-  val io = IO(new SPSRAMBundle(addrBits, dataBits))
+class MemoryAccessBundle(val addrBits: Int, dataBits: Int, val nPorts: Int) extends Bundle {
+  val addr = Input(Vec(nPorts, UInt(addrBits.W)))
+  val write_enable = Input(Vec(nPorts, Bool()))
+  val read_enable = Input(Vec(nPorts, Bool()))
+  val chip_select = Input(Vec(nPorts, Bool()))
+  val data_in = Input(Vec(nPorts, UInt(dataBits.W)))
+  val data_out = Output(Vec(nPorts, UInt(dataBits.W)))
 }
 
 private class CASICSPMemoryCascade(
@@ -418,7 +145,7 @@ private class CASICSPMemoryCascade(
   require(idx < cascadeSize, "sanity")
   val cascadeBits = log2Up(cascadeSize)
   val totalAddr = log2Up(rows) + cascadeBits
-  val io = IO(new SPSRAMBundle(totalAddr, dataBits) with withSPForwarding)
+  val io = IO(new SPSRAMBundle(totalAddr, dataBits) with withMemoryIOForwarding)
   val cascade_select1 = idx.U === io.A.head(cascadeBits)
   mem.io.CE := clock.asBool
   io.O := mem.io.O
@@ -438,11 +165,10 @@ private class CASICSPMemoryCascade(
   io.O := Mux(cascade_select_stage, mem.io.O, data_in_stage)
 }
 
-private class CASICDPMemoryCascade(
-                                    rows: Int,
-                                    dataBits: Int,
-                                    cascadeBits: Int,
-                                    idx: Int
+private class CASICDPMemoryCascade(rows: Int,
+                                   dataBits: Int,
+                                   cascadeBits: Int,
+                                   idx: Int
                                   )(implicit p: Parameters) extends RawModule {
   val mem = Module(new CMemoryDPSRAM(rows, dataBits))
   val totalAddr = log2Up(rows) + cascadeBits
@@ -489,62 +215,130 @@ private class CASICDPMemoryCascade(
   }
 }
 
-object SRAMBuilder {
-  def buildSerially(latency: Int, dataWidth: Int, nRows: Int)(implicit io: DPSRAMBundle, p: Parameters): Unit = {
-    if (latency < (nRows / 1024) || dataWidth > 512) {
-      throw new Exception(s"Can't build memory with $nRows rows and $dataWidth columns with $latency cycles. ")
-    }
+// SRAM DIM
+case class SD(dWidth: Int, nRows: Int)
 
+case class CascadeDescriptor(depth: Int, bankWidths: Seq[Int])
+
+abstract class MemoryCompiler {
+  val DP_mems: Seq[SD]
+  val SP_mems: Seq[SD]
+  val isActiveHighSignals: Boolean
+
+  def getMemoryName(nPorts: Int, nRows: Int, nColumns: Int): String
+
+  def getDPMemoryCascade(suggestedRows: Int, suggestedColumns: Int, latency: Int): CascadeDescriptor = {
+    getMemoryCascade(suggestedRows, suggestedColumns, latency, DP_mems)
+  }
+
+  def getSPMemoryCascade(suggestedRows: Int, suggestedColumns: Int, latency: Int): CascadeDescriptor = {
+    getMemoryCascade(suggestedRows, suggestedColumns, latency, SP_mems)
+  }
+
+  private def getMemoryCascade(suggestedRows: Int, suggestedColumns: Int, latency: Int, memSet: Seq[SD]): CascadeDescriptor = {
+    // first figure out how deep we have to cascade.
+    val maxRows = memSet.map(_.nRows).max
+    require(latency * maxRows >= suggestedRows,
+      f"Unable to build a $suggestedRows deep memory in $latency cycles. ${(suggestedRows.toFloat / maxRows).ceil.toInt} cycles needed.")
+    // find the minimum depth that will make us able to build the cascade
+    val chosenDepth = memSet.map(_.nRows).filter(depth => depth * latency >= suggestedRows).min
+    // get the widest memory with the selected depth
+
+    /**
+     * Sieve of eratosthenes-ish except record shortest sequence to get to a certain width given the basis
+     */
     @tailrec
-    def getCascade(rem: Int,
-                   divsRem: Int,
-                   lst: List[Int] = List.empty): List[Int] = {
-      if (divsRem == 0) {
-        require(rem <= 0, s"Not able to build a memory cascade with $nRows with latency $latency. We estimate ${nRows / 1024} latency will be necessary.")
-        lst.reverse
+    def sieve(lim: Int, numberChoices: List[Int], originators: Map[Int, List[Int]]):
+    Map[Int, List[Int]] = {
+      def get_add_list(): Map[Int, List[Int]] = {
+        if (numberChoices.isEmpty) return Map.empty
+        val inc = numberChoices.head
+        val addList = originators.map(o => (o._1 + inc, inc :: o._2))
+        val filter = addList.filter { kv =>
+          if (kv._1 > lim) false
+          else if (!originators.contains(kv._1)) true
+          else {
+            val other = originators(kv._1)
+            if (other.length > kv._2.length) true
+            else false
+          }
+        }
+        filter
+      }
+
+      val AL = get_add_list()
+      if (AL.isEmpty) {
+        if (numberChoices.isEmpty) originators
+        else sieve(lim, numberChoices.tail, originators)
       } else {
-        val amt = Math.min(1 << log2Up(rem / divsRem), 1024)
-        getCascade(rem - amt, divsRem - 1, amt :: lst)
+        sieve(lim, numberChoices, originators.removedAll(AL.keys) ++ AL)
       }
     }
 
+    val max_width = 1 << log2Up(suggestedColumns)
+    val basis = memSet.map(_.dWidth).distinct.toList
+    val sieveRes = sieve(max_width, basis,
+      Map.from(basis.map(p => (p, List(p)))))
+    val chosenWidth = sieveRes.filter(p => p._1 >= suggestedColumns).toList.minBy(_._1)
+    CascadeDescriptor(chosenDepth, chosenWidth._2)
+  }
+}
+
+object MemoryCompiler {
+
+  def buildDPSRAM(latency: Int, dataWidth: Int, nRows: Int)(implicit io: DPSRAMBundle, p: Parameters): Unit = {
+
+    val memoryStructure = p(ASICMemoryCompilerKey).getDPMemoryCascade(nRows, dataWidth, latency)
     val totalRowBits = log2Up(nRows)
-    val cascadeRows = getCascade(nRows, latency)
+    val cascadeRows = Seq.fill(latency)(memoryStructure.depth)
+    //
     val addressBases = cascadeRows.zip(cascadeRows.scan(0)(_ + _)).map {
       case (sz, sum) => sum >> log2Up(sz)
     }
-    val readWidth = 1 << log2Up(dataWidth)
-    println(cascadeRows)
-    val cascade = Seq.tabulate(latency)(idx =>
-      Module(
-        new CASICDPMemoryCascade(
-          cascadeRows(idx),
-          readWidth,
-          totalRowBits - log2Up(cascadeRows(idx)),
-          addressBases(idx)
+    val banks = Seq.tabulate(memoryStructure.bankWidths.length) { bank_idx =>
+      val data_offset = (0 until bank_idx).map(memoryStructure.bankWidths(_)).sum
+      val bank_width = memoryStructure.bankWidths(bank_idx)
+      val bank_i1 = io.I1(data_offset + bank_width - 1, data_offset)
+      val bank_i2 = io.I2(data_offset + bank_width - 1, data_offset)
+
+      val bank_O1 = Wire(UInt(bank_width.W))
+      val bank_O2 = Wire(UInt(bank_width.W))
+      val cascade = Seq.tabulate(latency)(idx =>
+        Module(
+          new CASICDPMemoryCascade(
+            cascadeRows(idx),
+            bank_width,
+            totalRowBits - log2Up(cascadeRows(idx)),
+            addressBases(idx)
+          )
         )
       )
-    )
-    cascade zip cascade.tail foreach { case (front, back) =>
-      front.io.connectTo(back.io)
+      cascade zip cascade.tail foreach { case (front, back) =>
+        front.io.connectTo(back.io)
+      }
+      cascade.foreach { csc => csc.io.CE1 := io.CE1; csc.io.CE2 := io.CE2 }
+      val head = cascade.head
+      val tail = cascade.last
+      head.io.A1 := io.A1
+      head.io.A2 := io.A2
+      head.io.I1 := bank_i1
+      head.io.I2 := bank_i2
+      head.io.CSB1 := io.CSB1
+      head.io.CSB2 := io.CSB2
+      head.io.WEB1 := io.WEB1
+      head.io.WEB2 := io.WEB2
+      head.io.OEB1 := io.OEB1
+      head.io.OEB2 := io.OEB2
+      bank_O1 := tail.io.O1
+      bank_O2 := tail.io.O2
+      (bank_idx, bank_O1, bank_O2)
     }
-    cascade.foreach { csc => csc.io.CE1 := io.CE1; csc.io.CE2 := io.CE2 }
-    val head = cascade.head
-    val tail = cascade.last
-    head.io.A1 := io.A1
-    head.io.A2 := io.A2
-    head.io.I1 := io.I1
-    head.io.I2 := io.I2
-    head.io.CSB1 := io.CSB1
-    head.io.CSB2 := io.CSB2
-    head.io.WEB1 := io.WEB1
-    head.io.WEB2 := io.WEB2
-    head.io.OEB1 := io.OEB1
-    head.io.OEB2 := io.OEB2
-    io.O1 := tail.io.O1
-    io.O2 := tail.io.O2
+    io.O1 := Cat(banks.sortBy(_._1).reverse.map(_._2))
+    io.O2 := Cat(banks.sortBy(_._1).reverse.map(_._3))
+
   }
 }
+
 
 /**
  * ALL LOGIC IMPLEMENTED HERE MUST BE ACTIVE LOW
@@ -554,14 +348,14 @@ class CASICMemory(latency: Int, dataWidth: Int, nRowsSuggested: Int)(implicit p:
     with HasCMemoryIO {
   private val nRows = Math.max(nRowsSuggested, 4 * latency)
   override val desiredName = f"CMemoryASIC_l${latency}dw${dataWidth}r$nRows"
-  implicit val io = IO(new DPSRAMBundle(dataWidth, nRows))
+  implicit val io = IO(new DPSRAMBundle(log2Up(nRows), dataWidth))
 
-  SRAMBuilder.buildSerially(latency, dataWidth, nRows)
+  MemoryCompiler.buildDPSRAM(latency, dataWidth, nRows)
 }
 
 class CASICMemoryWithActiveHighSelects(latency: Int, dataWidth: Int, nRows: Int)(implicit p: Parameters)
     extends RawModule
-    with HasCMemoryIO {
+    with HasMemoryInterface {
   val io = IO(new DPSRAMBundle(log2Up(nRows), dataWidth))
 
   val mod = Module(

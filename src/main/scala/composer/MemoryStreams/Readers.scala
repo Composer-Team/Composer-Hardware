@@ -6,6 +6,7 @@ import chisel3.util._
 import composer.{PlatformType, PlatformTypeKey, PrefetchSourceMultiplicity}
 import composer.Systems.DataChannelIO
 import composer.common.{CLog2Up, ShiftReg}
+import composer.MemoryStreams.RAM.SimpleDRAMHintKey
 import freechips.rocketchip.diplomacy.ValName
 import freechips.rocketchip.tilelink._
 
@@ -90,14 +91,12 @@ class CReader(dataBytes: Int,
 
   val prefetch_blatency = p(PlatformTypeKey) match {
     case PlatformType.FPGA => 3
-    case PlatformType.ASIC => (prefetchRows.toFloat / 512).ceil.toInt
+    case PlatformType.ASIC => (prefetchRows.toFloat / 256).ceil.toInt
   }
   val prefetch_buffers = CMemory(prefetch_blatency, storedDataWidth, prefetchRows, debugName = Some(debugName.getOrElse("") + "_prefetchBuffer"))(p.alterPartial({
     case SimpleDRAMHintKey => true
   }), valName = ValName.apply("prefetch_buffers"))
-  prefetch_buffers.CE1 := clock.asBool
-  prefetch_buffers.CE2 := clock.asBool
-
+  prefetch_buffers.clock := clock
   prefetch_buffers.A1 := prefetch_readIdx
   prefetch_buffers.I1 := DontCare
   prefetch_buffers.WEB1 := false.B
