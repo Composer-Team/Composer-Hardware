@@ -93,21 +93,21 @@ class CReader(dataBytes: Int,
     case PlatformType.FPGA => 3
     case PlatformType.ASIC => (prefetchRows.toFloat / 256).ceil.toInt
   }
-  val prefetch_buffers = CMemory(prefetch_blatency, storedDataWidth, prefetchRows, debugName = Some(debugName.getOrElse("") + "_prefetchBuffer"))(p.alterPartial({
+  val prefetch_buffers = CMemory(prefetch_blatency, storedDataWidth, prefetchRows, debugName = Some(debugName.getOrElse("") + "_prefetchBuffer"), nPorts = 2)(p.alterPartial({
     case SimpleDRAMHintKey => true
   }), valName = ValName.apply("prefetch_buffers"))
   prefetch_buffers.clock := clock
-  prefetch_buffers.A1 := prefetch_readIdx
-  prefetch_buffers.I1 := DontCare
-  prefetch_buffers.WEB1 := false.B
-  prefetch_buffers.OEB1 := true.B
-  prefetch_buffers.CSB1 := false.B
+  prefetch_buffers.addr(0) := prefetch_readIdx
+  prefetch_buffers.data_in(0) := DontCare
+  prefetch_buffers.write_enable(0) := false.B
+  prefetch_buffers.read_enable(0) := true.B
+  prefetch_buffers.chip_select(0) := false.B
 
-  prefetch_buffers.CSB2 := false.B
-  prefetch_buffers.OEB2 := false.B
-  prefetch_buffers.WEB2 := true.B
-  prefetch_buffers.I2 := DontCare
-  prefetch_buffers.A2 := DontCare
+  prefetch_buffers.chip_select(1) := false.B
+  prefetch_buffers.read_enable(1) := false.B
+  prefetch_buffers.write_enable(1) := true.B
+  prefetch_buffers.data_in(1) := DontCare
+  prefetch_buffers.addr(1) := DontCare
 
   val prefetch_buffers_valid = Reg(Vec(prefetchRows, Bool()))
 
@@ -124,9 +124,9 @@ class CReader(dataBytes: Int,
       val dSource = tl_out.d.bits.source
       val prefetchIdx = sourceToIdx(dSource)
 
-      prefetch_buffers.I2 := tl_out.d.bits.data
-      prefetch_buffers.A2 := prefetchIdx
-      prefetch_buffers.CSB2 := true.B
+      prefetch_buffers.data_in(1) := tl_out.d.bits.data
+      prefetch_buffers.data_in(1) := prefetchIdx
+      prefetch_buffers.chip_select(1) := true.B
 
       sourceToIdx(dSource) := sourceToIdx(dSource) + 1.U
       prefetch_buffers_valid(prefetchIdx) := true.B
@@ -162,9 +162,9 @@ class CReader(dataBytes: Int,
         prefetch_buffers_valid(sourceToIdx(src)) := true.B
         sourceToIdx(src) := sourceToIdx(src) + 1.U
 
-        prefetch_buffers.A2 := sourceToIdx(src)
-        prefetch_buffers.I2 := Cat(tl_out.d.bits.data, Cat(beatBufferPerSource(src).reverse))
-        prefetch_buffers.CSB2 := true.B
+        prefetch_buffers.addr(1) := sourceToIdx(src)
+        prefetch_buffers.data_in(1) := Cat(tl_out.d.bits.data, Cat(beatBufferPerSource(src).reverse))
+        prefetch_buffers.chip_select(1) := true.B
 
       }
     }
@@ -256,19 +256,19 @@ class CReader(dataBytes: Int,
   })
 
 
-  val read_enable_pipeline = ShiftReg(prefetch_buffers.CSB1, prefetch_blatency)
+  val read_enable_pipeline = ShiftReg(prefetch_buffers.chip_select(0), prefetch_blatency)
   val reads_in_flight = RegInit(0.U(3.W))
   val queue_occupancy = RegInit(0.U(log2Up(channel_buffer_depth + 1).W))
 
   dontTouch(prefetch_readIdx)
   when(prefetch_buffers_valid(prefetch_readIdx) && reads_in_flight + queue_occupancy < channel_buffer_depth.U) {
-    prefetch_buffers.CSB1 := true.B
+    prefetch_buffers.chip_select(0) := true.B
     prefetch_buffers_valid(prefetch_readIdx) := false.B
     prefetch_readIdx := prefetch_readIdx + 1.U
   }
 
   // maintain reads in flight
-  when(prefetch_buffers.CSB1 && read_enable_pipeline) {}.elsewhen(prefetch_buffers.CSB1) {
+  when(prefetch_buffers.chip_select(0) && read_enable_pipeline) {}.elsewhen(prefetch_buffers.chip_select(0)) {
     reads_in_flight := reads_in_flight + 1.U
   }.elsewhen(read_enable_pipeline) {
     reads_in_flight := reads_in_flight - 1.U
@@ -282,7 +282,7 @@ class CReader(dataBytes: Int,
   }
 
   channel_buffer_q.io.enq.valid := read_enable_pipeline
-  channel_buffer_q.io.enq.bits := prefetch_buffers.O1
+  channel_buffer_q.io.enq.bits := prefetch_buffers.data_out(0)
   channel_buffer_q.io.deq.ready := false.B
   channel_buffer_valid := channel_buffer_q.io.deq.valid
   when(io.channel.data.fire) {

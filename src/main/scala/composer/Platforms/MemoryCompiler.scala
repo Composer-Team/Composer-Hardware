@@ -79,13 +79,14 @@ private class C_ASIC_MemoryCascade(rows: Int,
   val mem = Module(p(ASICMemoryCompilerKey).generateMemoryFactory(nPorts, rows, dataBits)(p)())
   val totalAddr = log2Up(rows) + cascadeBits
   val io = IO(new CMemoryIOBundle(nPorts, totalAddr, dataBits) with withMemoryIOForwarding)
-  mem.clock := io.clock
+  mem.clocks.foreach(_ := io.clock)
   (0 until nPorts) foreach { port_idx =>
     val cascade_select = idx.U === io.addr(port_idx).head(cascadeBits)
     io.data_out(port_idx) := mem.data_out(port_idx)
     mem.data_in(port_idx) := io.data_in(port_idx)
     mem.read_enable(port_idx) := io.read_enable(port_idx)
-    val selectMe_activeHigh = !io.chip_select(port_idx) && cascade_select
+    val CSActiveHigh = if (p(ASICMemoryCompilerKey).isActiveHighSignals) io.chip_select(port_idx) else !io.chip_select(port_idx)
+    val selectMe_activeHigh = CSActiveHigh && cascade_select
     val selectMe = if (p(ASICMemoryCompilerKey).isActiveHighSignals) selectMe_activeHigh else !selectMe_activeHigh
     mem.chip_select(port_idx) := selectMe
     mem.write_enable(port_idx) := io.write_enable(port_idx)
@@ -94,7 +95,7 @@ private class C_ASIC_MemoryCascade(rows: Int,
       io.addr_FW(port_idx) := RegNext(io.addr(port_idx))
       io.read_enable_FW(port_idx) := Reg(io.read_enable(port_idx))
       io.write_enable_FW(port_idx) := Reg(io.write_enable(port_idx))
-      io.chip_select_FW(port_idx) := Reg(io.chip_select(port_idx) ^ selectMe)
+      io.chip_select_FW(port_idx) := Reg(io.chip_select(port_idx) ^ selectMe_activeHigh)
       val cascade_select_stage = RegNext(cascade_select)
       val data_in_stage = RegNext(io.data_in(port_idx))
       io.data_out := Mux(cascade_select_stage, mem.data_out(port_idx), data_in_stage)
@@ -124,6 +125,11 @@ object MemoryCompiler {
     val addressBases = cascadeRows.zip(cascadeRows.scan(0)(_ + _)).map {
       case (sz, sum) => sum >> log2Up(sz)
     }
+
+    def al_switch(a: Bool): Bool = {
+      if (p(ASICMemoryCompilerKey).isActiveHighSignals) a else !a
+    }
+
     val banks = Seq.tabulate(memoryStructure.bankWidths.length) { bank_idx =>
       val data_offset = (0 until bank_idx).map(memoryStructure.bankWidths(_)).sum
       val bank_width = memoryStructure.bankWidths(bank_idx)
@@ -149,9 +155,9 @@ object MemoryCompiler {
       (0 until nPorts) foreach { port_idx =>
         head.io.addr(port_idx) := io.addr(port_idx)
         head.io.data_in(port_idx) := banks_i(port_idx)
-        head.io.chip_select(port_idx) := io.chip_select(port_idx)
-        head.io.write_enable(port_idx) := io.write_enable(port_idx)
-        head.io.read_enable(port_idx) := io.read_enable(port_idx)
+        head.io.chip_select(port_idx) := al_switch(io.chip_select(port_idx))
+        head.io.write_enable(port_idx) := al_switch(io.write_enable(port_idx))
+        head.io.read_enable(port_idx) := al_switch(io.read_enable(port_idx))
         banks_o(port_idx) := tail.io.data_out(port_idx)
       }
       (bank_idx, banks_o)
