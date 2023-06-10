@@ -285,6 +285,7 @@ class WithSAED(corner: ProcessCorner = ProcessCorner.Typical,
           Module(new RegMem(nRows, nColumns, nPorts))
         }
       }
+      makeMemory
     }
 
     override def getMemoryName(nPorts: Int, nRows: Int, nColumns: Int): String = {

@@ -47,6 +47,11 @@ class CScratchpadAccessPort(val scReqBits: Int, val dataWidthBits: Int) extends 
   }
 }
 
+class MemWritePort(addrBits: Int, dataBits: Int) extends DecoupledIO(new Bundle() {
+  val data = UInt(dataBits.W)
+  val addr = UInt(addrBits.W)
+})
+
 class CScratchpadInitReqIO(mem_out: Option[TLBundle], nDatas: Int, memLenBits: Int) extends Bundle {
   val progress = Output(UInt((log2Up(nDatas) + 1).W))
   val request, writeback = Flipped(Decoupled(new Bundle() {

@@ -158,6 +158,6 @@ abstract class LazyModuleWithSLRs()(implicit p: Parameters) extends LazyModule {
         ConstraintGeneration.addToSLR(name, a)
         lazyClockMap = (lm, slrId.get) :: lazyClockMap
     }
-    annotations.foldRight(lm) { case (annot: AssignmentAnnotation, cs: T) => annot.transform(cs) }
+    annotations.foldRight(lm) { case (annot: AssignmentAnnotation, cs) => annot.transform(cs) }
   }
 }

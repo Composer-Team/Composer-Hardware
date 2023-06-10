@@ -9,6 +9,7 @@ import composer.MemoryStreams._
 import composer.RoccHelpers._
 import composer.TLManagement.{ComposerIntraCoreIOModule, TLClientModule}
 import composer.common._
+import composer.MemoryStreams.RAM.SimpleDRAMHintKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
@@ -102,7 +103,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
           dataWidthBits = mp.dataWidthBits,
           nDatas = mp.nDatas,
           latency = mp.latency,
-          nPorts = 2,
+          nPorts = 1,
           specialization = CScratchpadSpecialization.flatPacked)(p.alterPartial {
           case SimpleDRAMHintKey => true
         }))
@@ -209,7 +210,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     }
   }
 
-  def getIntraCoreMemIns(name: String)(implicit valName: ValName): Seq[CScratchpadDualPortAccess] = {
+  def getIntraCoreMemIns(name: String)(implicit valName: ValName): Seq[CScratchpadAccessPort] = {
     val params = try {
       outer.intraCoreMemSlaveNodes.filter(_._1 == name)(0)
     } catch {
@@ -221,11 +222,11 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     VecInit((0 until params._3.nChannels) map (getIntraCoreMemIn(name, _)))
   }
 
-  def getIntraCoreMemIn(name: String, idx: Int): CScratchpadDualPortAccess = {
+  def getIntraCoreMemIn(name: String, idx: Int): CScratchpadAccessPort = {
     val params = outer.intraCoreMemSlaveNodes.filter(_._1 == name)
     if (params.isEmpty) throw new Exception(s"Attempting to access intraCoreMem \"$name\" which we can't find in the config.")
     val ic_scratchpad = params(0)
-    ic_scratchpad._4(idx).module.dual_port_IOs(0)
+    ic_scratchpad._4(idx).module.IOs(0)
   }
 
   def getReaderModule(name: String,
@@ -289,7 +290,7 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     lm.suggestName(name)
     val mod = lm.module
 
-    (mod.req, mod.access)
+    (mod.req, mod.IOs)
   }
 
   def getWriterModules(name: String,
