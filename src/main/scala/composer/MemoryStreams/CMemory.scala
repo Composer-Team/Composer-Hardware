@@ -58,24 +58,22 @@ object CMemory {
         }
         mio
       case PlatformType.ASIC =>
-        val cmem = Module(
-          new CASICMemory(latency, dataWidth, nRows, nPorts)
-        )
+        val cmem = Module(new CASICMemory(latency, dataWidth, nRows, nPorts))
         cmem.suggestName(valName.name)
-        cmem.io
+        TransitName(cmem.io, cmem)
     }
   }
 }
 
 class CMemoryIOBundle(val nPorts: Int, val addrBits: Int, dataWidth: Int) extends Bundle {
-  val addr = Vec(nPorts, UInt(addrBits.W))
+  val addr = Input(Vec(nPorts, UInt(addrBits.W)))
 
-  val data_in = Vec(nPorts, UInt(dataWidth.W))
-  val data_out = Vec(nPorts, UInt(dataWidth.W))
+  val data_in = Input(Vec(nPorts, UInt(dataWidth.W)))
+  val data_out = Output(Vec(nPorts, UInt(dataWidth.W)))
 
-  val chip_select = Vec(nPorts, Bool())
-  val read_enable = Vec(nPorts, Bool())
-  val write_enable = Vec(nPorts, Bool())
+  val chip_select = Input(Vec(nPorts, Bool()))
+  val read_enable = Input(Vec(nPorts, Bool()))
+  val write_enable = Input(Vec(nPorts, Bool()))
 
   val clock = Input(Clock())
 }
@@ -84,22 +82,7 @@ trait HasCMemoryIO {
   val io: CMemoryIOBundle
 }
 
-trait withSupportForwarding {
-  val elements: SeqMap[String, Data]
-
-  def connectTo(other: Bundle): Unit = {
-    elements.filter(_._1.contains("_FW")).foreach { case (name, dat) =>
-      val o = other.elements(name.substring(0, name.length - 3))
-      o <> dat
-    }
-    other.elements.filter(_._1.substring(0, 1) == "I").foreach {
-      case (name, dat) =>
-        dat <> elements("O" + name.substring(1))
-    }
-  }
-}
-
-trait withMemoryIOForwarding extends withSupportForwarding {
+trait withMemoryIOForwarding {
   val addrBits: Int
   val nPorts: Int
   val addr_FW = Output(Vec(nPorts, UInt(addrBits.W)))

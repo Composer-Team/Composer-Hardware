@@ -76,10 +76,10 @@ private class C_ASIC_MemoryCascade(rows: Int,
                                    cascadeBits: Int,
                                    idx: Int,
                                    nPorts: Int)(implicit p: Parameters) extends RawModule {
-  val mem = Module(p(ASICMemoryCompilerKey).generateMemoryFactory(nPorts, rows, dataBits)(p)())
+  val mem = p(ASICMemoryCompilerKey).generateMemoryFactory(nPorts, rows, dataBits)(p)()
   val totalAddr = log2Up(rows) + cascadeBits
   val io = IO(new CMemoryIOBundle(nPorts, totalAddr, dataBits) with withMemoryIOForwarding)
-  mem.clocks.foreach(_ := io.clock)
+  mem.clocks.foreach(_ := io.clock.asBool)
   (0 until nPorts) foreach { port_idx =>
     val cascade_select = idx.U === io.addr(port_idx).head(cascadeBits)
     io.data_out(port_idx) := mem.data_out(port_idx)
@@ -93,12 +93,12 @@ private class C_ASIC_MemoryCascade(rows: Int,
     mem.addr(port_idx) := io.addr(port_idx).tail(cascadeBits)
     withClock(io.clock) {
       io.addr_FW(port_idx) := RegNext(io.addr(port_idx))
-      io.read_enable_FW(port_idx) := Reg(io.read_enable(port_idx))
-      io.write_enable_FW(port_idx) := Reg(io.write_enable(port_idx))
-      io.chip_select_FW(port_idx) := Reg(io.chip_select(port_idx) ^ selectMe_activeHigh)
+      io.read_enable_FW(port_idx) := RegNext(io.read_enable(port_idx))
+      io.write_enable_FW(port_idx) := RegNext(io.write_enable(port_idx))
+      io.chip_select_FW(port_idx) := RegNext(io.chip_select(port_idx) ^ selectMe_activeHigh)
       val cascade_select_stage = RegNext(cascade_select)
       val data_in_stage = RegNext(io.data_in(port_idx))
-      io.data_out := Mux(cascade_select_stage, mem.data_out(port_idx), data_in_stage)
+      io.data_out(port_idx) := Mux(cascade_select_stage, mem.data_out(port_idx), data_in_stage)
     }
   }
 }
@@ -147,7 +147,11 @@ object MemoryCompiler {
         )
       )
       cascade zip cascade.tail foreach { case (front, back) =>
-        front.io.connectTo(back.io)
+        back.io.addr <> front.io.addr_FW
+        back.io.chip_select <> front.io.chip_select_FW
+        back.io.data_in <> front.io.data_out
+        back.io.write_enable <> front.io.write_enable_FW
+        back.io.read_enable <> front.io.read_enable_FW
       }
       cascade.foreach { csc => csc.io.clock := io.clock }
       val head = cascade.head

@@ -138,25 +138,22 @@ class CScratchpadImp(supportWriteback: Boolean,
 
   IOs.grouped(mostPortsSupported) zip memory foreach{ case (access_group, mem) =>
     mem.clock := clock
-    
-    val port1 = access_group(0)
-    mem.addr(0) := port1.req.bits.addr
-    mem.chip_select(0) := port1.req.valid
-    mem.read_enable(0) := !port1.req.bits.write_enable
-    mem.write_enable(0) := port1.req.bits.write_enable
-    mem.data_in(0) := port1.req.bits.data
-    port1.res.valid := ShiftReg(port1.req.valid && !port1.req.bits.write_enable, latency)
-    port1.res.bits := mem.data_out(0)
-
-    if (access_group.length > 1) {
-      val port2 = access_group(1)
-      mem.addr(1) := port2.req.bits.addr
-      mem.chip_select(1) := port2.req.valid
-      mem.read_enable(1) := !port2.req.bits.write_enable
-      mem.write_enable(1) := port2.req.bits.write_enable
-      mem.data_in(1) := port2.req.bits.data
-      port2.res.valid := ShiftReg(port2.req.valid && !port2.req.bits.write_enable, latency)
-      port2.res.bits := mem.data_out(1)
+    access_group.indices.foreach { port_idx =>
+      val port = access_group(port_idx)
+      mem.addr(port_idx) := port.req.bits.addr
+      mem.chip_select(port_idx) := port.req.valid
+      mem.read_enable(port_idx) := !port.req.bits.write_enable
+      mem.write_enable(port_idx) := port.req.bits.write_enable
+      mem.data_in(port_idx) := port.req.bits.data
+      port.res.valid := ShiftReg(port.req.valid && !port.req.bits.write_enable, latency)
+      port.res.bits := mem.data_out(0)
+    }
+    (access_group.length until mem.nPorts) foreach { port_idx =>
+      mem.addr(port_idx) := DontCare
+      mem.chip_select(port_idx) := false.B
+      mem.read_enable(port_idx) := DontCare
+      mem.write_enable(port_idx) := DontCare
+      mem.data_in(port_idx) := DontCare
     }
   }
 
