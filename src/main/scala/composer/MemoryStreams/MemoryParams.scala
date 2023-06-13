@@ -72,8 +72,10 @@ trait CChannelParams {
  *
  * @param name      The name of the channel
  * @param nChannels number of memory access channels of this type
+ * @param maxInFlightTxs maximum number of AXI/TileLink memory transactions can be inflight per reader module at once
  */
-case class CReadChannelParams(name: String, nChannels: Int, maxInFlightTxs: Int = 1) extends CChannelParams {
+case class CReadChannelParams(name: String, nChannels: Int, maxInFlightTxs: Int = 2) extends CChannelParams {
+  require(maxInFlightTxs > 1, s"Max In Flight Transactions must be greater than 1. Got: $maxInFlightTxs")
 }
 
 /**
@@ -105,11 +107,12 @@ case class CScratchpadParams(name: String,
                              supportWriteback: Boolean,
                              dataWidthBits: Number,
                              nDatas: Number,
-                             latency: Number = 2,
+                             latency: Number = 3,
                              nPorts: Int = 2,
                              specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked)
   extends CChannelParams {
   override val nChannels: Int = 1
+  require(latency.intValue() >= 3, "Latency must be greater than 2") //TODO: CMemory line 27 subtracts 2gi but could be improved
 
   private[composer] def make(implicit p: Parameters): CScratchpad = {
     new CScratchpad(supportWriteback, None, dataWidthBits, nDatas, latency, nPorts, specialization)(p.alterPartial({
