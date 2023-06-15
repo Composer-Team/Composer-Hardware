@@ -114,7 +114,8 @@ class CScratchpadImp(supportWriteback: Boolean,
                      nPorts: Int,
                      specialization: CScratchpadSpecialization,
                      outer: CScratchpad) extends LazyModuleImp(outer) {
-  private val scReqBits = log2Up(nDatas)
+  private val realNRows = Math.max(nDatas, outer.channelWidthBytes*8/dataWidthBits)
+  private val scReqBits = log2Up(realNRows)
 
   private val maxTxLength = outer.channelWidthBytes
   private val lgMaxTxLength = log2Up(maxTxLength)
@@ -128,7 +129,7 @@ class CScratchpadImp(supportWriteback: Boolean,
 
   val nDuplicates = (nPorts.toFloat / mostPortsSupported).ceil.toInt
 
-  private val memory = Seq.fill(nDuplicates)(CMemory(latency, dataWidth = dataWidthBits, nRows = nDatas, debugName = Some(outer.name), nPorts = mostPortsSupported))
+  private val memory = Seq.fill(nDuplicates)(CMemory(latency, dataWidth = dataWidthBits, nRows = realNRows, debugName = Some(outer.name), nPorts = mostPortsSupported))
 
   val IOs = Seq.fill(nPorts)(IO(new CScratchpadAccessPort(scReqBits, dataWidthBits)))
 
@@ -440,7 +441,7 @@ class CScratchpadImp(supportWriteback: Boolean,
       writer.io.req.bits.len := req.writeback.bits.len
       writer.io.req.bits.addr := req.writeback.bits.memAddr
       val channel = writer.io.channel
-      val writebackIdx, written = Reg(UInt(log2Up(nDatas).W))
+      val writebackIdx, written = Reg(UInt(log2Up(realNRows).W))
 
       channel.data.valid := ShiftReg(memory(0).read_enable(0), latency) && wb_state === wb_read
       channel.data.bits := memory(0).data_out(0)
