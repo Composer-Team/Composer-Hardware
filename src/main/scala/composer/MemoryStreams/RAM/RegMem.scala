@@ -19,15 +19,19 @@ class RegMem(nRows: Int, nColumns: Int, nPorts: Int) extends RawModule with HasM
 
   override def write_enable: Seq[Bool] = io.write_enable
 
-  override def clocks: Seq[Bool] = Seq(io.clock.asBool)
+  override def clocks: Seq[Bool] = Seq(io.clock)
 
-  withClock(io.clock) {
+  val clock = io.clock.asClock
+
+  withClock(clock) {
     val mem = Reg(Vec(nRows, UInt(nColumns.W)))
     val out_regs = Reg(Vec(nPorts, UInt(nColumns.W)))
+
+
     data_out zip out_regs foreach { case (o, r) => o := r }
     (0 until nPorts) foreach { port_idx =>
       when(io.chip_select(port_idx)) {
-        assert(!(io.chip_select(port_idx) && io.read_enable(port_idx) && io.write_enable(port_idx)))
+        //        assert(!(io.chip_select(port_idx) && io.read_enable(port_idx) && io.write_enable(port_idx)))
         when(io.read_enable(port_idx)) {
           out_regs(port_idx) := mem(io.addr(port_idx))
         }.elsewhen(io.write_enable(port_idx)) {

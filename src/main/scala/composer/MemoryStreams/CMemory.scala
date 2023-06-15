@@ -75,7 +75,7 @@ class CMemoryIOBundle(val nPorts: Int, val addrBits: Int, dataWidth: Int) extend
   val read_enable = Input(Vec(nPorts, Bool()))
   val write_enable = Input(Vec(nPorts, Bool()))
 
-  val clock = Input(Clock())
+  val clock = Input(Bool())
 }
 
 trait HasCMemoryIO {

@@ -137,7 +137,7 @@ class CScratchpadImp(supportWriteback: Boolean,
   val req = IO(new CScratchpadInitReqIO(if (outer.mem_master_node.isDefined) Some(outer.mem_master_node.get.out(0)._1) else None, nDatas, memoryLengthBits))
 
   IOs.grouped(mostPortsSupported) zip memory foreach{ case (access_group, mem) =>
-    mem.clock := clock
+    mem.clock := clock.asBool
     access_group.indices.foreach { port_idx =>
       val port = access_group(port_idx)
       mem.addr(port_idx) := port.req.bits.addr

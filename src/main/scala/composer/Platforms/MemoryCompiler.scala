@@ -23,51 +23,59 @@ abstract class MemoryCompiler {
 
   def getMemoryCascade(suggestedRows: Int, suggestedColumns: Int, nPorts: Int, latency: Int): CascadeDescriptor = {
     // first figure out how deep we have to cascade.
-    val memSet = mems(nPorts)
-    val maxRows = memSet.map(_.nRows).max
-    require(latency * maxRows >= suggestedRows,
-      f"Unable to build a $suggestedRows deep memory in $latency cycles. ${(suggestedRows.toFloat / maxRows).ceil.toInt} cycles needed.")
-    // find the minimum depth that will make us able to build the cascade
-    val chosenDepth = memSet.map(_.nRows).filter(depth => depth * latency >= suggestedRows).min
-    // get the widest memory with the selected depth
+    val ms = mems.get(nPorts)
+    ms match {
+      case Some(memSet) =>
+        val maxRows = memSet.map(_.nRows).max
+        require(latency * maxRows >= suggestedRows,
+          f"Unable to build a $suggestedRows deep memory in $latency cycles. ${(suggestedRows.toFloat / maxRows).ceil.toInt} cycles needed.")
+        // find the minimum depth that will make us able to build the cascade
+        val chosenDepth = memSet.map(_.nRows).filter(depth => depth * latency >= suggestedRows).min
+        // get the widest memory with the selected depth
 
-    /**
-     * Sieve of eratosthenes-ish except record shortest sequence to get to a certain width given the basis
-     */
-    @tailrec
-    def sieve(lim: Int, numberChoices: List[Int], originators: Map[Int, List[Int]]):
-    Map[Int, List[Int]] = {
-      def get_add_list(): Map[Int, List[Int]] = {
-        if (numberChoices.isEmpty) return Map.empty
-        val inc = numberChoices.head
-        val addList = originators.map(o => (o._1 + inc, inc :: o._2))
-        val filter = addList.filter { kv =>
-          if (kv._1 > lim) false
-          else if (!originators.contains(kv._1)) true
-          else {
-            val other = originators(kv._1)
-            if (other.length > kv._2.length) true
-            else false
+        /**
+         * Sieve of eratosthenes-ish except record shortest sequence to get to a certain width given the basis
+         */
+        @tailrec
+        def sieve(lim: Int, numberChoices: List[Int], originators: Map[Int, List[Int]]):
+        Map[Int, List[Int]] = {
+          def get_add_list(): Map[Int, List[Int]] = {
+            if (numberChoices.isEmpty) return Map.empty
+            val inc = numberChoices.head
+            val addList = originators.map(o => (o._1 + inc, inc :: o._2))
+            val filter = addList.filter { kv =>
+              if (kv._1 > lim) false
+              else if (!originators.contains(kv._1)) true
+              else {
+                val other = originators(kv._1)
+                if (other.length > kv._2.length) true
+                else false
+              }
+            }
+            filter
+          }
+
+          val AL = get_add_list()
+          if (AL.isEmpty) {
+            if (numberChoices.isEmpty) originators
+            else sieve(lim, numberChoices.tail, originators)
+          } else {
+            sieve(lim, numberChoices, originators.removedAll(AL.keys) ++ AL)
           }
         }
-        filter
-      }
 
-      val AL = get_add_list()
-      if (AL.isEmpty) {
-        if (numberChoices.isEmpty) originators
-        else sieve(lim, numberChoices.tail, originators)
-      } else {
-        sieve(lim, numberChoices, originators.removedAll(AL.keys) ++ AL)
-      }
+        val max_width = 1 << log2Up(suggestedColumns)
+        val basis = memSet.map(_.dWidth).distinct.toList
+        val sieveRes = sieve(max_width, basis,
+          Map.from(basis.map(p => (p, List(p)))))
+        val chosenWidth = sieveRes.filter(p => p._1 >= suggestedColumns).toList.minBy(_._1)
+        CascadeDescriptor(chosenDepth, chosenWidth._2)
+      case None =>
+        // The memory compiler doesn't support SRAMs with the require portage. Pass the problem down the line.
+        // if the Compiler supports RegMems, then it will succeed, otherwise, fail later
+        val d = 1 << log2Up((suggestedRows.toFloat / latency).ceil.toInt)
+        CascadeDescriptor(d, Seq(suggestedColumns))
     }
-
-    val max_width = 1 << log2Up(suggestedColumns)
-    val basis = memSet.map(_.dWidth).distinct.toList
-    val sieveRes = sieve(max_width, basis,
-      Map.from(basis.map(p => (p, List(p)))))
-    val chosenWidth = sieveRes.filter(p => p._1 >= suggestedColumns).toList.minBy(_._1)
-    CascadeDescriptor(chosenDepth, chosenWidth._2)
   }
 }
 
@@ -76,29 +84,31 @@ private class C_ASIC_MemoryCascade(rows: Int,
                                    cascadeBits: Int,
                                    idx: Int,
                                    nPorts: Int)(implicit p: Parameters) extends RawModule {
-  val mem = p(ASICMemoryCompilerKey).generateMemoryFactory(nPorts, rows, dataBits)(p)()
   val totalAddr = log2Up(rows) + cascadeBits
   val io = IO(new CMemoryIOBundle(nPorts, totalAddr, dataBits) with withMemoryIOForwarding)
-  mem.clocks.foreach(_ := io.clock.asBool)
-  (0 until nPorts) foreach { port_idx =>
-    val cascade_select = idx.U === io.addr(port_idx).head(cascadeBits)
-    io.data_out(port_idx) := mem.data_out(port_idx)
-    mem.data_in(port_idx) := io.data_in(port_idx)
-    mem.read_enable(port_idx) := io.read_enable(port_idx)
-    val CSActiveHigh = if (p(ASICMemoryCompilerKey).isActiveHighSignals) io.chip_select(port_idx) else !io.chip_select(port_idx)
-    val selectMe_activeHigh = CSActiveHigh && cascade_select
-    val selectMe = if (p(ASICMemoryCompilerKey).isActiveHighSignals) selectMe_activeHigh else !selectMe_activeHigh
-    mem.chip_select(port_idx) := selectMe
-    mem.write_enable(port_idx) := io.write_enable(port_idx)
-    mem.addr(port_idx) := io.addr(port_idx).tail(cascadeBits)
-    withClock(io.clock) {
-      io.addr_FW(port_idx) := RegNext(io.addr(port_idx))
-      io.read_enable_FW(port_idx) := RegNext(io.read_enable(port_idx))
-      io.write_enable_FW(port_idx) := RegNext(io.write_enable(port_idx))
-      io.chip_select_FW(port_idx) := RegNext(io.chip_select(port_idx) ^ selectMe_activeHigh)
-      val cascade_select_stage = RegNext(cascade_select)
-      val data_in_stage = RegNext(io.data_in(port_idx))
-      io.data_out(port_idx) := Mux(cascade_select_stage, mem.data_out(port_idx), data_in_stage)
+  withClockAndReset(io.clock.asClock, false.B.asAsyncReset) {
+    val mem = p(ASICMemoryCompilerKey).generateMemoryFactory(nPorts, rows, dataBits)(p)()
+    mem.clocks.foreach(_ := io.clock)
+    (0 until nPorts) foreach { port_idx =>
+      val cascade_select = if (cascadeBits == 0) true.B else idx.U === io.addr(port_idx).head(cascadeBits)
+      io.data_out(port_idx) := mem.data_out(port_idx)
+      mem.data_in(port_idx) := io.data_in(port_idx)
+      mem.read_enable(port_idx) := io.read_enable(port_idx)
+      val CSActiveHigh = if (p(ASICMemoryCompilerKey).isActiveHighSignals) io.chip_select(port_idx) else !io.chip_select(port_idx)
+      val selectMe_activeHigh = CSActiveHigh && cascade_select
+      val selectMe = if (p(ASICMemoryCompilerKey).isActiveHighSignals) selectMe_activeHigh else !selectMe_activeHigh
+      mem.chip_select(port_idx) := selectMe
+      mem.write_enable(port_idx) := io.write_enable(port_idx)
+      mem.addr(port_idx) := io.addr(port_idx).tail(cascadeBits)
+      withClock(io.clock.asClock) {
+        io.addr_FW(port_idx) := RegNext(io.addr(port_idx))
+        io.read_enable_FW(port_idx) := RegNext(io.read_enable(port_idx))
+        io.write_enable_FW(port_idx) := RegNext(io.write_enable(port_idx))
+        io.chip_select_FW(port_idx) := RegNext(io.chip_select(port_idx) ^ selectMe_activeHigh)
+        val cascade_select_stage = RegNext(cascade_select)
+        val data_in_stage = RegNext(io.data_in(port_idx))
+        io.data_out(port_idx) := Mux(cascade_select_stage, mem.data_out(port_idx), data_in_stage)
+      }
     }
   }
 }
@@ -140,7 +150,7 @@ object MemoryCompiler {
           new C_ASIC_MemoryCascade(
             cascadeRows(idx),
             bank_width,
-            totalRowBits - log2Up(cascadeRows(idx)),
+            Math.max(0, totalRowBits - log2Up(cascadeRows(idx))),
             addressBases(idx),
             nPorts
           )

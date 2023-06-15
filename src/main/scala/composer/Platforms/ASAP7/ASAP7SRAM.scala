@@ -17,6 +17,8 @@ class ASAP7_SP_SRAM (rows: Int, dataBits: Int)(implicit p: Parameters) extends B
     val read = Input(Bool())
     val write = Input(Bool())
     val dataout = Output(UInt(dataBits.W))
+
+    val sdel = Input(UInt(5.W))
   })
 
   override def addr: Seq[UInt] = Seq(io.ADDRESS)

@@ -96,7 +96,7 @@ class CReader(dataBytes: Int,
   val prefetch_buffers = CMemory(prefetch_blatency, storedDataWidth, prefetchRows, debugName = Some(debugName.getOrElse("") + "_prefetchBuffer"), nPorts = 2)(p.alterPartial({
     case SimpleDRAMHintKey => true
   }), valName = ValName.apply("prefetch_buffers"))
-  prefetch_buffers.clock := clock
+  prefetch_buffers.clock := clock.asBool
   prefetch_buffers.addr(0) := prefetch_readIdx
   prefetch_buffers.data_in(0) := DontCare
   prefetch_buffers.write_enable(0) := false.B
