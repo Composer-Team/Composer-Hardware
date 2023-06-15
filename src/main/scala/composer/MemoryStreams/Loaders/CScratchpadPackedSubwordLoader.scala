@@ -1,28 +1,25 @@
 package composer.MemoryStreams.Loaders
 
 import chipsalliance.rocketchip.config._
-
-
-import chisel3.util._
 import chisel3._
+import chisel3.util._
 
-class CScratchpadPackedSubwordLoader(datOutWidth: Int, idxWidth: Int, wordSizeBits: Int, datsPerSubword: Int,
-                                     val beatSize: Int)(implicit p: Parameters)
-  extends CScratchpadLoader(datOutWidth, idxWidth, beatSize) {
-  val beatBits = beatSize * 8
-  override val spEntriesPerBeat: Int = (beatSize * 8) / wordSizeBits
+class CScratchpadPackedSubwordLoader(datOutWidth: Int, idxWidth: Int, wordSizeBits: Int, datsPerSubword: Int)(implicit p: Parameters)
+  extends CScratchpadLoader(datOutWidth, idxWidth, wordSizeBits) {
+  override val spEntriesPerBeat: Int = datsPerSubword
 
-  if (wordSizeBits <= beatBits) {
-    require(beatSize * 8 % wordSizeBits == 0, "WordSize within Scratchpad is currently incompatible with our impl.\n" +
-      "Found " + wordSizeBits + ", require beatSize(" + beatSize * 8 + ") to be divisible by wordSize(" + wordSizeBits +
-      "). If you need this functionality, consider unaligned loader\n" +
-      "specializations or use raw Readers/Writers with manually instantiated BRAMs to achieve desired functionality\n")
-    val subwordCounter = Counter(beatSize)
+  if (datOutWidth == wordSizeBits) {
+    io.sp_write_out.bits.dat := io.cache_block_in.bits.dat
+    io.sp_write_out.bits.idx := io.cache_block_in.bits.idxBase
+    io.sp_write_out.valid := io.cache_block_in.valid
+    io.cache_block_in.ready := io.sp_write_out.ready
+  } else {
+    val subwordCounter = Counter(datsPerSubword + 1)
     val datCounter = Counter(datsPerSubword)
 
     val beat = Reg(UInt(io.cache_block_in.bits.dat.getWidth.W))
     val idxBase = Reg(UInt(idxWidth.W))
-    val lenRemainingFromReq = Reg(UInt((log2Up(beatSize) + 1).W))
+    val lenRemainingFromReq = Reg(UInt((log2Up(wordSizeBits / 8) + 1).W))
 
     val s_idle :: s_loading :: Nil = Enum(2)
     val state = RegInit(s_idle)

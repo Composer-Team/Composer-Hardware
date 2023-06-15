@@ -59,7 +59,6 @@ class CReader(dataBytes: Int,
   tl_reg.io.enq.valid := false.B
   tl_reg.io.enq.bits := DontCare
   io.req.ready := len === 0.U && state === s_idle
-  io.busy := state =/= s_idle
 
   // has to be pow2 to ensure OHToUInt works like we want
 
@@ -87,7 +86,7 @@ class CReader(dataBytes: Int,
   println("largest read is " + largestRead)
 
 
-  val prefetch_readIdx, prefetch_writeIdx = Reg(UInt(log2Up(prefetchRows).W))
+  val prefetch_readIdx, prefetch_writeIdx = RegInit(0.U(log2Up(prefetchRows).W))
 
   val prefetch_blatency = p(PlatformTypeKey) match {
     case PlatformType.FPGA => 3
@@ -115,6 +114,7 @@ class CReader(dataBytes: Int,
     prefetch_buffers_valid.foreach(_ := false.B)
   }
 
+  dontTouch(tl_out.d.bits.data)
   tl_out.d.ready := atLeastOneSourceActive
 
   val sourceToIdx = Reg(Vec(nSources, UInt(log2Up(prefetchRows).W)))
@@ -125,7 +125,7 @@ class CReader(dataBytes: Int,
       val prefetchIdx = sourceToIdx(dSource)
 
       prefetch_buffers.data_in(1) := tl_out.d.bits.data
-      prefetch_buffers.data_in(1) := prefetchIdx
+      prefetch_buffers.addr(1) := prefetchIdx
       prefetch_buffers.chip_select(1) := true.B
 
       sourceToIdx(dSource) := sourceToIdx(dSource) + 1.U
@@ -292,4 +292,7 @@ class CReader(dataBytes: Int,
       channel_buffer_q.io.deq.ready := true.B
     }
   }
+
+  io.busy := state =/= s_idle || reads_in_flight > 0.U || (prefetch_readIdx =/= prefetch_writeIdx)
+
 }

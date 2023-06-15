@@ -108,7 +108,7 @@ object CppGeneration {
 
   private[composer] def safe_join(s: Seq[String], sep: String = "\n"): String = if (s.isEmpty) "" else if (s.length == 1) s(0) else s.reduce(_ + sep + _)
 
-  def customCommandToCpp(sysName: String, cc: AbstractComposerCommand, resp: ComposerUserResponse): (String, String) = {
+  def customCommandToCpp(sysName: String, cc: AbstractComposerCommand, resp: ComposerUserResponse)(implicit p: Parameters): (String, String) = {
     val sub_signature = cc.realElements.sortBy(_._1).map { pa =>
       val isSigned = pa._2.isInstanceOf[SInt]
       getCType(pa._1, pa._2.getWidth, !isSigned) + " " + pa._1
@@ -171,7 +171,7 @@ object CppGeneration {
          |}
          |
          |$command_sig {
-         |  assert(core_id < (1 << 10));
+         |  assert(core_id < ${p(ComposerSystemsKey).filter(_.name == sysName)(0).nCores});
          |  uint64_t payloads[${numCommands * 2}];
          |""".stripMargin + (if (assignments.length == 1) assignments(0) + "\n" else assignments.reduce(_ + "\n" + _)) +
         f"""
@@ -271,6 +271,8 @@ object CppGeneration {
          |#include <composer/alloc.h>
          |#include <composer/rocc_cmd.h>
          |#include <cinttypes>
+         |#include <cassert>
+         |
          |#ifndef COMPOSER_ALLOCATOR_GEN
          |#define COMPOSER_ALLOCATOR_GEN
          |#define AXIL_BUS_WIDTH ${p(FrontBusBeatBytes) * 8}
