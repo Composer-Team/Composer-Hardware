@@ -118,9 +118,9 @@ class CScratchpadImp(supportWriteback: Boolean,
   private val scReqBits = log2Up(realNRows)
 
   private val maxTxLength = outer.channelWidthBytes
-  private val lgMaxTxLength = log2Up(maxTxLength)
-
-  private val pageLength = p(DRAMBankBytes)
+//  private val lgMaxTxLength = log2Up(maxTxLength)
+//
+//  private val pageLength = p(DRAMBankBytes)
 
   val mostPortsSupported = p(PlatformTypeKey) match {
     case PlatformType.FPGA => 2
@@ -175,253 +175,273 @@ class CScratchpadImp(supportWriteback: Boolean,
         new CScratchpadPackedSubwordLoader(dataWidthBits, scReqBits, dataWidthBits, 1, maxTxLength)
     })
 
-
-    val (mem_out, mem_edge) = outer.mem_master_node.get.out(0)
-
-    // given alignment, all bottom bits should be zeroed. Don't need to store them
-    val (memoryAddrBitsFAlign, memoryAddrShAmt) = {
-      val defaultBits = mem_out.params.addressBits
-      val alignment = log2Up(outer.channelWidthBytes) - 1
-      (defaultBits - alignment, alignment)
+    val swWordSizeBits = specialization match {
+      case psw: PackedSubwordScratchpadParams =>
+        psw.wordSizeBits
+      case _ => dataWidthBits
     }
 
-    def chopAddr(a: UInt): UInt = {
-      require(a.getWidth == mem_out.params.addressBits)
-      a(mem_out.params.addressBits - 1, memoryAddrShAmt)
+    val reader = Module(new CReader(swWordSizeBits, 1, tlclient = outer.mem_master_node.get, debugName = Some(s"ScratchpadReader")))
+    val idxCounter = Reg(UInt(log2Up(realNRows).W))
+    req.request.ready := reader.io.req.ready
+    reader.io.req.valid := req.request.valid
+    reader.io.req.bits.addr := req.request.bits.memAddr
+    reader.io.req.bits.len := req.request.bits.len
+    when (req.request.fire) {
+      idxCounter := req.request.bits.scAddr
+    }
+    loader.io.cache_block_in.valid := reader.io.channel.data.valid
+    loader.io.cache_block_in.bits.dat := reader.io.channel.data.bits(0)
+    loader.io.cache_block_in.bits.idxBase := idxCounter
+    reader.io.channel.data.ready := loader.io.cache_block_in.ready
+    when (loader.io.cache_block_in.fire) {
+      idxCounter := idxCounter + loader.spEntriesPerBeat.U
     }
 
-    def realignAddr(a: UInt): UInt = {
-      require(a.getWidth == memoryAddrBitsFAlign)
-      Cat(a, 0.U(memoryAddrShAmt.W))
-    }
-
-    val read_idle :: read_send :: read_process :: Nil = Enum(3)
-    val mem_tx_state = RegInit(read_idle)
-
-    // in-flight read tx busy bits
-
-    req.request.ready := mem_tx_state === read_idle
-
-    val reqIdleBits = RegInit(VecInit(Seq.fill(mem_edge.master.endSourceId)(true.B)))
-    val reqAvailable = reqIdleBits.reduce(_ || _)
-    val reqChosen = PriorityEncoder(reqIdleBits)
-    // only consider non-busy transactions to be the
-    val req_cache = Reg(Vec(mem_edge.master.endSourceId, new Bundle() {
-      val scratchpadAddress = UInt(req.request.bits.scAddr.getWidth.W)
-      val memoryLength = UInt(memoryLengthBits.W)
-      val memAddr = UInt(memoryAddrBitsFAlign.W)
-    }))
-    /* handle progress monitoring */
-
-    class ProgressStat extends Bundle {
-      val progress = UInt((1 + scReqBits).W)
-      val valid = Bool()
-      val complete = Bool()
-    }
-
-    val perSourceProgress = Reg(Vec(mem_edge.master.endSourceId, new ProgressStat()))
-    val loaderSource = Reg(UInt(mem_out.params.sourceBits.W))
-
-    val totalTx = Reg(new Bundle {
-      val memoryAddress = UInt(memoryAddrBitsFAlign.W)
-      val scratchpadAddress = UInt(req.request.bits.scAddr.getWidth.W)
-      val memoryLength = UInt(memoryLengthBits.W)
-    })
-
-    val txEmitLengthLg = Wire(UInt(4.W))
-    txEmitLengthLg := 0.U
-
-    // relaunch transactions at bank granularity
-    val rsource = mem_out.d.bits.source
-    val prevProcessed = Reg(rsource.cloneType)
-    val prevDone = Reg(Bool())
-    val relaunch_queue = Module(new Queue[UInt](reqChosen.cloneType, mem_edge.master.endSourceId, flow = false, useSyncReadMem = true))
-    relaunch_queue.io.enq.valid := false.B
-    relaunch_queue.io.enq.bits := rsource
-    relaunch_queue.io.deq.ready := false.B
-    when(relaunch_queue.io.deq.valid) {
-      mem_out.a.valid := true.B
-      val rl_id = relaunch_queue.io.deq.bits
-      val mem_length = req_cache(rl_id).memoryLength
-      val tx_size = Mux(mem_length < maxTxLength.U, OHToUInt(mem_length), lgMaxTxLength.U)
-      mem_out.a.bits := mem_edge.Get(
-        fromSource = rl_id,
-        toAddress = realignAddr(req_cache(rl_id).memAddr),
-        lgSize = tx_size
-      )._2
-      relaunch_queue.io.deq.ready := mem_out.a.ready
-    }.otherwise {
-      mem_out.a.valid := mem_tx_state === read_send
-      mem_out.a.bits := mem_edge.Get(
-        fromSource = reqChosen,
-        toAddress = realignAddr(totalTx.memoryAddress),
-        lgSize = txEmitLengthLg)._2
-    }
-
-
-    when(mem_tx_state === read_idle) {
-      when(req.request.fire) {
-        totalTx.memoryLength := req.request.bits.len
-        totalTx.scratchpadAddress := req.request.bits.scAddr
-        totalTx.memoryAddress := chopAddr(req.request.bits.memAddr)
-        mem_tx_state := read_send
-        prevDone := false.B
-        perSourceProgress foreach { pss =>
-          pss.valid := false.B
-          pss.complete := false.B
-        }
-
-        // sanity check
-        val low_order = req.request.bits.len(lgMaxTxLength - 1, 0)
-        val low_order_is_pow_2 = !(low_order & (low_order - 1.U)).orR
-        assert(low_order_is_pow_2,
-          "Transaction length must be approximately a multiple of the cache block size.\n" +
-            "Length detected: %d\n" +
-            "Length %% " + maxTxLength + " must be a power of two\n" +
-            "Low order bits found: %x\n", req.request.bits.len, low_order)
-
-        val alignment = Mux(req.request.bits.len < maxTxLength.U, req.request.bits.len, maxTxLength.U)
-        val alignment_is_power_2 = ((alignment - 1.U) & alignment) === 0.U
-        assert(alignment_is_power_2, "Alignment must be a power of two. Found %d\n", alignment)
-        val alignmentSubsets = VecInit((0 until req.request.bits.memAddr.getWidth).map(width => req.request.bits.memAddr(width, 0)))
-        assert(alignmentSubsets(OHToUInt(alignment) - 1.U) === 0.U, "\nAlignment not met!\n Alignment required: %x, Low order bits of address(%x): %x, len: %x\n",
-          alignment,
-          req.request.bits.memAddr,
-          alignmentSubsets(OHToUInt(alignment)),
-          req.request.bits.len)
-
-      }
-    }.elsewhen(mem_tx_state === read_send) {
-      when(!relaunch_queue.io.deq.valid) { // whenever relaunch is ongoing, we need to launch txs from elsewhere.
-        // They have precedence
-        val isBelowLimit = totalTx.memoryLength <= maxTxLength.U
-        txEmitLengthLg := Mux(isBelowLimit, OHToUInt(totalTx.memoryLength), lgMaxTxLength.U)
-        mem_out.a.valid := reqAvailable
-        val isBelowPage = totalTx.memoryLength <= pageLength.U
-        when(mem_out.a.fire) {
-          reqIdleBits(reqChosen) := false.B
-          req_cache(reqChosen).scratchpadAddress := totalTx.scratchpadAddress
-          req_cache(reqChosen).memoryLength := Mux(isBelowPage, totalTx.memoryLength, pageLength.U)
-          req_cache(reqChosen).memAddr := totalTx.memoryAddress
-
-          totalTx.memoryLength := Mux(isBelowPage, 0.U, totalTx.memoryLength - pageLength.U)
-          totalTx.scratchpadAddress := totalTx.scratchpadAddress + (loader.spEntriesPerBeat * pageLength / maxTxLength).U
-          totalTx.memoryAddress := chopAddr(realignAddr(totalTx.memoryAddress) + pageLength.U)
-
-          perSourceProgress(reqChosen).progress := totalTx.scratchpadAddress
-          perSourceProgress(reqChosen).complete := false.B
-          perSourceProgress(reqChosen).valid := true.B
-
-          when(isBelowPage) {
-            mem_tx_state := read_process
-          }
-        }
-      }
-    }.otherwise {
-      when(reqIdleBits.reduce(_ && _) && loader.io.cache_block_in.ready) {
-        mem_tx_state := read_idle
-      }
-    }
-
-    loader.io.cache_block_in.valid := mem_out.d.valid
-    loader.io.cache_block_in.bits.dat := mem_out.d.bits.data
-    when(req_cache(rsource).memoryLength >= maxTxLength.U) {
-      loader.io.cache_block_in.bits.len := maxTxLength.U
-    }.otherwise {
-      loader.io.cache_block_in.bits.len := req_cache(rsource).memoryLength
-    }
-    loader.io.cache_block_in.bits.idxBase := req_cache(rsource).scratchpadAddress
-    mem_out.d.ready := loader.io.cache_block_in.ready
-    loader.io.sp_write_out.ready := true.B
-
-
-    val mergedStat = {
-      // collate progress statistics
-      // lower ps has precedence
-      def collapseStat(ps1: ProgressStat, ps2: ProgressStat): ProgressStat = {
-        val stat = Wire(new ProgressStat)
-        stat.valid := false.B
-        stat.complete := DontCare
-        stat.progress := DontCare
-        when(ps1.valid && ps2.valid) {
-          val ps1less = ps1.progress < ps2.progress
-          when(ps1less && !ps1.complete) {
-            stat := ps1
-          }.elsewhen(!ps2.complete) {
-            stat := ps2
-          }.elsewhen(ps1less) {
-            stat := ps2
-          }.otherwise {
-            stat := ps1
-          }
-        }.elsewhen(ps1.valid) {
-          stat := ps1
-        }.elsewhen(ps2.valid) {
-          stat := ps2
-        }
-
-        val r = Reg(new ProgressStat())
-        when(req.request.fire) {
-          r.valid := false.B
-          r.progress := 0.U
-          r.complete := false.B
-        }.otherwise {
-          r := stat
-        }
-        r
-
-      }
-
-      @tailrec
-      def recurseStat(stats: Seq[ProgressStat]): ProgressStat = {
-        if (stats.length == 1) stats(0)
-        else {
-          val groups = stats.grouped(2).map(a => {
-            if (a.length == 1) a(0)
-            else collapseStat(a(0), a(1))
-          }).toSeq
-          recurseStat(groups)
-        }
-      }
-
-      val ms = recurseStat(perSourceProgress)
-      Mux(ms.valid, ms.progress, 0.U)
-    }
-    req.progress := mergedStat
-
-    when(mem_out.d.fire) {
-      req_cache(rsource).memoryLength := req_cache(rsource).memoryLength - maxTxLength.U
-      req_cache(rsource).scratchpadAddress := req_cache(rsource).scratchpadAddress + loader.spEntriesPerBeat.U
-      req_cache(rsource).memAddr := chopAddr(realignAddr(req_cache(rsource).memAddr) + maxTxLength.U)
-      loaderSource := mem_out.d.bits.source
-      prevProcessed := rsource
-      when(req_cache(rsource).memoryLength <= maxTxLength.U) {
-        reqIdleBits(rsource) := true.B
-        prevDone := true.B
-      }.otherwise {
-        // transaction has to keep going, emit another segment
-        relaunch_queue.io.enq.valid := true.B
-        assert(relaunch_queue.io.enq.ready)
-        prevDone := false.B
-      }
-    }
-
-    when(loader.io.sp_write_out.valid) {
-      memory.foreach { mem =>
-        mem.chip_select(0) := true.B
-        mem.write_enable(0) := true.B
-        mem.read_enable(0) := false.B
-        mem.data_in(0) := loader.io.sp_write_out.bits.dat
-        mem.addr(0) := loader.io.sp_write_out.bits.idx
-      }
-      IOs.foreach { _.req.ready := false.B }
-      perSourceProgress(loaderSource).progress := loader.io.sp_write_out.bits.idx +& 1.U
-    }
-
-    // processing a new cache block
-    when(loader.io.cache_block_in.ready && !RegNext(loader.io.cache_block_in.ready) && prevDone && reqIdleBits(prevProcessed)) {
-      perSourceProgress(prevProcessed).complete := true.B
-    }
+//    // given alignment, all bottom bits should be zeroed. Don't need to store them
+//    val (memoryAddrBitsFAlign, memoryAddrShAmt) = {
+//      val defaultBits = mem_out.params.addressBits
+//      val alignment = log2Up(outer.channelWidthBytes) - 1
+//      (defaultBits - alignment, alignment)
+//    }
+//
+//    def chopAddr(a: UInt): UInt = {
+//      require(a.getWidth == mem_out.params.addressBits)
+//      a(mem_out.params.addressBits - 1, memoryAddrShAmt)
+//    }
+//
+//    def realignAddr(a: UInt): UInt = {
+//      require(a.getWidth == memoryAddrBitsFAlign)
+//      Cat(a, 0.U(memoryAddrShAmt.W))
+//    }
+//
+//    val read_idle :: read_send :: read_process :: Nil = Enum(3)
+//    val mem_tx_state = RegInit(read_idle)
+//
+//    // in-flight read tx busy bits
+//
+//    req.request.ready := mem_tx_state === read_idle
+//
+//    val reqIdleBits = RegInit(VecInit(Seq.fill(mem_edge.master.endSourceId)(true.B)))
+//    val reqAvailable = reqIdleBits.reduce(_ || _)
+//    val reqChosen = PriorityEncoder(reqIdleBits)
+//    // only consider non-busy transactions to be the
+//    val req_cache = Reg(Vec(mem_edge.master.endSourceId, new Bundle() {
+//      val scratchpadAddress = UInt(req.request.bits.scAddr.getWidth.W)
+//      val memoryLength = UInt(memoryLengthBits.W)
+//      val memAddr = UInt(memoryAddrBitsFAlign.W)
+//    }))
+//    /* handle progress monitoring */
+//
+//    class ProgressStat extends Bundle {
+//      val progress = UInt((1 + scReqBits).W)
+//      val valid = Bool()
+//      val complete = Bool()
+//    }
+//
+//    val perSourceProgress = Reg(Vec(mem_edge.master.endSourceId, new ProgressStat()))
+//    val loaderSource = Reg(UInt(mem_out.params.sourceBits.W))
+//
+//    val totalTx = Reg(new Bundle {
+//      val memoryAddress = UInt(memoryAddrBitsFAlign.W)
+//      val scratchpadAddress = UInt(req.request.bits.scAddr.getWidth.W)
+//      val memoryLength = UInt(memoryLengthBits.W)
+//    })
+//
+//    val txEmitLengthLg = Wire(UInt(4.W))
+//    txEmitLengthLg := 0.U
+//
+//    // relaunch transactions at bank granularity
+//    val rsource = mem_out.d.bits.source
+//    val prevProcessed = Reg(rsource.cloneType)
+//    val prevDone = Reg(Bool())
+//    val relaunch_queue = Module(new Queue[UInt](reqChosen.cloneType, mem_edge.master.endSourceId, flow = false, useSyncReadMem = true))
+//    relaunch_queue.io.enq.valid := false.B
+//    relaunch_queue.io.enq.bits := rsource
+//    relaunch_queue.io.deq.ready := false.B
+//    when(relaunch_queue.io.deq.valid) {
+//      mem_out.a.valid := true.B
+//      val rl_id = relaunch_queue.io.deq.bits
+//      val mem_length = req_cache(rl_id).memoryLength
+//      val tx_size = Mux(mem_length < maxTxLength.U, OHToUInt(mem_length), lgMaxTxLength.U)
+//      mem_out.a.bits := mem_edge.Get(
+//        fromSource = rl_id,
+//        toAddress = realignAddr(req_cache(rl_id).memAddr),
+//        lgSize = tx_size
+//      )._2
+//      relaunch_queue.io.deq.ready := mem_out.a.ready
+//    }.otherwise {
+//      mem_out.a.valid := mem_tx_state === read_send
+//      mem_out.a.bits := mem_edge.Get(
+//        fromSource = reqChosen,
+//        toAddress = realignAddr(totalTx.memoryAddress),
+//        lgSize = txEmitLengthLg)._2
+//    }
+//
+//
+//    when(mem_tx_state === read_idle) {
+//      when(req.request.fire) {
+//        totalTx.memoryLength := req.request.bits.len
+//        totalTx.scratchpadAddress := req.request.bits.scAddr
+//        totalTx.memoryAddress := chopAddr(req.request.bits.memAddr)
+//        mem_tx_state := read_send
+//        prevDone := false.B
+//        perSourceProgress foreach { pss =>
+//          pss.valid := false.B
+//          pss.complete := false.B
+//        }
+//
+//        // sanity check
+//        val low_order = req.request.bits.len(lgMaxTxLength - 1, 0)
+//        val low_order_is_pow_2 = !(low_order & (low_order - 1.U)).orR
+//        assert(low_order_is_pow_2,
+//          "Transaction length must be approximately a multiple of the cache block size.\n" +
+//            "Length detected: %d\n" +
+//            "Length %% " + maxTxLength + " must be a power of two\n" +
+//            "Low order bits found: %x\n", req.request.bits.len, low_order)
+//
+//        val alignment = Mux(req.request.bits.len < maxTxLength.U, req.request.bits.len, maxTxLength.U)
+//        val alignment_is_power_2 = ((alignment - 1.U) & alignment) === 0.U
+//        assert(alignment_is_power_2, "Alignment must be a power of two. Found %d\n", alignment)
+//        val alignmentSubsets = VecInit((0 until req.request.bits.memAddr.getWidth).map(width => req.request.bits.memAddr(width, 0)))
+//        assert(alignmentSubsets(OHToUInt(alignment) - 1.U) === 0.U, "\nAlignment not met!\n Alignment required: %x, Low order bits of address(%x): %x, len: %x\n",
+//          alignment,
+//          req.request.bits.memAddr,
+//          alignmentSubsets(OHToUInt(alignment)),
+//          req.request.bits.len)
+//
+//      }
+//    }.elsewhen(mem_tx_state === read_send) {
+//      when(!relaunch_queue.io.deq.valid) { // whenever relaunch is ongoing, we need to launch txs from elsewhere.
+//        // They have precedence
+//        val isBelowLimit = totalTx.memoryLength <= maxTxLength.U
+//        txEmitLengthLg := Mux(isBelowLimit, OHToUInt(totalTx.memoryLength), lgMaxTxLength.U)
+//        mem_out.a.valid := reqAvailable
+//        val isBelowPage = totalTx.memoryLength <= pageLength.U
+//        when(mem_out.a.fire) {
+//          reqIdleBits(reqChosen) := false.B
+//          req_cache(reqChosen).scratchpadAddress := totalTx.scratchpadAddress
+//          req_cache(reqChosen).memoryLength := Mux(isBelowPage, totalTx.memoryLength, pageLength.U)
+//          req_cache(reqChosen).memAddr := totalTx.memoryAddress
+//
+//          totalTx.memoryLength := Mux(isBelowPage, 0.U, totalTx.memoryLength - pageLength.U)
+//          totalTx.scratchpadAddress := totalTx.scratchpadAddress + (loader.spEntriesPerBeat * pageLength / maxTxLength).U
+//          totalTx.memoryAddress := chopAddr(realignAddr(totalTx.memoryAddress) + pageLength.U)
+//
+//          perSourceProgress(reqChosen).progress := totalTx.scratchpadAddress
+//          perSourceProgress(reqChosen).complete := false.B
+//          perSourceProgress(reqChosen).valid := true.B
+//
+//          when(isBelowPage) {
+//            mem_tx_state := read_process
+//          }
+//        }
+//      }
+//    }.otherwise {
+//      when(reqIdleBits.reduce(_ && _) && loader.io.cache_block_in.ready) {
+//        mem_tx_state := read_idle
+//      }
+//    }
+//
+//    loader.io.cache_block_in.valid := mem_out.d.valid
+//    loader.io.cache_block_in.bits.dat := mem_out.d.bits.data
+//    when(req_cache(rsource).memoryLength >= maxTxLength.U) {
+//      loader.io.cache_block_in.bits.len := maxTxLength.U
+//    }.otherwise {
+//      loader.io.cache_block_in.bits.len := req_cache(rsource).memoryLength
+//    }
+//    loader.io.cache_block_in.bits.idxBase := req_cache(rsource).scratchpadAddress
+//    mem_out.d.ready := loader.io.cache_block_in.ready
+//    loader.io.sp_write_out.ready := true.B
+//
+//
+//    val mergedStat = {
+//      // collate progress statistics
+//      // lower ps has precedence
+//      def collapseStat(ps1: ProgressStat, ps2: ProgressStat): ProgressStat = {
+//        val stat = Wire(new ProgressStat)
+//        stat.valid := false.B
+//        stat.complete := DontCare
+//        stat.progress := DontCare
+//        when(ps1.valid && ps2.valid) {
+//          val ps1less = ps1.progress < ps2.progress
+//          when(ps1less && !ps1.complete) {
+//            stat := ps1
+//          }.elsewhen(!ps2.complete) {
+//            stat := ps2
+//          }.elsewhen(ps1less) {
+//            stat := ps2
+//          }.otherwise {
+//            stat := ps1
+//          }
+//        }.elsewhen(ps1.valid) {
+//          stat := ps1
+//        }.elsewhen(ps2.valid) {
+//          stat := ps2
+//        }
+//
+//        val r = Reg(new ProgressStat())
+//        when(req.request.fire) {
+//          r.valid := false.B
+//          r.progress := 0.U
+//          r.complete := false.B
+//        }.otherwise {
+//          r := stat
+//        }
+//        r
+//
+//      }
+//
+//      @tailrec
+//      def recurseStat(stats: Seq[ProgressStat]): ProgressStat = {
+//        if (stats.length == 1) stats(0)
+//        else {
+//          val groups = stats.grouped(2).map(a => {
+//            if (a.length == 1) a(0)
+//            else collapseStat(a(0), a(1))
+//          }).toSeq
+//          recurseStat(groups)
+//        }
+//      }
+//
+//      val ms = recurseStat(perSourceProgress)
+//      Mux(ms.valid, ms.progress, 0.U)
+//    }
+//    req.progress := mergedStat
+//
+//    when(mem_out.d.fire) {
+//      req_cache(rsource).memoryLength := req_cache(rsource).memoryLength - maxTxLength.U
+//      req_cache(rsource).scratchpadAddress := req_cache(rsource).scratchpadAddress + loader.spEntriesPerBeat.U
+//      req_cache(rsource).memAddr := chopAddr(realignAddr(req_cache(rsource).memAddr) + maxTxLength.U)
+//      loaderSource := mem_out.d.bits.source
+//      prevProcessed := rsource
+//      when(req_cache(rsource).memoryLength <= maxTxLength.U) {
+//        reqIdleBits(rsource) := true.B
+//        prevDone := true.B
+//      }.otherwise {
+//        // transaction has to keep going, emit another segment
+//        relaunch_queue.io.enq.valid := true.B
+//        assert(relaunch_queue.io.enq.ready)
+//        prevDone := false.B
+//      }
+//    }
+//
+//    when(loader.io.sp_write_out.valid) {
+//      memory.foreach { mem =>
+//        mem.chip_select(0) := true.B
+//        mem.write_enable(0) := true.B
+//        mem.read_enable(0) := false.B
+//        mem.data_in(0) := loader.io.sp_write_out.bits.dat
+//        mem.addr(0) := loader.io.sp_write_out.bits.idx
+//      }
+//      IOs.foreach { _.req.ready := false.B }
+//      perSourceProgress(loaderSource).progress := loader.io.sp_write_out.bits.idx +& 1.U
+//    }
+//
+//    // processing a new cache block
+//    when(loader.io.cache_block_in.ready && !RegNext(loader.io.cache_block_in.ready) && prevDone && reqIdleBits(prevProcessed)) {
+//      perSourceProgress(prevProcessed).complete := true.B
+//    }
     if (supportWriteback) {
       require(specialization.isInstanceOf[FlatPackScratchpadParams] && dataWidthBits % 8 == 0)
       val writer = Module(new SequentialWriter(nBytes = dataWidthBits / 8,
@@ -434,7 +454,7 @@ class CScratchpadImp(supportWriteback: Boolean,
 
       when(wb_state =/= wb_idle) {
         req.request.ready := false.B
-        writer.tl_out <> mem_out
+        writer.tl_out <> outer.mem_master_node.get.out(0)._1
       }
       writer.io.req.valid := req.writeback.valid
       req.writeback.ready := writer.io.req.ready
