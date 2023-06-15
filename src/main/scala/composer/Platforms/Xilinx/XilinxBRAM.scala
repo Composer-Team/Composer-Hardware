@@ -126,11 +126,13 @@ private[MemoryStreams] class CFPGAMemory(latency: Int,
         )
         ("(* ram_style = \"ultra\" *)", "constU")
       } else if (have_enough_bram) {
-        System.err.println(
-          s"Using $bram_consumption brams for $debugName ($dataWidth, $nRows) - $dname_prefix"
-        )
-        bram_used = bram_used + bram_consumption
-        ("(* ram_style = \"block\" *)", "constB")
+        if (nRows > 32) {
+          System.err.println(
+            s"Using $bram_consumption brams for $debugName ($dataWidth, $nRows) - $dname_prefix"
+          )
+          bram_used = bram_used + bram_consumption
+          ("(* ram_style = \"block\" *)", "constB")
+        } else ("", "")
       } else {
         System.err.println(
           "Memory Constrained Hint Warning: URAM and BRAM may be entirely consumed by requested\n" +
