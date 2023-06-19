@@ -143,7 +143,7 @@ class CScratchpadImp(supportWriteback: Boolean,
 
   val IOs = Seq.fill(nPorts)(IO(new CScratchpadAccessPort(scReqBits, dataWidthBits)))
 
-  val memoryLengthBits = log2Up(nDatas * outer.channelWidthBytes) + 1
+  val memoryLengthBits = log2Up(realNRows * dataWidthBits) + 1
 
   val req = IO(new CScratchpadInitReqIO(if (outer.mem_master_node.isDefined) Some(outer.mem_master_node.get.out(0)._1) else None, nDatas, memoryLengthBits))
 
