@@ -153,6 +153,7 @@ class ComposerBuild(config: Config) {
 //    }
 
     os.move(targetDir / "ComposerTop.v", outputFile, replaceExisting = true)
+    os.remove(gsrc_dir / "composer.v", checkExists = false)
     os.symlink(gsrc_dir / "composer.v", outputFile)
 
 
