@@ -113,7 +113,7 @@ case class CScratchpadParams(name: String,
                              specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked)
   extends CChannelParams {
   override val nChannels: Int = 1
-  require(latency.intValue() >= 3, "Latency must be greater than 2") //TODO: CMemory line 27 subtracts 2gi but could be improved
+//  require(latency.intValue() >= 3, "Latency must be greater than 2") //TODO: CMemory line 27 subtracts 2gi but could be improved
 
   private[composer] def make(implicit p: Parameters): CScratchpad = {
     new CScratchpad(supportWriteback, None, dataWidthBits, nDatas, latency, nPorts, specialization)(p.alterPartial({

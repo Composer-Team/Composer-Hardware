@@ -23,6 +23,7 @@ object CMemory {
       case PlatformType.FPGA =>
         require (nPorts <= 2, s"Trying to elaborate a $nPorts port memory. FPGA BRAM/URAM only" +
           s"supports up to 2 ports.")
+        require (latency >= 3)
         val cmem = Module(
           new CFPGAMemory(
             latency - 2,

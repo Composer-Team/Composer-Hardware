@@ -107,7 +107,7 @@ class ComposerBuild(config: Config) {
     val full_name = config.getClass.getCanonicalName
     val short_name = full_name.split('.').last
     println("Elaborating config: " + short_name)
-    val outputFile = gsrc_dir / "composer.v"
+    val outputFile = gsrc_dir / s"$short_name.v"
     val targetDir = gsrc_dir / "composer.fir"
     new ComposerChipStage().transform(
       AnnotationSeq(
@@ -151,6 +151,6 @@ class ComposerBuild(config: Config) {
       val basename = sr.baseName
       println(basename)
     }
-    config(PostProcessorMacro)() // do post-processing per backend
+    config(PostProcessorMacro)(config) // do post-processing per backend
   }
 }

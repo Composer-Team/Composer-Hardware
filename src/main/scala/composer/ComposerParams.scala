@@ -18,6 +18,7 @@ case object SystemName2IdMapKey extends Field[Map[String, Int]]
 case object DRAMBankBytes extends Field[Int]
 case object ComposerQuiet extends Field[Boolean]
 case object PrefetchSourceMultiplicity extends Field[Int]
+case object UseConfigAsOutputNameKey extends Field[Boolean]
 
 // Architecture parameters
 //case object MaxChannelTransactionLenKey extends Field[Int]
@@ -63,7 +64,8 @@ case object ConstraintHintsKey extends Field[List[ComposerConstraintHint.type]]
 
 class WithComposer(
     constraintHints: List[ComposerConstraintHint] = List.empty,
-    quiet: Boolean = false
+    quiet: Boolean = false,
+    useConfigAsOutputName: Boolean = false
 ) extends Config((site, _, _) => {
       case ComposerQuiet            => quiet
       case ComposerSystemsKey       => Seq()
@@ -73,6 +75,7 @@ class WithComposer(
       case PrefetchSourceMultiplicity => 8
       case SimpleDRAMHintKey => false
       case CmdRespBusWidthBytes => 4
+      case UseConfigAsOutputNameKey => useConfigAsOutputName
       case MaxHartIdBits =>
         1 // log2Up(site(TilesLocated(InSubsystem)).map(_.tileParams.hartId).max+1)
       // Interconnect parameters

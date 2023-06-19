@@ -48,7 +48,8 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
       f"srambank_${nRows / 4}x4x${nColumns}_6t122"
     }
   }
-  case PostProcessorMacro => () => {
+  case PostProcessorMacro => c: Config => {
+    val mName = c.getClass.getCanonicalName.split('.').last
     val cwd = os.Path(ComposerBuild.composerGenDir)
     val timestamp = LocalDateTime.now()
     val synwd = cwd / ("asic_build_" + DateTimeFormatter.ofPattern("yy-MM-dd_HHMMSS").format(timestamp))
@@ -59,7 +60,7 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
         os.copy.over(src, synwd / "src" / src.baseName, createFolders = true)
       }
     }
-    os.copy.over(cwd / "composer.v", synwd / "src" / "composer.sv")
+    os.copy.over(cwd / f"$mName.v", synwd / "src" / "composer.sv")
 
     def getFileWithNameApprox(dir: Path, contents: Seq[String]): Path = {
       os.walk(dir).filter(d => contents.map(c => d.toString().contains(c)).reduce(_ && _))(0)

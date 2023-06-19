@@ -61,7 +61,7 @@ case object PlatformNumSLRs extends Field[Int]
 
 case object IsAWS extends Field[Boolean]
 
-case object PostProcessorMacro extends Field[() => Unit]
+case object PostProcessorMacro extends Field[Config => Unit]
 
 case object ASICMemoryCompilerKey extends Field[MemoryCompiler]
 
@@ -105,7 +105,7 @@ class WithKriaPlatform(nMemoryChannels: Int = 1)
     case PlatformSLRs => None
 
     case IsAWS => false
-    case PostProcessorMacro => () => ;
+    case PostProcessorMacro => _: Config => ;
     case HasDisjointMemoryControllers => false
   })
 
@@ -158,7 +158,7 @@ private[composer] class U200_sole()
       )
     case DefaultClockRateKey => 300
     case IsAWS => false
-    case PostProcessorMacro => () => ;
+    case PostProcessorMacro => _: Config => ;
   })
 
 private[composer] class AWS_sole(simulation: Boolean)
@@ -176,8 +176,9 @@ private[composer] class AWS_sole(simulation: Boolean)
     case DefaultClockRateKey => 125
     case IsAWS => true
     case PostProcessorMacro =>
-      () =>
+      _: Config =>
         if (!simulation) {
+          require(false, "Fix this to call new top name")
           val cwd = ComposerBuild.composerVsimDir
           val cdir = ComposerBuild.composerBin
           val callable = os.proc(f"$cdir/aws-gen-build")
