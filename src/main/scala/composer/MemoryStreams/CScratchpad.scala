@@ -99,7 +99,7 @@ class CScratchpad(supportWriteback: Boolean,
     Some(TLClientNode(Seq(TLMasterPortParameters.v2(
       masters = Seq(TLMasterParameters.v1(
         name = "ScratchpadToMemory",
-        sourceId = IdRange(0, 4),
+        sourceId = IdRange(0, 2),
         supportsProbe = TransferSizes(1, blockBytes * p(PrefetchSourceMultiplicity)),
         supportsGet = TransferSizes(1, blockBytes * p(PrefetchSourceMultiplicity)),
         supportsPutFull = TransferSizes(1, blockBytes * p(PrefetchSourceMultiplicity))

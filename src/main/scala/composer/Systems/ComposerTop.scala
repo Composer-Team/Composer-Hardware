@@ -3,10 +3,10 @@ package composer.Systems
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
+import composer._
 import composer.Generation._
 import composer.RoccHelpers.{AXI4Compat, FrontBusHub}
 import composer.Systems.ComposerTop._
-import composer._
 import freechips.rocketchip.amba.ahb._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
@@ -130,10 +130,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       := m)
     composer_mem
   }
-  val extMemIDBits = p(ExtMem) match {
-    case None => 0
-    case Some(a) => a.master.idBits
-  }
   val mem_tops = if (p(HasDMA).isDefined) {
     val dma_mem_xbar = Seq.fill(nMemChannels)(AXI4Xbar(maxFlightPerId = p(MaxInFlightMemTxsPerSource)))
     val dma = AXI4Xbar()
@@ -153,7 +149,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
         endpoint :=
           AXI4Buffer() :=
           AXI4UserYanker(capMaxFlight = Some(p(MaxInFlightMemTxsPerSource))) :=
-          AXI4IdIndexer(extMemIDBits) :=
           AXI4Buffer() := mt
       }
     case None => ;
@@ -197,9 +192,9 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
     (M00_AXI zip ins) foreach { case (i, (o, _)) => AXI4Compat.connectCompatMaster(i, o) }
 
 //    val read_success = EventPerformanceCounter(M00_AXI.map(axi => axi.rvalid && axi.rready), new NoObjective)
-//    val read_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.rready && axi.rvalid), new NoObjective)
-//    val write_request_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.awready && axi.awvalid), new NoObjective)
-//    val read_request_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.arready && axi.arvalid), new NoObjective)
+    //    val read_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.rready && axi.rvalid), new NoObjective)
+    //    val write_request_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.awready && axi.awvalid), new NoObjective)
+    //    val read_request_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.arready && axi.arvalid), new NoObjective)
 
     // make incoming dma port and connect it
     if (p(HasDMA).isDefined) {
@@ -207,6 +202,14 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
       AXI4Compat.connectCompatSlave(dma, outer.dma_port.get.out(0)._1)
     }
 
+    p(ExtMem) match {
+      case None => ;
+      case Some(a) => require(M00_AXI(0).rid.getWidth <= a.master.idBits,
+        s"Too many ID bits for this platform. Try reducing the\n" +
+          s"prefetch length of scratchpads/readers/writers.\n" +
+          s"Current width: ${M00_AXI(0).rid.getWidth}\n" +
+          s"Required width: ${a.master.idBits}")
+    }
   }
 
   // try to make this the last thing we do
