@@ -138,19 +138,24 @@ class ComposerBuild(config: Config) {
           }
       }
     }
-    os.move(targetDir / "ComposerTop.v", outputFile, replaceExisting = true)
 
     sourceList.distinct foreach { src =>
       if (file.Files.isRegularFile(java.nio.file.Paths.get(src.toString()))) {
-        os.write.append(outputFile, os.read(src))
+        os.write.append(targetDir / "ComposerTop.v", os.read(src))
       } else {
         os.copy.over(src, gsrc_dir / src.baseName)
       }
     }
-    symbolicMemoryResources.foreach { sr =>
-      val basename = sr.baseName
-      println(basename)
-    }
+
+//    symbolicMemoryResources.foreach { sr =>
+//      val basename = sr.baseName
+//      println(basename)
+//    }
+
+    os.move(targetDir / "ComposerTop.v", outputFile, replaceExisting = true)
+    os.symlink(gsrc_dir / "composer.v", outputFile)
+
+
     config(PostProcessorMacro)(config) // do post-processing per backend
   }
 }
