@@ -84,7 +84,6 @@ class CReader(dataBytes: Int,
 
   val largestRead = beatBytes * largeTxNBeats
   val lgLargestRead = log2Up(largestRead)
-  println("largest read is " + largestRead)
 
 
   val prefetch_readIdx, prefetch_writeIdx = RegInit(0.U(log2Up(prefetchRows).W))
