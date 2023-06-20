@@ -128,7 +128,7 @@ private[composer] class U200Base(nMemoryChannels: Int)
       q
     // 16GB memory per DIMM
     case PlatformPhysicalMemoryBytes => (16L << 30) * nMemoryChannels
-    case HasDMA => Some(6)
+    case HasDMA => Some(2)
     // TODO this can be tuned
     case CXbarMaxDegree => 32
     case HasDiscreteMemory => true
