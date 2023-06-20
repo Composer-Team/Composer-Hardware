@@ -27,6 +27,7 @@ class CReader(dataBytes: Int,
   val maxBytes = dataBytes * vlen
   val largeTxNBeats = Math.max(p(PrefetchSourceMultiplicity), maxBytes / beatBytes)
   val prefetchRows = tlclient.portParams(0).endSourceId * p(PrefetchSourceMultiplicity)
+  val hasOneSource = tlclient.portParams(0).endSourceId == 1
   require(isPow2(maxBytes))
 
 
@@ -203,14 +204,17 @@ class CReader(dataBytes: Int,
         }
       }.otherwise {
         val haveRoomToAlloc = Wire(Bool())
-        val dist2Roof = (prefetchRows - 1).U - prefetch_writeIdx
-        when (dist2Roof < slots_per_alloc.U) {
-          haveRoomToAlloc := prefetch_readIdx > (slots_per_alloc.U - dist2Roof) && (prefetch_readIdx < prefetch_writeIdx)
-        }.otherwise {
-          haveRoomToAlloc := (prefetch_readIdx > prefetch_writeIdx + slots_per_alloc.U) || (prefetch_readIdx <= prefetch_writeIdx)
+        if (hasOneSource) {
+          haveRoomToAlloc := prefetch_readIdx === prefetch_writeIdx
+        } else {
+          val dist2Roof = (prefetchRows - 1).U - prefetch_writeIdx
+          when(dist2Roof < slots_per_alloc.U) {
+            haveRoomToAlloc := prefetch_readIdx > (slots_per_alloc.U - dist2Roof) && (prefetch_readIdx < prefetch_writeIdx)
+          }.otherwise {
+            haveRoomToAlloc := (prefetch_readIdx > prefetch_writeIdx + slots_per_alloc.U) || (prefetch_readIdx <= prefetch_writeIdx)
+          }
         }
         tl_reg.io.enq.valid := sourceAvailable && haveRoomToAlloc
-        println("largeTxNBeats: " + largeTxNBeats)
         tl_reg.io.enq.bits := tledge.Get(
           fromSource = chosenSource,
           toAddress = addr,
