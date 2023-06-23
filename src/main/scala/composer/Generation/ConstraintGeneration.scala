@@ -99,7 +99,6 @@ class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters)
       case None => ;
       case Some(real_slrid) =>
         val name = wrapper.baseName + "_" + valName.name + "_" + gl_id
-        println("wrapper name is " + wrapper.baseName)
         mod.suggestName(name)
         gl_id = gl_id + 1
         ConstraintGeneration.addToSLR(name, real_slrid)

@@ -7,6 +7,7 @@ import composer._
 import composer.Generation._
 import composer.RoccHelpers.{AXI4Compat, FrontBusHub}
 import composer.Systems.ComposerTop._
+import composer.common.CLog2Up
 import freechips.rocketchip.amba.ahb._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
@@ -97,8 +98,8 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
         address = Seq(getAddressSet(channel_idx)),
         resources = device.reg,
         regionType = RegionType.UNCACHED,
-        supportsRead = TransferSizes(externalMemParams.master.beatBytes),
-        supportsWrite = TransferSizes(externalMemParams.master.beatBytes),
+        supportsRead = TransferSizes(externalMemParams.master.beatBytes * 16),
+        supportsWrite = TransferSizes(externalMemParams.master.beatBytes * 16),
         interleavedId = Some(1)
       )),
       beatBytes = externalMemParams.master.beatBytes
@@ -124,9 +125,12 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   val composer_mems = acc.mem map { m =>
     val composer_mem = AXI4IdentityNode()
+    val DMASourceBits = if (p(HasDMA).isDefined) CLog2Up(p(HasDMA).get) else 0
+    val availableComposerSources = 1 << (p(ExtMem).get.master.idBits - DMASourceBits)
     (composer_mem
       := AXI4Buffer()
       := TLToAXI4()
+      := TLSourceShrinker(availableComposerSources)
       := m)
     composer_mem
   }

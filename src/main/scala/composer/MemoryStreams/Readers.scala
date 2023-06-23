@@ -13,7 +13,6 @@ import freechips.rocketchip.tilelink._
 class ReadChannelIO(dataBytes: Int, vlen: Int)(implicit p: Parameters) extends Bundle {
   val req = Flipped(Decoupled(new ChannelTransactionBundle))
   val channel = new DataChannelIO(dataBytes, vlen)
-  val busy = Output(Bool())
 }
 
 class CReader(dataBytes: Int,
@@ -59,7 +58,6 @@ class CReader(dataBytes: Int,
 
   tl_reg.io.enq.valid := false.B
   tl_reg.io.enq.bits := DontCare
-  io.req.ready := len === 0.U && state === s_idle
 
   // has to be pow2 to ensure OHToUInt works like we want
 
@@ -295,7 +293,5 @@ class CReader(dataBytes: Int,
       channel_buffer_q.io.deq.ready := true.B
     }
   }
-
-  io.busy := state =/= s_idle || reads_in_flight > 0.U || (prefetch_readIdx =/= prefetch_writeIdx)
-
+  io.req.ready := !(state =/= s_idle || reads_in_flight > 0.U || (prefetch_readIdx =/= prefetch_writeIdx))
 }

@@ -48,8 +48,8 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
       TLClientNode(List(TLMasterPortParameters.v1(
         clients = List(TLMasterParameters.v1(
           name = s"ReadChannel_sys${system_id}_core${core_id}_${para.name}$i",
-          supportsGet = TransferSizes(1, blockBytes * p(PrefetchSourceMultiplicity)),
-          supportsProbe = TransferSizes(1, blockBytes * p(PrefetchSourceMultiplicity)),
+          supportsGet = TransferSizes(blockBytes, blockBytes * p(PrefetchSourceMultiplicity)),
+          supportsProbe = TransferSizes(blockBytes, blockBytes * p(PrefetchSourceMultiplicity)),
           sourceId = IdRange(0, param.maxInFlightTxs)
         )))))
     })
@@ -97,17 +97,15 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
       ))
       val xbar_sp_pairs = memManagerParams map { mm_param =>
         val intraCoreMemXbar = TLXbar()
-        val sp = LazyModule(new CScratchpad(
-          supportWriteback = false,
-          asMemorySlave = Some(mm_param),
+        val sp = LazyModule(new IntraCoreScratchpad(
+          asMemorySlave = mm_param,
           dataWidthBits = mp.dataWidthBits,
           nDatas = mp.nDatas,
           latency = mp.latency,
-          nPorts = 1,
-          specialization = CScratchpadSpecialization.flatPacked)(p.alterPartial {
+          nPorts = 1)(p.alterPartial {
           case SimpleDRAMHintKey => true
         }))
-        sp.mem_slave_node.get := intraCoreMemXbar
+        sp.mem_slave_node := intraCoreMemXbar
         (intraCoreMemXbar, sp)
       }
       val xbars = xbar_sp_pairs.map(_._1)

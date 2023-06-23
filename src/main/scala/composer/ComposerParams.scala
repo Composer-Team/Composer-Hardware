@@ -132,7 +132,7 @@ class WithComposer(
         )
       case MonitorsEnabled            => false
       case TileKey                    => RocketTileParams()
-      case MaxInFlightMemTxsPerSource => 32
+      case MaxInFlightMemTxsPerSource => 4
       case DRAMBankBytes              => 4 * 1024
     })
 

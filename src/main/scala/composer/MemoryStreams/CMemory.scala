@@ -1,15 +1,11 @@
 package composer.MemoryStreams
 
-import chipsalliance.rocketchip.config.{Field, Parameters}
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import composer._
-import composer.MemoryStreams.RAM.{CFPGAMemory, MemoryCompiler}
+import composer.MemoryStreams.RAM.{CFPGAMemory, MemoryCompiler, SyncReadMemMem}
 import freechips.rocketchip.diplomacy.ValName
-
-import java.io.FileWriter
-import scala.annotation.tailrec
-import scala.collection.SeqMap
 
 object CMemory {
   def apply(
@@ -19,54 +15,112 @@ object CMemory {
       nPorts: Int,
       debugName: Option[String] = None
   )(implicit p: Parameters, valName: ValName): CMemoryIOBundle = {
-    p(PlatformTypeKey) match {
-      case PlatformType.FPGA =>
-        require (nPorts <= 2, s"Trying to elaborate a $nPorts port memory. FPGA BRAM/URAM only" +
-          s"supports up to 2 ports.")
-        require (latency >= 3)
-        val cmem = Module(
-          new CFPGAMemory(
-            latency - 2,
-            dataWidth,
-            nRows,
-            debugName = debugName.getOrElse(valName.name)
-          )
-        )
-        cmem.suggestName(valName.name)
-        val mio = Wire(Output(new CMemoryIOBundle(nPorts, addrBits = log2Up(nRows), dataWidth)))
-        cmem.io.I1 := mio.data_in(0)
-        cmem.io.CE1 := mio.clock.asBool
-        cmem.io.A1 := mio.addr(0)
-        cmem.io.CSB1 := mio.chip_select(0)
-        cmem.io.WEB1 := mio.write_enable(0)
-        cmem.io.OEB1 := mio.read_enable(0)
-        mio.data_out(0) := cmem.io.O1
-        cmem.io.CE2 := DontCare
-        if (nPorts == 1) {
-          cmem.io.I2 := DontCare
-          cmem.io.A2 := DontCare
-          cmem.io.CSB2 := false.B
-          cmem.io.OEB2 := DontCare
-          cmem.io.WEB2 := DontCare
-        } else {
-          cmem.io.I2 := mio.data_in(1)
-          cmem.io.CE2 := mio.clock.asBool
-          cmem.io.A2 := mio.addr(1)
-          cmem.io.CSB2 := mio.chip_select(1)
-          cmem.io.WEB2 := mio.write_enable(1)
-          cmem.io.OEB2 := mio.read_enable(1)
-          mio.data_out(1) := cmem.io.O2
-        }
-        mio
-      case PlatformType.ASIC =>
-        val cmem = Module(new CASICMemory(latency, dataWidth, nRows, nPorts))
-        cmem.suggestName(valName.name)
-        TransitName(cmem.io, cmem)
+    val mostPortsSupported = p(PlatformTypeKey) match {
+      case PlatformType.FPGA => 2
+      case PlatformType.ASIC => p(ASICMemoryCompilerKey).mems.keys.max
+    }
+    if (nPorts > mostPortsSupported) {
+      val regMem = Module(new SyncReadMemMem(nPorts, nRows, dataWidth, latency))
+      regMem.mio
+    } else {
+      p(PlatformTypeKey) match {
+        case PlatformType.FPGA =>
+          require(latency >= 1)
+          val mio = Wire(Output(new CMemoryIOBundle(nPorts, addrBits = log2Up(nRows), dataWidth)))
+          if (latency >= 3 && nPorts <= 2) {
+            val cmem = Module(
+              new CFPGAMemory(
+                latency - 2,
+                dataWidth,
+                nRows,
+                debugName = debugName.getOrElse(valName.name)
+              )
+            )
+            cmem.suggestName(valName.name)
+            cmem.io.I1 := mio.data_in(0)
+            cmem.io.CE1 := mio.clock.asBool
+            cmem.io.A1 := mio.addr(0)
+            cmem.io.CSB1 := mio.chip_select(0)
+            cmem.io.WEB1 := mio.write_enable(0)
+            cmem.io.OEB1 := mio.read_enable(0)
+            mio.data_out(0) := cmem.io.O1
+            cmem.io.CE2 := DontCare
+            if (nPorts == 1) {
+              cmem.io.I2 := DontCare
+              cmem.io.A2 := DontCare
+              cmem.io.CSB2 := false.B
+              cmem.io.OEB2 := DontCare
+              cmem.io.WEB2 := DontCare
+            } else {
+              cmem.io.I2 := mio.data_in(1)
+              cmem.io.CE2 := mio.clock.asBool
+              cmem.io.A2 := mio.addr(1)
+              cmem.io.CSB2 := mio.chip_select(1)
+              cmem.io.WEB2 := mio.write_enable(1)
+              cmem.io.OEB2 := mio.read_enable(1)
+              mio.data_out(1) := cmem.io.O2
+            }
+          } else {
+            val cmem = Module(new SyncReadMemMem(nPorts, nRows, dataWidth, latency))
+            mio <> cmem.mio
+            // latency == 1 or 2. Recognizing URAM/BRAM is now in god's hands
+          }
+          mio
+        case PlatformType.ASIC =>
+          val cmem = Module(new CASICMemory(latency, dataWidth, nRows, nPorts))
+          cmem.suggestName(valName.name)
+          TransitName(cmem.io, cmem)
+      }
     }
   }
 }
 
-class CMemoryIOBundle(val nPorts: Int, val addrBits: Int, dataWidth: Int) extends Bundle {
+class CMemorySinglePortIOBundle(val addrBits: Int, dataWidth: Int) extends Bundle {
+  val addr = Input(UInt(addrBits.W))
+
+  val data_in = Input(UInt(dataWidth.W))
+  val data_out = Output(UInt(dataWidth.W))
+
+  val chip_select = Input(Bool())
+  val read_enable = Input(Bool())
+  val write_enable = Input(Bool())
+}
+
+object CMemorySinglePortIOBundle {
+  // constructor for series of single port IOs from a CMemoryIOBundle
+  def fromTransposeInput(in: CMemoryIOBundle): Vec[CMemorySinglePortIOBundle] = {
+    val nPorts = in.nPorts
+    val addrBits = in.addrBits
+    val dataWidth = in.dataWidth
+    val io = Wire(Vec(nPorts, Output(new CMemorySinglePortIOBundle(addrBits, dataWidth))))
+    for (i <- 0 until nPorts) {
+      io(i).addr := in.addr(i)
+      io(i).data_in := in.data_in(i)
+      in.data_out(i) := io(i).data_out
+      io(i).chip_select := in.chip_select(i)
+      io(i).read_enable := in.read_enable(i)
+      io(i).write_enable := in.write_enable(i)
+    }
+    io
+  }
+
+  // constructor for series of single port IOs from a flipped CMemoryIOBundle
+  def fromTransposeOutput(in: CMemoryIOBundle): Vec[CMemorySinglePortIOBundle] = {
+    val io = Wire(Vec(in.nPorts, Output(new CMemorySinglePortIOBundle(in.addrBits, in.dataWidth))))
+    for (i <- 0 until in.nPorts) {
+      in.addr := io(i).addr
+      in.data_in := io(i).data_in
+      io(i).data_out := in.data_out
+      in.chip_select := io(i).chip_select
+      in.read_enable := io(i).read_enable
+      in.write_enable := io(i).write_enable
+    }
+    io
+  }
+
+}
+
+class CMemoryIOBundle(val nPorts: Int, val addrBits: Int, val dataWidth: Int) extends Bundle {
   val addr = Input(Vec(nPorts, UInt(addrBits.W)))
 
   val data_in = Input(Vec(nPorts, UInt(dataWidth.W)))
@@ -78,6 +132,7 @@ class CMemoryIOBundle(val nPorts: Int, val addrBits: Int, dataWidth: Int) extend
 
   val clock = Input(Bool())
 }
+
 
 trait HasCMemoryIO {
   val io: CMemoryIOBundle

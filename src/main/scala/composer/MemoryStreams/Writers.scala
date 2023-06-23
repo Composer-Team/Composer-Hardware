@@ -91,9 +91,11 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
           idx := io.req.bits.addr(log2Ceil(beatBytes), logNBytes)
         }
         req_len := io.req.bits.len >> logNBytes
-        assert(io.req.bits.len(logNBytes - 1, 0) === 0.U,
-          s"Currently support only requests that are divisble by the bus width(${1 << logNBytes}B).\n" +
-          s"If you need this, let me know.")
+        if (logNBytes > 0) {
+          assert(io.req.bits.len(logNBytes - 1, 0) === 0.U,
+            s"Currently support only requests that are divisble by the bus width(${1 << logNBytes}B).\n" +
+              s"If you need this, let me know.")
+        }
         addr := io.req.bits.addr >> log2Up(beatBytes)
         dataValid := 0.U
 

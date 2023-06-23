@@ -103,20 +103,19 @@ object CScratchpadSpecialization {
 case class CCachedReadChannelParams(name: String, nChannels: Int, cacheParams: CCacheParams) extends CChannelParams {
 }
 
-
 case class CScratchpadParams(name: String,
                              supportWriteback: Boolean,
                              dataWidthBits: Number,
                              nDatas: Number,
                              latency: Number = 3,
                              nPorts: Int = 2,
-                             specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked)
+                             supportMemRequest: Boolean = true,
+                             specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked,
+                             datasPerCacheLine: Int = 1)
   extends CChannelParams {
   override val nChannels: Int = 1
-//  require(latency.intValue() >= 3, "Latency must be greater than 2") //TODO: CMemory line 27 subtracts 2gi but could be improved
-
-  private[composer] def make(implicit p: Parameters): CScratchpad = {
-    new CScratchpad(supportWriteback, None, dataWidthBits, nDatas, latency, nPorts, specialization)(p.alterPartial({
+  private[composer] def make(implicit p: Parameters): MemoryScratchpad = {
+    new MemoryScratchpad(supportWriteback, supportMemRequest, dataWidthBits, nDatas, latency, nPorts, specialization, datasPerCacheLine)(p.alterPartial({
       case SimpleDRAMHintKey => false
     }))
   }

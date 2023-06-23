@@ -112,6 +112,7 @@ class ComposerRoccCommand(implicit p: Parameters) extends AbstractComposerComman
 
   override def getCoreID: UInt = inst.core_id
 
+
   private[composer] def payloadWidth = payload1.getWidth + payload2.getWidth
 }
 
@@ -122,7 +123,7 @@ object ComposerRoccCommand {
     wr.inst.xd := gen.inst.xd
     wr.inst.funct := gen.inst.funct.tail(SystemIDLengthKey)
     wr.inst.system_id := gen.inst.funct.head(SystemIDLengthKey)
-    wr.inst.core_id := Cat(gen.inst.rs1, gen.inst.rs2)
+    wr.inst.core_id := Cat(gen.inst.rs2, gen.inst.rs1)
     wr.inst.opcode := gen.inst.opcode
     wr.inst.xs1 := gen.inst.xs1
     wr.inst.xs2 := gen.inst.xs2
