@@ -168,8 +168,8 @@ private[composer] class AWS_sole(simulation: Boolean)
     case PlatformSLRs =>
       Some(
         Seq(
-          SLRName("pblock_CL_bot", frontBus = true),
           SLRName("pblock_CL_mid", memoryBus = true),
+          SLRName("pblock_CL_bot", frontBus = true),
           SLRName("pblock_CL_top")
         )
       )
@@ -196,7 +196,16 @@ class WithAWSPlatform(nMemoryChannels: Int, simulation: Boolean = true)
   extends Config(new U200Base(nMemoryChannels) ++ new AWS_sole(simulation))
 
 object SLRConstants {
+  private[composer] val SLRRoutingFanout = 4
   final val DEFAULT_SLR = 0
+  final def getFrontBusSLR(implicit p: Parameters): Int = {
+    val slr = p(PlatformSLRs).get.zipWithIndex.find(_._1.frontBus)
+    slr.getOrElse((SLRName("0"), 0))._2
+  }
+  final def getMemoryBusSLR(implicit p: Parameters): Int = {
+    val slr = p(PlatformSLRs).get.zipWithIndex.find(_._1.memoryBus)
+    slr.getOrElse((SLRName("0"), 0))._2
+  }
 }
 
 //noinspection ScalaUnusedSymbol

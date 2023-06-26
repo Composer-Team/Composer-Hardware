@@ -36,7 +36,7 @@ import java.io.FileWriter
 
 object ConstraintGeneration {
   // map module -> SLR
-  private var slrMappings: List[(String, Int)] = List.empty
+  private[composer] var slrMappings: List[(String, Int)] = List.empty
 
   def addToSLR(moduleName: String, slr: Int): Unit = {
     require(!slrMappings.map(_._1).contains(moduleName), f"The module '$moduleName' has already been assigned to an SLR!")
@@ -74,7 +74,7 @@ object ConstraintGeneration {
 
         (0 until p(PlatformNumSLRs)).foreach { slrID =>
           val cells = slrMappings.filter(_._2 == slrID)
-          val plist = cells.map(_._1 + "*").reduce(_ + " " + _)
+          val plist = cells.map(c => f"*${c._1}*").fold("")(_ + " " + _)
           f.write(f"add_cells_to_pblock ${id2Name(slrID)} [get_cells -hierarchical [list " + plist + " ] ]\n")
         }
         f.close()
@@ -106,6 +106,17 @@ class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters)
     }
     mod
   }
+
+  def ModuleWithSLR[T <: Module](m: => T, real_slrid: Int)(implicit valName: ValName): T = {
+    val mod = Module(m)
+    val name = wrapper.baseName + "_" + valName.name + "_" + gl_id
+    mod.suggestName(name)
+    gl_id = gl_id + 1
+    ConstraintGeneration.addToSLR(name, real_slrid)
+    clockMap = (mod, real_slrid) :: clockMap
+    mod
+  }
+
 
   /**
    * Generate and tie off clocks to secondary SLRs. Only call this after LazyModules are finalized and module can be
@@ -146,17 +157,13 @@ abstract class LazyModuleWithSLRs()(implicit p: Parameters) extends LazyModule {
   private var gl_id = 0
   implicit val slrId: Option[Int] = if (ConstraintGeneration.canDistributeOverSLRs()) Some(SLRConstants.DEFAULT_SLR) else None
 
-  def LazyModuleWithSLR[T <: LazyModule](mod: => T, annotations: Seq[AssignmentAnnotation] = Seq.empty)(implicit slrId: Option[Int], valName: ValName): T = {
+  def LazyModuleWithSLR[T <: LazyModule](mod: => T, annotations: Seq[AssignmentAnnotation] = Seq.empty, slr_id: Int = SLRConstants.DEFAULT_SLR)(implicit valName: ValName): T = {
     val lm = LazyModule(mod)
     val name = baseName + "_" + valName.name + "_" + gl_id
     lm.suggestName(name)
     gl_id = gl_id + 1
-    slrId match {
-      case None => ;
-      case Some(a) =>
-        ConstraintGeneration.addToSLR(name, a)
-        lazyClockMap = (lm, slrId.get) :: lazyClockMap
-    }
+    ConstraintGeneration.addToSLR(name, slr_id)
+    lazyClockMap = (lm, slrId.get) :: lazyClockMap
     annotations.foldRight(lm) { case (annot: AssignmentAnnotation, cs) => annot.transform(cs) }
   }
 }

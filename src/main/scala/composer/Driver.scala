@@ -3,12 +3,13 @@ package composer
 import chipsalliance.rocketchip.config._
 import chisel3.stage._
 import composer.ComposerBuild._
-import composer.Generation.ExportCSymbolPhase
+import composer.Generation.{ConstraintGeneration, ExportCSymbolPhase}
 import firrtl._
 import firrtl.options.PhaseManager.PhaseDependency
 import firrtl.options._
 import firrtl.stage.FirrtlCli
 import freechips.rocketchip.stage._
+
 import java.nio.file
 import os._
 
@@ -133,7 +134,6 @@ class ComposerBuild(config: Config) {
             fend == "v"
           }
           .foreach { path =>
-//          val to = gsrc_dir / path.toString().split("/").takeRight(1)(0)
             os.write.append(appendFile, os.read(path))
           }
       }
@@ -147,10 +147,16 @@ class ComposerBuild(config: Config) {
       }
     }
 
-//    symbolicMemoryResources.foreach { sr =>
-//      val basename = sr.baseName
-//      println(basename)
-//    }
+    ConstraintGeneration.slrMappings.foreach { case (name, _) =>
+      val replacement = s"s/\\([a-zA-Z_0-9]* [a-zA-Z_0-9]*${name}\\) /(* keep_hierarchy = \\\"yes\\\" *) \\1/g"
+      println(replacement)
+      os.proc("sed", "-i", "r",
+        "-e",
+        replacement,
+        (targetDir / "ComposerTop.V").toString(),
+        ).call()
+    }
+
 
     os.move(targetDir / "ComposerTop.v", outputFile, replaceExisting = true)
     os.remove(gsrc_dir / "composer.v", checkExists = false)

@@ -61,30 +61,15 @@ class CScratchpadInitReqIO(mem_out: Option[TLBundle], nDatas: Int, memLenBits: I
  * @param latency        latency of a scratchpad access from the user interface. Current implementation only supports 1 or 2.
  * @param specialization How data is loaded from memory. Choose a specialization from CScratchpadSpecialization
  */
-class MemoryScratchpad(supportWriteback: Boolean,
-                       supportMemRequest: Boolean,
-                       dataWidthBits: Number,
-                       nDatas: Number,
-                       latency: Number,
-                       nPorts: Int,
-                       specialization: CScratchpadSpecialization,
-                       datasPerCacheLine: Int)(implicit p: Parameters) extends LazyModule {
-  require(dataWidthBits.intValue() > 0)
-  require(nDatas.intValue() > 0)
+class MemoryScratchpad(csp: CScratchpadParams)(implicit p: Parameters) extends LazyModule {
+  require(csp.dataWidthBits.intValue() > 0)
+  require(csp.nDatas.intValue() > 0)
   val channelWidthBytes = p(ExtMem).get.master.beatBytes
 
   val blockBytes = p(CacheBlockBytes)
-  lazy val module = new CScratchpadImp(
-    supportWriteback,
-    dataWidthBits.intValue(),
-    nDatas.intValue(),
-    latency.intValue(),
-    nPorts,
-    specialization,
-    datasPerCacheLine,
-    this)
-  val mem_master_node = if (supportMemRequest) {
-    require(dataWidthBits.intValue() <= channelWidthBytes * 8 * p(PrefetchSourceMultiplicity))
+  lazy val module = new CScratchpadImp(csp,this)
+  val mem_master_node = if (csp.supportMemRequest) {
+    require(csp.dataWidthBits.intValue() <= channelWidthBytes * 8 * p(PrefetchSourceMultiplicity))
     Some(TLClientNode(Seq(TLMasterPortParameters.v2(
       masters = Seq(TLMasterParameters.v1(
         name = "ScratchpadToMemory",
@@ -96,21 +81,23 @@ class MemoryScratchpad(supportWriteback: Boolean,
       channelBytes = TLChannelBeatBytes(channelWidthBytes)))))
   } else None
 
-  dataWidthBits match {
+  csp.dataWidthBits match {
     case a: BaseTunable if !a.isIdentity =>
       println(s"dataWidthBits is base tunable. Range is ${a.range._1}, ${a.range._2}")
     case _ => ;
   }
 }
 
-class CScratchpadImp(supportWriteback: Boolean,
-                     dataWidthBits: Int,
-                     nDatas: Int,
-                     latency: Int,
-                     nPorts: Int,
-                     specialization: CScratchpadSpecialization,
-                     datasPerCacheLine: Int,
+class CScratchpadImp(csp: CScratchpadParams,
                      outer: MemoryScratchpad) extends LazyModuleImp(outer) {
+  val nDatas = csp.nDatas.intValue()
+  val datasPerCacheLine = csp.datasPerCacheLine
+  val dataWidthBits = csp.dataWidthBits.intValue()
+  val nPorts = csp.nPorts
+  val latency = csp.latency.intValue()
+  val specialization = csp.specialization
+  val supportWriteback = csp.supportWriteback
+
   private val realNRows = Math.max((nDatas.toFloat / datasPerCacheLine).ceil.toInt, outer.channelWidthBytes * 8 / dataWidthBits)
   val memoryLengthBits = log2Up(realNRows * dataWidthBits) + 1
 
@@ -187,7 +174,7 @@ class CScratchpadImp(supportWriteback: Boolean,
     }
 
     loader.io.cache_block_in.bits.len := maxTxLength.U
-    val reader = Module(new CReader(swWordSize * datasPerCacheLine / 8, 1, tlclient = outer.mem_master_node.get, debugName = Some(s"ScratchpadReader")))
+    val reader = Module(new CReader(swWordSize * datasPerCacheLine / 8, 1, tlclient = outer.mem_master_node.get, debugName = Some(s"Scratchpad${csp.name}")))
     reader.tl_out <> outer.mem_master_node.get.out(0)._1
     val idxCounter = Reg(UInt(log2Up(realNRows).W))
     reader.io.req.valid := req.request.valid

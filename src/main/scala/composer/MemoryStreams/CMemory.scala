@@ -38,13 +38,12 @@ object CMemory {
             )
             cmem.suggestName(valName.name)
             cmem.io.I1 := mio.data_in(0)
-            cmem.io.CE1 := mio.clock.asBool
+            cmem.io.CE := mio.clock.asBool
             cmem.io.A1 := mio.addr(0)
             cmem.io.CSB1 := mio.chip_select(0)
             cmem.io.WEB1 := mio.write_enable(0)
             cmem.io.OEB1 := mio.read_enable(0)
             mio.data_out(0) := cmem.io.O1
-            cmem.io.CE2 := DontCare
             if (nPorts == 1) {
               cmem.io.I2 := DontCare
               cmem.io.A2 := DontCare
@@ -53,7 +52,6 @@ object CMemory {
               cmem.io.WEB2 := DontCare
             } else {
               cmem.io.I2 := mio.data_in(1)
-              cmem.io.CE2 := mio.clock.asBool
               cmem.io.A2 := mio.addr(1)
               cmem.io.CSB2 := mio.chip_select(1)
               cmem.io.WEB2 := mio.write_enable(1)
@@ -63,6 +61,7 @@ object CMemory {
           } else {
             val cmem = Module(new SyncReadMemMem(nPorts, nRows, dataWidth, latency))
             mio <> cmem.mio
+
             // latency == 1 or 2. Recognizing URAM/BRAM is now in god's hands
           }
           mio
