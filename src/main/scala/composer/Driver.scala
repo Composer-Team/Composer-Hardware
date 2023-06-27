@@ -158,7 +158,7 @@ class ComposerBuild(config: Config) {
       System.err.println("Adding keep_hierarchy to SLR mappings for design with SLR distribution hint. This may take some time...")
 
       os.write.over(targetDir / "ComposerTop.v", crossBoundaryDisableList.fold(os.read(targetDir / "ComposerTop.v")) { case (f, name) =>
-        val pattern = s"([a-zA-Z_0-9]+ [a-zA-Z_0-9]*$name) ".r
+        val pattern = s"(\\w+ \\w*$name) ".r
         val replacement = {r: Regex.Match => " (* keep_hierarchy = \"yes\" *) " + r.group(1) + " "}
         pattern.replaceAllIn(f, replacement)
       })
