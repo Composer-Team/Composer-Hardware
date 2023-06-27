@@ -9,6 +9,7 @@ import firrtl.options.PhaseManager.PhaseDependency
 import firrtl.options._
 import firrtl.stage.FirrtlCli
 import freechips.rocketchip.stage._
+import scala.util.matching.Regex
 
 import java.nio.file
 import os._
@@ -155,14 +156,12 @@ class ComposerBuild(config: Config) {
     }
     if (crossBoundaryDisableList.nonEmpty) {
       System.err.println("Adding keep_hierarchy to SLR mappings for design with SLR distribution hint. This may take some time...")
-      crossBoundaryDisableList.foreach { case name =>
-        val replacement = s"s/^ *\\([a-zA-Z_0-9]+ [a-zA-Z_0-9]*${name}\\) /(* keep_hierarchy = \\\"yes\\\" *) \\1/g"
-        os.proc("sed", "-i", "r",
-          "-e",
-          replacement,
-          (targetDir / "ComposerTop.v").toString(),
-        ).call()
-      }
+
+      os.write.over(targetDir / "ComposerTop.v", crossBoundaryDisableList.fold(os.read(targetDir / "ComposerTop.v")) { case (f, name) =>
+        val pattern = s"([a-zA-Z_0-9]+ [a-zA-Z_0-9]*$name) ".r
+        val replacement = {r: Regex.Match => " (* keep_hierarchy = \"yes\" *) " + r.group(1) + " "}
+        pattern.replaceAllIn(f, replacement)
+      })
       System.err.println("Done adding keep_hierarchy to SLR mappings.")
     }
 
