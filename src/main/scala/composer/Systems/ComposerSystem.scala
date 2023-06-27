@@ -58,7 +58,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int,
       mems_per_slr.flatMap { case (slr, clients) =>
         val reduction = recursivelyReduceXBar(clients, slr_id = slr)
         if (reduction.isEmpty) List()
-        else if (slr == SLRConstants.getMemoryBusSLR) {
+        else if (slr == SLRHelper.getMemoryBusSLR) {
           reduction
         } else {
           // route across the SLR and give to a buffer
@@ -71,7 +71,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int,
           }
 
           // generate default SLR buffer
-          val dbuf = LazyModuleWithSLR(new TLBuffer(), slr_id = SLRConstants.getMemoryBusSLR)
+          val dbuf = LazyModuleWithSLR(new TLBuffer(), slr_id = SLRHelper.getMemoryBusSLR)
           dbuf.node := sbuf_src.node
 
           val endpoint = TLIdentityNode()
@@ -81,7 +81,7 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int,
       }.toSeq
     } else cores.flatMap(_._2.mem_nodes)
 
-    recursivelyReduceXBar(endpoints, slr_id = SLRConstants.getMemoryBusSLR)
+    recursivelyReduceXBar(endpoints, slr_id = SLRHelper.getMemoryBusSLR)
   }
 
   /* SEND OUT STUFF*/

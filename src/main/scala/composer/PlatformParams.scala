@@ -59,6 +59,8 @@ case object PlatformSLRs extends Field[Option[Seq[SLRName]]]
 
 case object PlatformNumSLRs extends Field[Int]
 
+case object PlatformPreferedSLRCmdRespRoutingPath extends Field[Option[Seq[String]]]
+
 case object IsAWS extends Field[Boolean]
 
 case object PostProcessorMacro extends Field[Config => Unit]
@@ -195,8 +197,12 @@ class WithU200Platform extends Config(new U200Base(1) ++ new U200_sole)
 class WithAWSPlatform(nMemoryChannels: Int, simulation: Boolean = true)
   extends Config(new U200Base(nMemoryChannels) ++ new AWS_sole(simulation))
 
-object SLRConstants {
-  private[composer] val SLRRoutingFanout = 4
+object SLRHelper {
+  private[composer] val SLRRespRoutingFanout = 5
+  private[composer] val SLRCmdRoutingFanout = 5
+  private[composer] val CmdEndpointsPerSLR = 1
+  private[composer] val RespEndpointsPerSLR = 2
+
   final val DEFAULT_SLR = 0
   final def getFrontBusSLR(implicit p: Parameters): Int = {
     val slr = p(PlatformSLRs).get.zipWithIndex.find(_._1.frontBus)
@@ -205,6 +211,25 @@ object SLRConstants {
   final def getMemoryBusSLR(implicit p: Parameters): Int = {
     val slr = p(PlatformSLRs).get.zipWithIndex.find(_._1.memoryBus)
     slr.getOrElse((SLRName("0"), 0))._2
+  }
+  final def getSLRFromName(slrName: String)(implicit p: Parameters): Int = {
+    val slr = p(PlatformSLRs).get.zipWithIndex.find(_._1.name == slrName)
+    require(slr.isDefined)
+    slr.get._2
+  }
+  final def getSLRFromIdx(idx: Int)(implicit p: Parameters): String = {
+    p(PlatformSLRs) match {
+      case None => ""
+      case Some(a) => a(idx).name
+    }
+  }
+
+  final def getCmdRespPath()(implicit p: Parameters): Option[Seq[Int]] = {
+    p(PlatformPreferedSLRCmdRespRoutingPath) match {
+      case None => None
+      case Some(path) =>
+        Some(path.map(p(PlatformSLRs).get.indexOf(_)))
+    }
   }
 }
 

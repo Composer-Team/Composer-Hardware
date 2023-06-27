@@ -84,7 +84,7 @@ object ConstraintGeneration {
 }
 
 class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters) extends LazyModuleImp(wrapper) {
-  implicit val slrId: Option[Int] = if (ConstraintGeneration.canDistributeOverSLRs()) Some(SLRConstants.DEFAULT_SLR) else None
+  implicit val slrId: Option[Int] = if (ConstraintGeneration.canDistributeOverSLRs()) Some(SLRHelper.DEFAULT_SLR) else None
   private var clockMap: List[(Module, Int)] = List.empty
   private var gl_id = 0
 
@@ -125,14 +125,14 @@ class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters)
   def tieClocks(): Unit = {
     if (!ConstraintGeneration.canDistributeOverSLRs()) return
 
-    val slr_ctrls: Map[Int, Clock] = Map.from((0 until p(PlatformNumSLRs)).filter(_ != SLRConstants.DEFAULT_SLR).map { slr =>
+    val slr_ctrls: Map[Int, Clock] = Map.from((0 until p(PlatformNumSLRs)).filter(_ != SLRHelper.DEFAULT_SLR).map { slr =>
       val CLmodName = f"${wrapper.baseName}_SLRClockCrossing_${slr}_clock"
       val cl_mod = Module(new BUFG)
       cl_mod.suggestName(CLmodName)
       cl_mod.io.I := clock.asBool
       ConstraintGeneration.addToSLR(CLmodName, slr)
       (slr, cl_mod.io.O.asClock)
-    } ++ Seq((SLRConstants.DEFAULT_SLR, clock)))
+    } ++ Seq((SLRHelper.DEFAULT_SLR, clock)))
 
 
     wrapper.lazyClockMap.foreach { case (lm, slr) =>
@@ -155,9 +155,9 @@ abstract class LazyModuleWithSLRs()(implicit p: Parameters) extends LazyModule {
   var lazyClockMap: List[(LazyModule, Int)] = List.empty
   val baseName: String
   private var gl_id = 0
-  implicit val slrId: Option[Int] = if (ConstraintGeneration.canDistributeOverSLRs()) Some(SLRConstants.DEFAULT_SLR) else None
+  implicit val slrId: Option[Int] = if (ConstraintGeneration.canDistributeOverSLRs()) Some(SLRHelper.DEFAULT_SLR) else None
 
-  def LazyModuleWithSLR[T <: LazyModule](mod: => T, annotations: Seq[AssignmentAnnotation] = Seq.empty, slr_id: Int = SLRConstants.DEFAULT_SLR)(implicit valName: ValName): T = {
+  def LazyModuleWithSLR[T <: LazyModule](mod: => T, annotations: Seq[AssignmentAnnotation] = Seq.empty, slr_id: Int = SLRHelper.DEFAULT_SLR)(implicit valName: ValName): T = {
     val lm = LazyModule(mod)
     val name = baseName + "_" + valName.name + "_" + gl_id
     lm.suggestName(name)

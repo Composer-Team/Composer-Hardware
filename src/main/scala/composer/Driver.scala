@@ -147,14 +147,17 @@ class ComposerBuild(config: Config) {
       }
     }
 
-    ConstraintGeneration.slrMappings.foreach { case (name, _) =>
-      val replacement = s"s/\\([a-zA-Z_0-9]* [a-zA-Z_0-9]*${name}\\) /(* keep_hierarchy = \\\"yes\\\" *) \\1/g"
-      println(replacement)
-      os.proc("sed", "-i", "r",
-        "-e",
-        replacement,
-        (targetDir / "ComposerTop.V").toString(),
+    if (ConstraintGeneration.slrMappings.nonEmpty) {
+      System.err.println("Adding keep_hierarchy to SLR mappings for design with SLR distribution hint. This may take some time...")
+      ConstraintGeneration.slrMappings.foreach { case (name, _) =>
+        val replacement = s"s/\\([a-zA-Z_0-9]* [a-zA-Z_0-9]*${name}\\) /(* keep_hierarchy = \\\"yes\\\" *) \\1/g"
+        os.proc("sed", "-i", "r",
+          "-e",
+          replacement,
+          (targetDir / "ComposerTop.V").toString(),
         ).call()
+      }
+      System.err.println("Done adding keep_hierarchy to SLR mappings.")
     }
 
 

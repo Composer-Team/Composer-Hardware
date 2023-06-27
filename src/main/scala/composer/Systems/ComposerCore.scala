@@ -383,7 +383,6 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     def apply[T](dat: Seq[Seq[T]]): CCoreChannelMultiAccessBundleChannelMajor[T] =
       new CCoreChannelMultiAccessBundleChannelMajor(dat)
   }
-
 }
 
 class ComposerSystemIO(implicit p: Parameters) extends Bundle {
