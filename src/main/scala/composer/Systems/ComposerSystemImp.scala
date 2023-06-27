@@ -80,8 +80,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
         val subgroups = resps.grouped(degree).toSeq
         val subGroupsArb = subgroups map { sg =>
           val respArb = ModuleWithSLR(new RRArbiter(new ComposerRoccResponse(), sg.length), slr_id, requestedName = Some(f"respArb_${outer.system_id}_${slr_id}_${gl_incrementer}"))
-          println(sg.length)
-          val respQ = ModuleWithSLR(new Queue(new ComposerRoccResponse(), entries = 2), slr_id, requestedName = Some(f"rq${outer.system_id}_${slr_id}_${gl_incrementer}_${sg.length}}"))
+          val respQ = ModuleWithSLR(new Queue(new ComposerRoccResponse(), entries = 2), slr_id, requestedName = Some(f"rq${outer.system_id}_${slr_id}_${gl_incrementer}_${subgroups.length}}"))
           gl_incrementer = gl_incrementer + 1
           sg.zipWithIndex.foreach { case (core_resp, idx) =>
             respArb.io.in(idx) <> core_resp
@@ -89,7 +88,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
           respArb.io.out <> respQ.io.enq
           respQ.io.deq
         }
-        collapseResp(degree, to_size, subGroupsArb.toSeq, slr_id)
+        collapseResp(degree, to_size, subGroupsArb, slr_id)
       }
     }
 
