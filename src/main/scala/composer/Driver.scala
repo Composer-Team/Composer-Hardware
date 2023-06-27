@@ -156,7 +156,7 @@ class ComposerBuild(config: Config) {
     if (crossBoundaryDisableList.nonEmpty) {
       System.err.println("Adding keep_hierarchy to SLR mappings for design with SLR distribution hint. This may take some time...")
       crossBoundaryDisableList.foreach { case name =>
-        val replacement = s"s/\\([a-zA-Z_0-9]* [a-zA-Z_0-9]*${name}\\) /(* keep_hierarchy = \\\"yes\\\" *) \\1/g"
+        val replacement = s"s/^ *\\([a-zA-Z_0-9]+ [a-zA-Z_0-9]*${name}\\) /(* keep_hierarchy = \\\"yes\\\" *) \\1/g"
         os.proc("sed", "-i", "r",
           "-e",
           replacement,
