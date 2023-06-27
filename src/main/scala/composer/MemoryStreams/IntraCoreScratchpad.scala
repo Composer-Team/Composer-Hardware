@@ -61,6 +61,7 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
   val (in, edge) = outer.mem_slave_node.in(0)
   val responseQ = Queue(in.a.map(_.source), entries = 4)
   private val realNRows = nDatas
+  private val memory = Seq.fill(nDuplicates)(CMemory(latency, dataWidth = dataWidthBits, nRows = realNRows, debugName = Some(outer.name), nPorts = mostPortsSupported))
 
   IOs.grouped(mostPortsSupported) zip memory foreach { case (access_group, mem) =>
     mem.clock := clock.asBool
@@ -91,7 +92,6 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
     }
   }
   private val scReqBits = log2Up(nDatas)
-  private val memory = Seq.fill(nDuplicates)(CMemory(latency, dataWidth = dataWidthBits, nRows = realNRows, debugName = Some(outer.name), nPorts = mostPortsSupported))
   in.d <> responseQ.map { source => edge.AccessAck(source, log2Up(in.params.dataBits / 8).U) }
 
   when(in.a.valid) {
