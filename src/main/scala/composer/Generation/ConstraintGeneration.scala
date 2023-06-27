@@ -84,7 +84,6 @@ object ConstraintGeneration {
 }
 
 class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters) extends LazyModuleImp(wrapper) {
-  implicit val slrId: Option[Int] = if (ConstraintGeneration.canDistributeOverSLRs()) Some(SLRHelper.DEFAULT_SLR) else None
   private var clockMap: List[(Module, Int)] = List.empty
   private var gl_id = 0
 
@@ -93,23 +92,9 @@ class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters)
    * some additonal bookkeeping whenever tieClocks(). If slrId is not manually defined, it assumes the Default SLR
    * specified by the Platform Configuration.
    */
-  def ModuleWithSLR[T <: Module](m: => T)(implicit valName: ValName): T = {
+  def ModuleWithSLR[T <: Module](m: => T, real_slrid: Int, requestedName: Option[String] = None)(implicit valName: ValName): T = {
     val mod = Module(m)
-    slrId match {
-      case None => ;
-      case Some(real_slrid) =>
-        val name = wrapper.baseName + "_" + valName.name + "_" + gl_id
-        mod.suggestName(name)
-        gl_id = gl_id + 1
-        ConstraintGeneration.addToSLR(name, real_slrid)
-        clockMap = (mod, slrId.get) :: clockMap
-    }
-    mod
-  }
-
-  def ModuleWithSLR[T <: Module](m: => T, real_slrid: Int)(implicit valName: ValName): T = {
-    val mod = Module(m)
-    val name = wrapper.baseName + "_" + valName.name + "_" + gl_id
+    val name = requestedName.getOrElse(wrapper.baseName + "_" + valName.name + "_" + gl_id)
     mod.suggestName(name)
     gl_id = gl_id + 1
     ConstraintGeneration.addToSLR(name, real_slrid)
@@ -148,22 +133,21 @@ class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters)
 }
 
 abstract class AssignmentAnnotation {
-  def transform[T <: LazyModule](d: T)(implicit slrID: Option[Int], valName: ValName): T
+  def transform[T <: LazyModule](d: T, slr_id: Int, name: String): T
 }
 
 abstract class LazyModuleWithSLRs()(implicit p: Parameters) extends LazyModule {
   var lazyClockMap: List[(LazyModule, Int)] = List.empty
   val baseName: String
   private var gl_id = 0
-  implicit val slrId: Option[Int] = if (ConstraintGeneration.canDistributeOverSLRs()) Some(SLRHelper.DEFAULT_SLR) else None
 
-  def LazyModuleWithSLR[T <: LazyModule](mod: => T, annotations: Seq[AssignmentAnnotation] = Seq.empty, slr_id: Int = SLRHelper.DEFAULT_SLR)(implicit valName: ValName): T = {
+  def LazyModuleWithSLR[T <: LazyModule](mod: => T, annotations: Seq[AssignmentAnnotation] = Seq.empty, slr_id: Int, requestedName: Option[String] = None)(implicit valName: ValName): T = {
     val lm = LazyModule(mod)
-    val name = baseName + "_" + valName.name + "_" + gl_id
+    val name = requestedName.getOrElse(baseName + "_" + valName.name) + "_" + gl_id
     lm.suggestName(name)
     gl_id = gl_id + 1
     ConstraintGeneration.addToSLR(name, slr_id)
-    lazyClockMap = (lm, slrId.get) :: lazyClockMap
-    annotations.foldRight(lm) { case (annot: AssignmentAnnotation, cs) => annot.transform(cs) }
+    lazyClockMap = (lm, slr_id) :: lazyClockMap
+    annotations.foldRight(lm) { case (annot: AssignmentAnnotation, cs) => annot.transform(cs, slr_id, name) }
   }
 }

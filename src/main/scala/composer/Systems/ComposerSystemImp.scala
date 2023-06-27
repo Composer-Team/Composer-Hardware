@@ -122,10 +122,16 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
       }
       SLRHelper.getCmdRespPath() match {
         case None =>
-          val topLevelResp = collapseResp(SLRHelper.SLRRespRoutingFanout, 1, respsCollapsed.map(_._2).flatten.toSeq, SLRHelper.getFrontBusSLR)
+          val topLevelResp = collapseResp(SLRHelper.SLRRespRoutingFanout, 1, respsCollapsed.flatMap(_._2).toSeq, SLRHelper.getFrontBusSLR)
           topLevelResp(0)
         case Some(path) =>
-          (0 until path.length).foldRight()
+          collapseResp(SLRHelper.SLRRespRoutingFanout, 1,
+            path.foldRight(Seq[DecoupledIO[ComposerRoccResponse]]()) { case (slr_idx, acc) =>
+              println(s"Collapsing to $slr_idx")
+            collapseResp(SLRHelper.SLRRespRoutingFanout, SLRHelper.RespEndpointsPerSLR,
+              acc ++ respsCollapsed(slr_idx),
+              slr_idx)
+          }, SLRHelper.getFrontBusSLR)(0)
       }
     }
   }
@@ -160,7 +166,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     wire.rd := 0.U
 
     val respClient = outer.outgoingInternalResponseClient.get
-    val internalRespDispatcher = ModuleWithSLR(new TLClientModule(respClient))
+    val internalRespDispatcher = Module(new TLClientModule(respClient))
     internalRespDispatcher.tl <> respClient.out(0)._1
     // Don't need RD internally so don't send it. Adding it would force use to use a _much_ wider interconnect...
     internalRespDispatcher.io.bits.dat := wire.packRocc
@@ -213,7 +219,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     val manager = outer.incomingInternalResponseHandlers(target)
     val managerNode = manager._1
     val (mBundle, mEdge) = managerNode.in(0)
-    val responseManager = ModuleWithSLR(new TLManagerModule(mBundle, mEdge))
+    val responseManager = Module(new TLManagerModule(mBundle, mEdge))
     responseManager.tl <> managerNode.in(0)._1
     val response = hasRoccResponseFields[ComposerRoccResponse](new ComposerRoccResponse, responseManager.io.bits)
 
@@ -258,7 +264,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
       }
     }
 
-    val slr_endpoints = slr_groups.flatMap { case (slr_id, cwrap) =>
+    val slr_endpoints = slr_groups.map { case (slr_id, cwrap) =>
       val slr_cores = cwrap.map(_._2)
       val core_cmd_endpoints = slr_cores.map { core =>
         val cmdsrcpr = Wire(Output(Decoupled(new CommandSrcPair(outer.acc.sysNCmdSourceLookup(outer.systemParams.name)))))
@@ -269,9 +275,19 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
         // queue in front of every core (no-fanout)
         connectCoreGroup(1, Seq((cmdsrcpr, Seq(core.core_id))), slr_id)
       }
-      recursivelyGroupCmds(SLRHelper.SLRCmdRoutingFanout, SLRHelper.CmdEndpointsPerSLR, core_cmd_endpoints.map(pr => (pr(0)._1, pr(0)._2)), slr_id)
+      (slr_id, recursivelyGroupCmds(SLRHelper.SLRCmdRoutingFanout, SLRHelper.CmdEndpointsPerSLR, core_cmd_endpoints.map(pr => (pr(0)._1, pr(0)._2)), slr_id))
     }
-    val origin = recursivelyGroupCmds(SLRHelper.SLRCmdRoutingFanout, 1, slr_endpoints.toSeq, SLRHelper.getFrontBusSLR)(0)._1
+    val origin = SLRHelper.getCmdRespPath() match {
+      case None => recursivelyGroupCmds(SLRHelper.SLRCmdRoutingFanout, 1, slr_endpoints.flatMap(_._2).toSeq, SLRHelper.getFrontBusSLR)(0)._1
+      case Some(path) =>
+        recursivelyGroupCmds(SLRHelper.SLRRespRoutingFanout, 1,
+          path.foldRight(Seq[(DecoupledIO[CommandSrcPair], Seq[Int])]()) { case (slr_id, acc) =>
+          recursivelyGroupCmds(SLRHelper.SLRCmdRoutingFanout, SLRHelper.CmdEndpointsPerSLR,
+            acc ++ slr_endpoints.find(_._1 == slr_id).get._2,
+            slr_id)
+
+        }, SLRHelper.getFrontBusSLR)(0)._1
+    }
 
     cmd <> origin
   } else {

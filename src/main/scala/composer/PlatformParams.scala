@@ -2,20 +2,9 @@ package composer
 
 import chipsalliance.rocketchip.config._
 import composer.FrontBusProtocol.FrontBusProtocol
-import composer.MemoryStreams._
-import composer.MemoryStreams.RAM.{ASAP7_SP_SRAM, MemoryCompiler, RegMem, SAED_1RW_SRAM, SAED_2RW_SRAM}
+import composer.MemoryStreams.RAM.MemoryCompiler
 import composer.PlatformType.PlatformType
-import composer.ProcessCorner.ProcessCorner
-import composer.ProcessOperatingConditions.ProcessOperatingConditions
-import composer.ProcessTemp.ProcessTemp
-import composer.ProcessVoltageThreshold.ProcessVoltageThreshold
 import freechips.rocketchip.subsystem._
-import os.Path
-import chisel3._
-import chisel3.experimental.BaseModule
-
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 object PlatformType extends Enumeration {
   val FPGA, ASIC = Value
@@ -168,13 +157,15 @@ private[composer] class AWS_sole(simulation: Boolean)
     // why did this ever become 128? It's 2X the bus width... That doesn't seem to make much sense...
     //  case CacheBlockBytes => 128
     case PlatformSLRs =>
-      Some(
-        Seq(
-          SLRName("pblock_CL_mid", memoryBus = true),
-          SLRName("pblock_CL_bot", frontBus = true),
-          SLRName("pblock_CL_top")
-        )
-      )
+      Some(Seq(
+        SLRName("pblock_CL_mid", memoryBus = true),
+        SLRName("pblock_CL_bot", frontBus = true),
+        SLRName("pblock_CL_top")))
+    case PlatformPreferedSLRCmdRespRoutingPath =>
+      Some(Seq(
+        "pblock_CL_bot",
+        "pblock_CL_mid",
+        "pblock_CL_top"))
     case DefaultClockRateKey => 125
     case IsAWS => true
     case PostProcessorMacro =>
@@ -225,10 +216,13 @@ object SLRHelper {
   }
 
   final def getCmdRespPath()(implicit p: Parameters): Option[Seq[Int]] = {
+    if (p(PlatformTypeKey) != PlatformType.FPGA) return None
     p(PlatformPreferedSLRCmdRespRoutingPath) match {
       case None => None
       case Some(path) =>
-        Some(path.map(p(PlatformSLRs).get.indexOf(_)))
+        val path_conv = path.map(p(PlatformSLRs).get.map(_.name).indexOf(_))
+        require(path_conv.forall(_ >= 0))
+        Some(path_conv)
     }
   }
 }

@@ -38,13 +38,17 @@ class ComposerChipStage extends Stage with Phase {
 
   override def run(annotations: AnnotationSeq): AnnotationSeq =
     pm.transform(annotations ++ Seq(PrintFullStackTraceAnnotation))
-
 }
 
 object ComposerBuild {
   private val errorNoCR =
     "Environment variables 'COMPOSER_ROOT' is not visible and no shell configuration file found.\n" +
       " Please define or configure IDE to see this enviornment variable\n"
+
+  private var crossBoundaryDisableList: Seq[String] = Seq.empty
+  def disableCrossBoundaryOptimizationForModule(moduleName: String): Unit = {
+    crossBoundaryDisableList = crossBoundaryDisableList :+ moduleName
+  }
 
   private[composer] def addSource(): Unit = {}
 
@@ -146,15 +150,17 @@ class ComposerBuild(config: Config) {
         os.copy.over(src, gsrc_dir / src.baseName)
       }
     }
-
-    if (ConstraintGeneration.slrMappings.nonEmpty) {
+    ConstraintGeneration.slrMappings.foreach{ slrMapping =>
+      crossBoundaryDisableList = crossBoundaryDisableList :+ slrMapping._1
+    }
+    if (crossBoundaryDisableList.nonEmpty) {
       System.err.println("Adding keep_hierarchy to SLR mappings for design with SLR distribution hint. This may take some time...")
-      ConstraintGeneration.slrMappings.foreach { case (name, _) =>
+      crossBoundaryDisableList.foreach { case name =>
         val replacement = s"s/\\([a-zA-Z_0-9]* [a-zA-Z_0-9]*${name}\\) /(* keep_hierarchy = \\\"yes\\\" *) \\1/g"
         os.proc("sed", "-i", "r",
           "-e",
           replacement,
-          (targetDir / "ComposerTop.V").toString(),
+          (targetDir / "ComposerTop.v").toString(),
         ).call()
       }
       System.err.println("Done adding keep_hierarchy to SLR mappings.")

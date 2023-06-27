@@ -31,10 +31,11 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int,
     def recursivelyReduceXBar(grp: Seq[TLNode], inc: Int = 0, slr_id: Int): Seq[TLIdentityNode] = {
       def help(a: Seq[Seq[TLNode]]): Seq[TLNode] = {
         a.map { r =>
-          val memory_xbar = LazyModuleWithSLR(new TLXbar(), slr_id = slr_id)
+          val memory_xbar = LazyModuleWithSLR(new TLXbar(), slr_id = slr_id, requestedName = Some(s"memory_xbar_${SLRHelper.getSLRFromIdx(slr_id)}"))
 
           r.foreach(memory_xbar.node := _)
-          val memory_xbar_buffer = LazyModuleWithSLR(new TLBuffer(), slr_id = slr_id)
+          val memory_xbar_buffer = LazyModuleWithSLR(new TLBuffer(), slr_id = slr_id, requestedName = Some(s"memory_xbar_buffer_slr${SLRHelper.getSLRFromIdx(slr_id)}"))
+
           memory_xbar_buffer.node := memory_xbar.node
           memory_xbar_buffer.node
         }
@@ -63,15 +64,15 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int,
         } else {
           // route across the SLR and give to a buffer
           val sbuf_src = {
-            val canal = LazyModuleWithSLR(new TLXbar(), slr_id = slr)
+            val canal = LazyModuleWithSLR(new TLXbar(), slr_id = slr, requestedName = Some(s"final_slrReduction_xbar_${SLRHelper.getSLRFromIdx(slr)}"))
             reduction foreach { a => canal.node := a }
-            val sbuf = LazyModuleWithSLR(new TLBuffer(), slr_id = slr)
+            val sbuf = LazyModuleWithSLR(new TLBuffer(), slr_id = slr, requestedName = Some(s"final_slrReduction_buffer_slr${SLRHelper.getSLRFromIdx(slr)}"))
             sbuf.node := canal.node
             sbuf
           }
 
           // generate default SLR buffer
-          val dbuf = LazyModuleWithSLR(new TLBuffer(), slr_id = SLRHelper.getMemoryBusSLR)
+          val dbuf = LazyModuleWithSLR(new TLBuffer(), slr_id = SLRHelper.getMemoryBusSLR, requestedName = Some(s"final_slrReduction_default_buffer_MemoryBus${SLRHelper.getSLRFromIdx(SLRHelper.getMemoryBusSLR)}"))
           dbuf.node := sbuf_src.node
 
           val endpoint = TLIdentityNode()
