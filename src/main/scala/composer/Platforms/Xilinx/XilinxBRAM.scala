@@ -75,16 +75,6 @@ private[MemoryStreams] class CFPGAMemory(latency: Int,
   })
 
   val dname_prefix = s"CMemoryL${latency}DW${dataWidth}R$nRows"
-  override val desiredName = f"$dname_prefix$dname_suffix"
-
-  private val memoryRoot = os.pwd / ".memories"
-  if (!os.exists(memoryRoot)) os.makeDir(memoryRoot)
-
-  private val component = memoryRoot / f"$desiredName.v"
-
-  ComposerBuild.addSource(component)
-
-
   val (memoryAnnotations, dname_suffix) = {
     if (
       p(ConstraintHintsKey).contains(ComposerConstraintHint.MemoryConstrained)
@@ -134,6 +124,17 @@ private[MemoryStreams] class CFPGAMemory(latency: Int,
       ret
     } else ("", "")
   }
+
+  override val desiredName = f"$dname_prefix$dname_suffix"
+
+  private val memoryRoot = os.pwd / ".memories"
+  if (!os.exists(memoryRoot)) os.makeDir(memoryRoot)
+
+  private val component = memoryRoot / f"$desiredName.v"
+
+  ComposerBuild.addSource(component)
+
+
 
   @tailrec
   private def get_bram_width(
