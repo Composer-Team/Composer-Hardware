@@ -6,7 +6,7 @@ import chisel3.util._
 import composer.{PlatformType, PlatformTypeKey, PrefetchSourceMultiplicity}
 import composer.Systems.DataChannelIO
 import composer.common.{CLog2Up, ShiftReg}
-import composer.MemoryStreams.RAM.SimpleDRAMHintKey
+import composer.MemoryStreams.RAM.{SimpleDRAMHintKey, SyncReadMemMem}
 import freechips.rocketchip.diplomacy.ValName
 import freechips.rocketchip.tilelink._
 
@@ -90,9 +90,9 @@ class CReader(dataBytes: Int,
     case PlatformType.FPGA => 3
     case PlatformType.ASIC => (prefetchRows.toFloat / 256).ceil.toInt
   }
-  val prefetch_buffers = CMemory(prefetch_blatency, storedDataWidth, prefetchRows, debugName = Some(debugName.getOrElse("") + "_prefetchBuffer"), nPorts = 2)(p.alterPartial({
-    case SimpleDRAMHintKey => true
-  }), valName = ValName.apply("prefetch_buffers"))
+  val prefetch_buffers_mod = Module(new SyncReadMemMem(2, prefetchRows, storedDataWidth, prefetch_blatency))
+  val prefetch_buffers = prefetch_buffers_mod.mio
+
   prefetch_buffers.clock := clock.asBool
   prefetch_buffers.addr(0) := prefetch_readIdx
   prefetch_buffers.data_in(0) := DontCare

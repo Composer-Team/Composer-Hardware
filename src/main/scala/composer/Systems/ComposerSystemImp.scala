@@ -78,8 +78,8 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
       } else {
         val subgroups = resps.grouped(degree)
         val subGroupsArb = subgroups map { sg =>
-          val respArb = ModuleWithSLR(new RRArbiter(new ComposerRoccResponse(), sg.length), slr_id)
-          val respQ = ModuleWithSLR(new Queue(new ComposerRoccResponse(), entries = 2), slr_id)
+          val respArb = ModuleWithSLR(new RRArbiter(new ComposerRoccResponse(), sg.length), slr_id, requestedName = Some(f"respArb_slr${slr_id}"))
+          val respQ = ModuleWithSLR(new Queue(new ComposerRoccResponse(), entries = 2), slr_id, requestedName = Some(f"respQ_slr${slr_id}"))
           sg.zipWithIndex.foreach { case (core_resp, idx) =>
             respArb.io.in(idx) <> core_resp
           }
