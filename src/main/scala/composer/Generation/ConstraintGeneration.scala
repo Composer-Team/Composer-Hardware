@@ -94,6 +94,7 @@ class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters)
    */
   def ModuleWithSLR[T <: Module](m: => T, real_slrid: Int, requestedName: Option[String] = None)(implicit valName: ValName): T = {
     val mod = Module(m)
+    if (!ConstraintGeneration.canDistributeOverSLRs()) return mod
     val name = requestedName.getOrElse(wrapper.baseName + "_" + valName.name + "_" + gl_id)
     mod.suggestName(name)
     gl_id = gl_id + 1
@@ -143,6 +144,7 @@ abstract class LazyModuleWithSLRs()(implicit p: Parameters) extends LazyModule {
 
   def LazyModuleWithSLR[T <: LazyModule](mod: => T, annotations: Seq[AssignmentAnnotation] = Seq.empty, slr_id: Int, requestedName: Option[String] = None)(implicit valName: ValName): T = {
     val lm = LazyModule(mod)
+    if (!ConstraintGeneration.canDistributeOverSLRs()) return lm
     val name = requestedName.getOrElse(baseName + "_" + valName.name) + "_" + gl_id
     lm.suggestName(name)
     gl_id = gl_id + 1
