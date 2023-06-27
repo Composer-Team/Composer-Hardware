@@ -196,10 +196,14 @@ object SLRHelper {
 
   final val DEFAULT_SLR = 0
   final def getFrontBusSLR(implicit p: Parameters): Int = {
+    if (p(PlatformTypeKey) != PlatformType.FPGA) return DEFAULT_SLR
+    if (p(PlatformSLRs).isEmpty) return DEFAULT_SLR
     val slr = p(PlatformSLRs).get.zipWithIndex.find(_._1.frontBus)
     slr.getOrElse((SLRName("0"), 0))._2
   }
   final def getMemoryBusSLR(implicit p: Parameters): Int = {
+    if (p(PlatformTypeKey) != PlatformType.FPGA) return DEFAULT_SLR
+    if (p(PlatformSLRs).isEmpty) return DEFAULT_SLR
     val slr = p(PlatformSLRs).get.zipWithIndex.find(_._1.memoryBus)
     slr.getOrElse((SLRName("0"), 0))._2
   }
