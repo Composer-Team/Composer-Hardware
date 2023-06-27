@@ -116,7 +116,7 @@ private[MemoryStreams] class CFPGAMemory(latency: Int,
             s"Using $bram_consumption brams for $debugName ($dataWidth, $nRows) - $dname_prefix"
           )
           bram_used = bram_used + bram_consumption
-          ("(* ram_style = \"block\", dont_touch = \"true\" *)", "constB")
+          ("(* ram_style = \"block\" *)", "constB")
         } else {
           System.err.println(s"Memory ${nRows}x${dataWidth} is too small for BRAM and URAM, leaving it up to the synthesizer")
           ("", "")
