@@ -61,7 +61,7 @@ object CMemory {
                 cmem.io.OEB2 := DontCare
                 cmem.io.WEB2 := DontCare
               } else {
-                cmem.io.I2 := mio.data_in(1)
+                cmem.io.I2 := mio.data_in(1)(high_idx, low_idx)
                 cmem.io.A2 := mio.addr(1)
                 cmem.io.CSB2 := mio.chip_select(1)
                 cmem.io.WEB2 := mio.write_enable(1)
