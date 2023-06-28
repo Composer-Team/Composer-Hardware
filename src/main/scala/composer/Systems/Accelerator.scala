@@ -5,6 +5,7 @@ import chisel3._
 import chisel3.util._
 import composer.common._
 import composer._
+import composer.Platforms.HasDisjointMemoryControllers
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem.ExtMem
 import freechips.rocketchip.tile._

@@ -6,6 +6,7 @@ import freechips.rocketchip.amba.axi4._
 import chipsalliance.rocketchip.config._
 import composer._
 import composer.common.ComposerRoccResponse
+import composer.Platforms.{FrontBusProtocol, FrontBusProtocolKey}
 import freechips.rocketchip.amba.ahb.{AHBMasterIdentityNode, AHBSlaveIdentityNode, AHBToTL}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tile.{RoCCCommand, RoCCResponse, TileVisibilityNodeKey}

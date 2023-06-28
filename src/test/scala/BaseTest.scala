@@ -8,6 +8,7 @@ import composer.Systems._
 import composer._
 import composer.Generation._
 import composer.common.ComposerCommand
+import composer.Platforms.WithKriaPlatform
 
 case class LFSRConfig(length: Int, taps: Seq[Int])
 

@@ -9,6 +9,7 @@ import composer.RoccHelpers.MCRFileMap
 import composer.Systems.{ComposerAcc, ComposerTop}
 import composer._
 import composer.common.{AbstractComposerCommand, ComposerUserResponse}
+import composer.Platforms.{DefaultClockRateKey, FrontBusBaseAddress, FrontBusBeatBytes, HasDiscreteMemory, HasDMA}
 import freechips.rocketchip.subsystem.ExtMem
 import freechips.rocketchip.tile.XLen
 import os.Path

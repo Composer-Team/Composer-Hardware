@@ -1,11 +1,11 @@
-package composer.MemoryStreams.RAM
+package composer.Platforms.ASIC
 
 import chipsalliance.rocketchip.config.Parameters
-import chisel3.util._
 import chisel3._
 import chisel3.experimental.BaseModule
-import composer.ASICMemoryCompilerKey
+import chisel3.util._
 import composer.MemoryStreams._
+import composer.Platforms.ASICMemoryCompilerKey
 
 import scala.annotation.tailrec
 

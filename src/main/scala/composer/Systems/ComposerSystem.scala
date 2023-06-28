@@ -2,10 +2,12 @@ package composer.Systems
 
 import chipsalliance.rocketchip.config._
 import chisel3.util._
+import composer._
 import composer.Generation.{ConstraintGeneration, LazyModuleWithSLRs}
 import composer.RoccHelpers._
-import composer._
 import composer.common._
+import composer.Platforms._
+import composer.Platforms.FPGA._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 
@@ -63,20 +65,14 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int,
           reduction
         } else {
           // route across the SLR and give to a buffer
-          val sbuf_src = {
-            val canal = LazyModuleWithSLR(new TLXbar(), slr_id = slr, requestedName = Some(s"final_slrReduction_xbar_${SLRHelper.getSLRFromIdx(slr)}"))
-            reduction foreach { a => canal.node := a }
-            val sbuf = LazyModuleWithSLR(new TLBuffer(), slr_id = slr, requestedName = Some(s"final_slrReduction_buffer_slr${SLRHelper.getSLRFromIdx(slr)}"))
-            sbuf.node := canal.node
-            sbuf
-          }
-
-          // generate default SLR buffer
-          val dbuf = LazyModuleWithSLR(new TLBuffer(), slr_id = SLRHelper.getMemoryBusSLR, requestedName = Some(s"final_slrReduction_default_buffer_MemoryBus${SLRHelper.getSLRFromIdx(SLRHelper.getMemoryBusSLR)}"))
-          dbuf.node := sbuf_src.node
+          val canal = LazyModuleWithSLR(new TLXbar(), slr_id = slr, requestedName = Some(s"final_slrReduction_xbar_${SLRHelper.getSLRFromIdx(slr)}"))
+          reduction foreach { a => canal.node := a }
+          val sbuf = LazyModule(new TLBuffer())
+          sbuf.suggestName(s"final_slrReduction_buffer_slr${SLRHelper.getSLRFromIdx(slr)}")
+          sbuf.node := canal.node
 
           val endpoint = TLIdentityNode()
-          endpoint := dbuf.node
+          endpoint := sbuf.node
           List(endpoint)
         }
       }.toSeq

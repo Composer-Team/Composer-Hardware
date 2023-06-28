@@ -5,7 +5,8 @@ import chipsalliance.rocketchip.config._
 
 import chisel3._
 import chisel3.util._
-import composer.{FrontBusBeatBytes, CmdRespBusWidthBytes}
+import composer.CmdRespBusWidthBytes
+import composer.Platforms.FrontBusBeatBytes
 import freechips.rocketchip.amba.axi4.{AXI4MasterNode, AXI4MasterParameters, AXI4MasterPortParameters}
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.subsystem.CacheBlockBytes

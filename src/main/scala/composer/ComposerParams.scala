@@ -3,7 +3,7 @@ package composer
 import chipsalliance.rocketchip.config._
 import composer.ComposerConstraintHint.ComposerConstraintHint
 import composer.MemoryStreams._
-import composer.MemoryStreams.RAM.SimpleDRAMHintKey
+import composer.Platforms.FPGA.Xilinx.SimpleDRAMHintKey
 import composer.Systems.{ComposerCore, ComposerCoreWrapper}
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.devices.tilelink._

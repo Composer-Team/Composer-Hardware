@@ -9,6 +9,7 @@ import composer.RoccHelpers._
 import composer.TLManagement._
 import composer._
 import composer.common._
+import composer.Platforms.FPGA._
 
 import scala.annotation.tailrec
 
@@ -80,7 +81,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
         val subgroups = resps.grouped(degree).toSeq
         val subGroupsArb = subgroups map { sg =>
           val respArb = ModuleWithSLR(new RRArbiter(new ComposerRoccResponse(), sg.length), slr_id, requestedName = Some(f"respArb_${outer.system_id}_${slr_id}_${gl_incrementer}"))
-          val respQ = ModuleWithSLR(new Queue(new ComposerRoccResponse(), entries = 2), slr_id, requestedName = Some(f"rq${outer.system_id}_${slr_id}_${gl_incrementer}_${subgroups.length}}"))
+          val respQ = Module(new Queue(new ComposerRoccResponse(), entries = 2))
           gl_incrementer = gl_incrementer + 1
           sg.zipWithIndex.foreach { case (core_resp, idx) =>
             respArb.io.in(idx) <> core_resp
@@ -236,11 +237,14 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   if (p(CoreCommandLatency) > 0) {
 
     // take in series of endpoints that recieve a commandSrc pair and return a smaller sequence (by degree radix) of commandSrc pairs
-    def connectCoreGroup(degree: Int, endpoints: Seq[(DecoupledIO[CommandSrcPair], Seq[Int])], slrId: Int):
+    def connectCoreGroup(degree: Int, endpoints: Seq[(DecoupledIO[CommandSrcPair], Seq[Int])], slr_id: Option[Int]):
     Seq[(DecoupledIO[CommandSrcPair], Seq[Int])] = {
       val core_group = endpoints.grouped(degree)
       core_group.map { cg =>
-        val core_group_cmd_queue = ModuleWithSLR(new Queue(new CommandSrcPair(outer.acc.sysNCmdSourceLookup(outer.systemParams.name)), 2), slrId)
+        val core_group_cmd_queue = slr_id match {
+          case Some(slrId) => ModuleWithSLR(new Queue(new CommandSrcPair(outer.acc.sysNCmdSourceLookup(outer.systemParams.name)), 2), slrId)
+          case None => Module(new Queue(new CommandSrcPair(outer.acc.sysNCmdSourceLookup(outer.systemParams.name)), 2))
+        }
         core_group_cmd_queue.io.deq.ready := false.B
         val local_cselect = core_group_cmd_queue.io.deq.bits.cmd.getCoreID
         cg.foreach { case (core_q, core_id_set) =>
@@ -258,7 +262,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     val slr_groups = outer.cores.groupBy(_._1)
 
     @tailrec
-    def recursivelyGroupCmds(degree: Int, to_size: Int, endpoints: Seq[(DecoupledIO[CommandSrcPair], Seq[Int])], slrId: Int): Seq[(DecoupledIO[CommandSrcPair], Seq[Int])] = {
+    def recursivelyGroupCmds(degree: Int, to_size: Int, endpoints: Seq[(DecoupledIO[CommandSrcPair], Seq[Int])], slrId: Option[Int]): Seq[(DecoupledIO[CommandSrcPair], Seq[Int])] = {
       if (endpoints.size <= to_size) {
         endpoints
       } else {
@@ -275,20 +279,22 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
         core.module.io_declaration.req.valid := cmdsrcpr.valid
         cmdsrcpr.ready := core.module.io_declaration.req.ready
         // queue in front of every core (no-fanout)
-        connectCoreGroup(1, Seq((cmdsrcpr, Seq(core.core_id))), slr_id)
+        connectCoreGroup(1, Seq((cmdsrcpr, Seq(core.core_id))), Some(slr_id))
       }
-      (slr_id, recursivelyGroupCmds(SLRHelper.SLRCmdRoutingFanout, SLRHelper.CmdEndpointsPerSLR, core_cmd_endpoints.map(pr => (pr(0)._1, pr(0)._2)), slr_id))
+      (slr_id, recursivelyGroupCmds(SLRHelper.SLRCmdRoutingFanout, SLRHelper.CmdEndpointsPerSLR, core_cmd_endpoints.map(pr => (pr(0)._1, pr(0)._2)), Some(slr_id)))
     }
     val origin = SLRHelper.getCmdRespPath() match {
-      case None => recursivelyGroupCmds(SLRHelper.SLRCmdRoutingFanout, 1, slr_endpoints.flatMap(_._2).toSeq, SLRHelper.getFrontBusSLR)(0)._1
+      case None => recursivelyGroupCmds(SLRHelper.SLRCmdRoutingFanout, 1, slr_endpoints.flatMap(_._2).toSeq, None)(0)._1
       case Some(path) =>
         recursivelyGroupCmds(SLRHelper.SLRRespRoutingFanout, 1,
+
           path.foldRight(Seq[(DecoupledIO[CommandSrcPair], Seq[Int])]()) { case (slr_id, acc) =>
           recursivelyGroupCmds(SLRHelper.SLRCmdRoutingFanout, SLRHelper.CmdEndpointsPerSLR,
-            acc ++ slr_endpoints.find(_._1 == slr_id).get._2,
-            slr_id)
+            connectCoreGroup(1, acc, None) ++
+              slr_endpoints.find(_._1 == slr_id).get._2,
+            Some(slr_id))
 
-        }, SLRHelper.getFrontBusSLR)(0)._1
+        }, Some(SLRHelper.getFrontBusSLR))(0)._1
     }
 
     cmd <> origin

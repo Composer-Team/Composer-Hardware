@@ -4,13 +4,14 @@ import chipsalliance.rocketchip.config._
 import chisel3.stage._
 import composer.ComposerBuild._
 import composer.Generation.{ConstraintGeneration, ExportCSymbolPhase}
+import composer.Platforms.PostProcessorMacro
 import firrtl._
 import firrtl.options.PhaseManager.PhaseDependency
 import firrtl.options._
 import firrtl.stage.FirrtlCli
 import freechips.rocketchip.stage._
-import scala.util.matching.Regex
 
+import scala.util.matching.Regex
 import java.nio.file
 import os._
 

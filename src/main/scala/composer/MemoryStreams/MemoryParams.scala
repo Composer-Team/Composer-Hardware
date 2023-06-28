@@ -5,7 +5,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import composer._
-import composer.MemoryStreams.RAM.SimpleDRAMHintKey
+import composer.Platforms.FPGA.Xilinx.SimpleDRAMHintKey
 import freechips.rocketchip.subsystem.ExtMem
 
 /**

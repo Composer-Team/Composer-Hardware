@@ -1,10 +1,11 @@
-package composer.MemoryStreams.RAM
+package composer.Platforms.ASIC.SAED
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import composer._
 import composer.MemoryStreams._
+import composer.Platforms.ASICMemoryCompilerKey
 
 
 class SAED_2RW_SRAM (rows: Int, dataBits: Int)(implicit p: Parameters) extends BlackBox with HasMemoryInterface {

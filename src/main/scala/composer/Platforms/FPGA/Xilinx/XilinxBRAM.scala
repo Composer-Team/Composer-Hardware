@@ -1,29 +1,119 @@
-package composer.MemoryStreams.RAM
+package composer.Platforms.FPGA.Xilinx
 
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util.log2Up
-import composer.MemoryStreams.HasMemoryInterface
-import composer.MemoryStreams.RAM.CFPGAMemory.{bram_used, uram_used}
 import composer._
+import composer.MemoryStreams.HasMemoryInterface
+import composer.Platforms.{PlatformNBRAM, PlatformNURAM}
 
 import java.io.FileWriter
 import scala.annotation.tailrec
 
 case object SimpleDRAMHintKey extends Field[Boolean]
 
-object CFPGAMemory {
+case class FPGAMemoryPrimitiveConsumer(brams: Int, urams: Int, verilogAnnotations: String, fileNameAnnotation: String)
+
+object FPGAMemoryCompiler {
+  private[composer] var warningsIssued = 0
   private var bram_used = 0
   private var uram_used = 0
+
+  private val uram_dwidth = 72
+  private val uram_nrows = 4 * 1024
+
+  private[composer] def bram_dwidth(implicit p: Parameters) = List(1, 2, 4, 9, 18, 36) ++ (if (p(SimpleDRAMHintKey)) Seq(72) else Seq())
+
+  def get_bram_width(requested: Int)(implicit p: Parameters): Int = {
+    @tailrec
+    def help(h: List[Int]): Int = {
+      if (h.isEmpty) bram_dwidth(p).max
+      else if (requested <= h.head) h.head
+      else help(h.tail)
+    }
+    help(bram_dwidth(p))
+  }
+
+  // get bram and uram usage respectively for a given memory
+  def getMemoryResources(nRows: Int, dwidth: Int, debugName: String)(implicit p: Parameters): FPGAMemoryPrimitiveConsumer = {
+    def get_n_brams(widthRequested: Int, rowsRequested: Int): Int = {
+      val w = get_bram_width(widthRequested)
+      val rows_per_bram = bram_width2rows(p)(w)
+      // if asking for a super wide BRAM, then they're likely going to be cascaded together
+      val cascade = if (widthRequested > w) {
+        (widthRequested.toFloat / w).ceil.toInt
+      } else 1
+      (rowsRequested.toFloat / rows_per_bram).ceil.toInt * cascade
+    }
+
+    def get_n_urams(widthRequested: Int, rowsRequested: Int): Int = {
+      val row_consumption = (rowsRequested.toFloat / uram_nrows).ceil.toInt
+      val width_mult = (widthRequested.toFloat / uram_dwidth).ceil.toInt
+      width_mult * row_consumption
+    }
+
+    val useURAM = if (nRows > 4 * 1024 && dwidth < 64) {
+      if (!p(ComposerQuiet) && warningsIssued < 5) {
+        System.err.println(
+          s"One of the memory modules ($debugName) has a data width less than 64 ($dwidth) but has a total\n" +
+            s"data capacity that makes it appropriate for URAM (applicable for Ultrascale+ devices)\n" +
+            s"This may lead to poor URAM cascading. Consider increasing the width if possible."
+        )
+        warningsIssued += 1
+      }
+      false
+    } else false
+    // appropriate data width and at least 90% capacity
+    val uram_consumption = get_n_urams(dwidth, nRows)
+    val bram_consumption = get_n_brams(dwidth, nRows)
+    val have_enough_uram = uram_used + uram_consumption < p(PlatformNURAM)
+    val have_enough_bram = bram_used + bram_consumption < p(PlatformNBRAM)
+    val usage = if (useURAM) FPGAMemoryPrimitiveConsumer(0, uram_consumption, "(* ram_style = \"ultra\" *)", "URAM")
+    else if (have_enough_bram) FPGAMemoryPrimitiveConsumer(bram_consumption, 0, "(* ram_style = \"block\" *)", "BRAM")
+    else if (have_enough_uram) FPGAMemoryPrimitiveConsumer(0, uram_consumption, "(* ram_style = \"ultra\" *)", "URAM")
+    else {
+      System.err.println(
+        s"Memory module $debugName requires ${bram_consumption} BRAMs and ${uram_consumption} URAMs,\n" +
+          s" but only ${p(PlatformNBRAM) - bram_used} BRAMs and ${p(PlatformNURAM) - uram_used} URAMs\n" +
+          s"are available.")
+      FPGAMemoryPrimitiveConsumer(0, 0, "", "")
+    }
+
+    if (!p(ComposerQuiet)) {
+      System.err.println(s"Using ${usage.brams} BRAMs and ${usage.urams} URAMs for $debugName.")
+      System.err.println(s"Total Usage - BRAM(${FPGAMemoryCompiler.bram_used}/${p(PlatformNBRAM)}) URAM(${FPGAMemoryCompiler.uram_used}/${p(PlatformNURAM)})")
+    }
+    usage
+  }
+
+  private def bram_maxdwidth(implicit p: Parameters) = if (p(SimpleDRAMHintKey)) 72 else 36
+
+  private def bram_width2rows(implicit p: Parameters) = Map.from({
+    Seq(
+      (1, 32 * 1024),
+      (2, 16 * 1024),
+      (4, 8 * 1024),
+      (9, 4 * 1024),
+      (18, 2 * 1024),
+      (36, 1024)) ++ (if (p(SimpleDRAMHintKey)) Seq(Tuple2(72, 512)) else Seq())
+  })
+
+  def allocateBRAM(nBRAM: Int): Unit = {
+    bram_used += nBRAM
+  }
+
+  def allocateURAM(nURAM: Int): Unit = {
+    uram_used += nURAM
+  }
+
 }
 
-
 //noinspection ScalaUnusedSymbol
-private[MemoryStreams] class CFPGAMemory(latency: Int,
-                                          dataWidth: Int,
-                                          nRows: Int,
-                                          debugName: String,
-                                        )(implicit p: Parameters) extends BlackBox with HasMemoryInterface {
+private[composer] class FPGAMemoryCompiler(latency: Int,
+                                                dataWidth: Int,
+                                                nRows: Int,
+                                                debugName: String,
+                                               )(implicit p: Parameters) extends BlackBox with HasMemoryInterface {
   val io = IO(new Bundle {
     val CE = Input(Bool())
     val WEB1 = Input(Bool())
@@ -60,68 +150,15 @@ private[MemoryStreams] class CFPGAMemory(latency: Int,
   )
   private val addrWidth = log2Up(nRows)
 
-  private val bram_dwidth = List(1, 2, 4, 9, 18, 36) ++ (if (p(SimpleDRAMHintKey)) Seq(72) else Seq())
-  private val bram_maxdwidth = if (p(SimpleDRAMHintKey)) 72 else 36
-  private val uram_dwidth = 72
-  private val uram_nrows = 4 * 1024
-  private val bram_width2rows = Map.from({
-    Seq(
-      (1, 32 * 1024),
-      (2, 16 * 1024),
-      (4, 8 * 1024),
-      (9, 4 * 1024),
-      (18, 2 * 1024),
-      (36, 1024)) ++ (if (p(SimpleDRAMHintKey)) Seq(Tuple2(72, 512)) else Seq())
-  })
-
   val dname_prefix = s"CMemoryL${latency}DW${dataWidth}R$nRows"
   val (memoryAnnotations, dname_suffix) = {
     if (
       p(ConstraintHintsKey).contains(ComposerConstraintHint.MemoryConstrained)
     ) {
-      val useURAM = if (nRows > 4 * 1024 && dataWidth < 64) {
-        if (!p(ComposerQuiet)) {
-          System.err.println(
-            s"One of the memory modules ($debugName) has a data width less than 64 ($dataWidth) but has a total\n" +
-              s"data capacity that makes it appropriate for URAM (applicable for Ultrascale+ devices)\n" +
-              s"This may lead to poor URAM cascading. Consider increasing the width if possible."
-          )
-        }
-        true
-      } else false
-      // appropriate data width and at least 90% capacity
-      val uram_consumption = get_n_urams(dataWidth, nRows)
-      val bram_consumption = get_n_brams(dataWidth, nRows)
-      val have_enough_uram = uram_used + uram_consumption < p(PlatformNURAM)
-      val have_enough_bram = bram_used + bram_consumption < p(PlatformNBRAM)
-      val ret = if ((dataWidth >= 64 && nRows >= 4 * 1024 * 0.5 && have_enough_uram) || useURAM) {
-        uram_used = uram_used + uram_consumption
-        System.err.println(
-          s"Using $uram_consumption urams for $debugName ($dataWidth, $nRows)- $dname_prefix"
-        )
-        ("(* ram_style = \"ultra\" *)", "constU")
-      } else if (have_enough_bram) {
-        if (nRows >= 32) {
-          System.err.println(
-            s"Using $bram_consumption brams for $debugName ($dataWidth, $nRows) - $dname_prefix"
-          )
-          bram_used = bram_used + bram_consumption
-          ("(* ram_style = \"block\" *)", "constB")
-        } else {
-          System.err.println(s"Memory ${nRows}x${dataWidth} is too small for BRAM and URAM, leaving it up to the synthesizer")
-          ("", "")
-        }
-      } else {
-        System.err.println(
-          "Memory Constrained Hint Warning: URAM and BRAM may be entirely consumed by requested\n" +
-            "memory. Design may be too big for given platform.\n" +
-            s"BRAM Used: $bram_used/${p(PlatformNBRAM)}\n" +
-            s"URAM Used: $uram_used/${p(PlatformNURAM)}"
-        )
-        ("", "constX")
-      }
-      System.err.println(s"Total Usage - BRAM($bram_used/${p(PlatformNBRAM)}) URAM($uram_used/${p(PlatformNURAM)})")
-      ret
+      val info = FPGAMemoryCompiler.getMemoryResources(nRows, dataWidth, debugName)
+      FPGAMemoryCompiler.allocateBRAM(info.brams)
+      FPGAMemoryCompiler.allocateURAM(info.urams)
+      (info.verilogAnnotations, info.fileNameAnnotation)
     } else ("", "")
   }
 
@@ -133,34 +170,6 @@ private[MemoryStreams] class CFPGAMemory(latency: Int,
   private val component = memoryRoot / f"$desiredName.v"
 
   ComposerBuild.addSource(component)
-
-
-
-  @tailrec
-  private def get_bram_width(
-                              requested: Int,
-                              h: List[Int] = bram_dwidth
-                            ): Int = {
-    if (h.isEmpty) bram_maxdwidth
-    else if (requested <= h.head) h.head
-    else get_bram_width(requested, h.tail)
-  }
-
-  private def get_n_brams(widthRequested: Int, rowsRequested: Int): Int = {
-    val w = get_bram_width(widthRequested)
-    val rows_per_bram = bram_width2rows(w)
-    // if asking for a super wide BRAM, then they're likely going to be cascaded together
-    val cascade = if (widthRequested > w) {
-      (widthRequested.toFloat / w).ceil.toInt
-    } else 1
-    (rowsRequested.toFloat / rows_per_bram).ceil.toInt * cascade
-  }
-
-  private def get_n_urams(widthRequested: Int, rowsRequested: Int): Int = {
-    val row_consumption = (rowsRequested.toFloat / uram_nrows).ceil.toInt
-    val width_mult = (widthRequested.toFloat / uram_dwidth).ceil.toInt
-    width_mult * row_consumption
-  }
 
   val src =
     f"""

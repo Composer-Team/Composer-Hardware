@@ -1,55 +1,55 @@
-package composer.Platforms.ASAP7
+package composer.Platforms.ASIC.SAED
 
 import chipsalliance.rocketchip.config.{Config, Parameters}
-import chisel3._
 import chisel3.experimental.BaseModule
-import composer.MemoryStreams.RAM.{ASAP7_SP_SRAM, MemoryCompiler, RegMem}
 import composer.MemoryStreams.{HasMemoryInterface, SD}
-import composer.ProcessCorner.ProcessCorner
 import composer._
-import composer.ProcessVoltageThreshold.ProcessVoltageThreshold
+import composer.MemoryStreams.RAM.RegMem
+import composer.Platforms.ASIC._
+import composer.Platforms._
+import composer.Platforms.ASIC.ProcessCorner.ProcessCorner
+import composer.Platforms.ASIC.ProcessOperatingConditions.ProcessOperatingConditions
+import composer.Platforms.ASIC.ProcessTemp.ProcessTemp
+import composer.Platforms.ASIC.ProcessVoltageThreshold.ProcessVoltageThreshold
 import os.Path
 
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
-class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
-                threshold: ProcessVoltageThreshold = ProcessVoltageThreshold.Regular,
-                clockRateMHz: Float = 1000) extends Config((_, _, _) => {
+class WithSAED(corner: ProcessCorner = ProcessCorner.Typical,
+               temp: ProcessTemp = ProcessTemp.C25,
+               threshold: ProcessVoltageThreshold = ProcessVoltageThreshold.Regular,
+               voltage: ProcessOperatingConditions = ProcessOperatingConditions.NormalVoltage,
+               clockRateMHz: Float = 1000) extends Config((_, _, _) => {
   case ASICMemoryCompilerKey => new MemoryCompiler {
-    override val isActiveHighSignals: Boolean = true
-    override val mems: Map[Int, Seq[SD]] = Map.from(Seq((1, Seq(
-      SD(16, 512), SD(18, 512), SD(20, 512), SD(32, 512), SD(34, 512),
-      SD(36, 512), SD(40, 512), SD(48, 512), SD(64, 512), SD(72, 512),
-      SD(74, 512), SD(80, 512),
-      SD(16, 1024), SD(18, 1024), SD(20, 1024), SD(32, 1024), SD(34, 1024),
-      SD(36, 1024), SD(40, 1024), SD(48, 1024), SD(64, 1024), SD(72, 1024),
-      SD(74, 1024), SD(80, 1024),
-      SD(16, 256), SD(18, 256), SD(20, 256), SD(32, 256), SD(34, 256),
-      SD(36, 256), SD(40, 256), SD(48, 256), SD(64, 256), SD(72, 256),
-      SD(74, 256), SD(80, 256),
-    ))))
+    override val mems: Map[Int, Seq[SD]] = Map.from(Seq(
+      (1, Seq(
+        SD(8, 128), SD(32, 64), SD(32, 256), SD(8, 1024), SD(8, 512), SD(48, 128),
+        SD(50, 32), SD(34, 64), SD(46, 256), SD(46, 128), SD(8, 64), SD(128, 64),
+        SD(128, 256), SD(8, 256), SD(48, 256), SD(128, 512), SD(32, 512))),
+      (2, Seq(SD(4, 16), SD(4, 32), SD(4, 64), SD(8, 16), SD(8, 32), SD(8, 64),
+        SD(8, 128), SD(16, 16), SD(16, 32), SD(16, 64), SD(16, 128), SD(32, 16),
+        SD(32, 64), SD(32, 128), SD(22, 32), SD(39, 32)))))
+    override val isActiveHighSignals: Boolean = false // active low
 
     override def generateMemoryFactory(nPorts: Int, nRows: Int, nColumns: Int)(implicit p: Parameters): () => BaseModule with HasMemoryInterface = {
       def makeMemory(): BaseModule with HasMemoryInterface = {
         if (nPorts == 1) {
-          val mem = Module(new ASAP7_SP_SRAM(nRows, nColumns))
-          mem.io.sdel := 0.U
-          mem
+          new SAED_1RW_SRAM(nRows, nColumns)
+        } else if (nPorts == 2) {
+          new SAED_2RW_SRAM(nRows, nColumns)
         } else {
-          Module(new RegMem(nRows, nColumns, nPorts))
+          new RegMem(nRows, nColumns, nPorts)
         }
       }
       makeMemory
     }
 
     override def getMemoryName(nPorts: Int, nRows: Int, nColumns: Int): String = {
-      require(nPorts == 1)
-      f"srambank_${nRows / 4}x4x${nColumns}_6t122"
+      f"SRAM${nPorts}RW${nRows}x$nColumns"
     }
   }
-  case PostProcessorMacro => c: Config => {
-    val mName = c.getClass.getCanonicalName.split('.').last
+  case PostProcessorMacro => () => {
     val cwd = os.Path(ComposerBuild.composerGenDir)
     val timestamp = LocalDateTime.now()
     val synwd = cwd / ("asic_build_" + DateTimeFormatter.ofPattern("yy-MM-dd_HHMMSS").format(timestamp))
@@ -60,57 +60,52 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
         os.copy.over(src, synwd / "src" / src.baseName, createFolders = true)
       }
     }
-    os.copy.over(cwd / f"$mName.v", synwd / "src" / "composer.sv")
+    os.copy.over(cwd / "composer.v", synwd / "src" / "composer.sv")
 
-    def getFileWithNameApprox(dir: Path, contents: Seq[String]): Path = {
-      os.walk(dir).filter(d => contents.map(c => d.toString().contains(c)).reduce(_ && _))(0)
+    def getFileWithEndingInDir(dir: Path, suffix: String): Path = {
+      os.walk(dir).filter(_.toString().contains(suffix))(0)
     }
 
     val cornerString = corner match {
-      case ProcessCorner.Typical => "TT"
-      case ProcessCorner.Fast => "FF"
-      case ProcessCorner.Slow => "SS"
+      case ProcessCorner.Typical => "tt"
+      case ProcessCorner.Fast => "ff"
+      case ProcessCorner.Slow => "ss"
+    }
+    val voltageString = corner match {
+      case ProcessCorner.Fast => voltage match {
+        case ProcessOperatingConditions.NormalVoltage => "0p88v"
+        case ProcessOperatingConditions.LowVoltage => "0p7v"
+      }
+      case ProcessCorner.Typical => voltage match {
+        case ProcessOperatingConditions.NormalVoltage => "0p8v"
+        case ProcessOperatingConditions.LowVoltage => "0p65v"
+      }
+      case ProcessCorner.Slow => voltage match {
+        case ProcessOperatingConditions.NormalVoltage => "0p72v"
+        case ProcessOperatingConditions.LowVoltage => "0p65v"
+      }
+    }
+    val tempString = temp match {
+      case ProcessTemp.C25 => "25c"
+      case ProcessTemp.C125 => "125c"
+      case ProcessTemp.CM40 => "m40c"
     }
     val stdcell_suffix = threshold match {
-      case ProcessVoltageThreshold.Regular => "RVT"
-      case ProcessVoltageThreshold.Low => "LVT"
-      case ProcessVoltageThreshold.SuperLow => "SLVT"
-      case ProcessVoltageThreshold.High => "HVT"
+      case ProcessVoltageThreshold.Regular => "rvt"
+      case ProcessVoltageThreshold.SuperLow => "slvt"
+      case _ => "I haven't downloaded this stdcell yet. Let me know if you need it"
     }
-    val tech_file = "/data/install/pdks/asap7/asap7_snps/icc/asap07_icc.tf"
-    val stdCellDBs = List("SIMPLE", "INVBUF", "AO", "SEQ").map { p =>
-      getFileWithNameApprox(os.Path("/data/install/pdks/asap7/asap7sc7p5t_28/LIB/NLDM/"),
-      Seq(f"asap7sc7p5t_${p}_${stdcell_suffix}_${cornerString}_", ".db")).toString()
+    val tech_file = "/usr/xtmp/cmk91/install/pdks/tech/milkyway/saed14nm_1p9m_mw.tf"
+    val baseStdCell = f"/usr/xtmp/cmk91/install/pdks/stdcell_$stdcell_suffix"
+    val baseMemories = f"/usr/xtmp/cmk91/install/pdks/stdcell_memories/lib/sram"
+    val basePDK = "/usr/xtmp/cmk91/install/pdks/SAED14PDK/SAED14_PDK/"
+    val processPath = f"$baseStdCell/db_ccs/saed14${stdcell_suffix}_$cornerString$voltageString$tempString.db"
+    //      val memoryPaths: Seq[Path] = ComposerBuild.symbolicMemoryResources.distinct.map(p => p / "db_nldm" / s"saed14sram_$cornerString$voltageString$tempString.db")
+    //    val memoryDBs = List("dual", "single").map(p => f"$baseMemories/logic_synth/$p/saed14sram_$cornerString$voltageString$tempString.db").fold("")(_ + " " + _)
+    val memoryDBs = List("dual").map(p => f"$baseMemories/logic_synth/$p/saed14sram_$cornerString$voltageString$tempString.db").fold("")(_ + " " + _)
+    val mem_pnrs = List("1rw", "2rw").map { mem =>
+      f"$baseMemories/ndm/saed14_sram_${mem}_frame_only.ndm"
     }.fold("")(_ + " " + _)
-    val stdCellLEFBase = "/data/install/pdks/asap7/asap7sc7p5t_28/LEF"
-    val stdCellLEFs = List(
-      f"$stdCellLEFBase/asap7sc7p5t_28_L_1x_220121a.lef",
-      f"$stdCellLEFBase/asap7sc7p5t_28_R_1x_220121a.lef",
-      f"$stdCellLEFBase/asap7sc7p5t_28_SL_1x_220121a.lef",
-      f"$stdCellLEFBase/asap7sc7p5t_28_SRAM_1x_220121a.lef"
-    ).fold("")(_ + " " + _)
-
-    val stdCellLEFs_scaled = List(
-      f"$stdCellLEFBase/scaled/asap7sc7p5t_28_L_4x_220121a.lef",
-      f"$stdCellLEFBase/scaled/asap7sc7p5t_28_R_4x_220121a.lef",
-      f"$stdCellLEFBase/scaled/asap7sc7p5t_28_SL_4x_220121a.lef",
-      f"$stdCellLEFBase/scaled/asap7sc7p5t_28_SRAM_4x_220121a.lef"
-    ).fold("")(_ + " " + _)
-
-
-    val baseMemoryDBs = "/data/install/pdks/asap7/ASAP7_SRAM_0p0/generated/LIB"
-    val baseMemoryLEFs = "/data/install/pdks/asap7/ASAP7_SRAM_0p0/generated/LEF"
-
-    val memoryDBs = os.walk(os.Path(baseMemoryDBs), maxDepth = 1).filter { p =>
-      p.toString().contains(".db")
-    }.map(_.toString()).fold("")(_ + " " + _)
-    val mem_lefs = os.walk(os.Path(baseMemoryLEFs), maxDepth = 1).filter { mem =>
-      mem.toString().contains(".lef")
-    }.map(_.toString()).fold("")(_ + " " + _)
-    val mem_lefs_scaled = os.walk(os.Path(baseMemoryLEFs) / "4xLEF", maxDepth = 1).filter { mem =>
-      mem.toString().contains(".lef")
-    }.map(_.toString()).fold("")(_ + " " + _)
-
 
     os.write(synwd / "synth.tcl",
       f"""set project_path $synwd
@@ -118,8 +113,8 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
          |### tech files
          |
          |### library files
-         |set_app_var target_library {$stdCellDBs}
-         |set_app_var link_library "* $memoryDBs $stdCellDBs "
+         |set_app_var target_library "$processPath"
+         |set_app_var link_library "* $processPath $memoryDBs"
          |define_design_lib work -path "$synwd/work"
          |
          |# suppress annoying messages
@@ -134,14 +129,14 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
          |link
          |uniquify
          |
-         |# 1/s^-6 -> s^12
-         |set peri [expr 1000.0 / ($clockRateMHz / 1000.0)]
+         |set peri [expr 1000.0 / $clockRateMHz]
          |set_wire_load_model -name "ForQA"
          |create_clock clock -name "clock" -period $$peri
+         |#set_switching_activity -type {registers black_boxes memory inputs outputs inouts ports nets} -hierarchy -static_probability 0.5
+         |#compile -incremental_mapping -map_effort high -area_effort low -power_effort low -auto_ungroup delay
          |set_cost_priority -delay
          |compile_ultra -retime -scan
-         |# enable this if timing is really tight
-         |# optimize_registers -delay_threshold=$$peri -minimum_period_only
+         |optimize_registers -delay_threshold=$$peri -minimum_period_only
          |link
          |check_design
          |
@@ -157,15 +152,19 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
 
     )
 
-    val starrcDir = "/data/install/pdks/asap7/asap7_snps/starrc"
-    val layermap = f"$starrcDir/asap07.layermap"
-    val tluplus = f"$starrcDir/asap07.tluplus"
+    val itf_map = f"$basePDK/starrc/saed14nm_tf_itf_tluplus.map"
+    val cmax = f"$basePDK/starrc/max/saed14nm_1p9m_Cmax.tluplus"
     //      val starrc_libs = List(
     //        cmax,
     //        os.Path(PDK) / "starrc" / "min" / "saed14nm_1p9m_Cmin.tluplus",
     //        os.Path(PDK) / "starrc" / "nominal" / "saed14nm_1p9m_nominal.tluplus",
     //        itf_map
     //      )
+    val tempInt = temp match {
+      case ProcessTemp.C25 => 25
+      case ProcessTemp.CM40 => -40
+      case ProcessTemp.C125 => 125
+    }
     val periodGHz = 1000.0 / clockRateMHz
     val processSpeedStr = corner match {
       case ProcessCorner.Fast => "fast"
@@ -173,16 +172,17 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
       case ProcessCorner.Slow => "slow"
     }
     // drop 0p, drop v, divide by 100 to get decimal back
+    val voltageFloat = voltageString.substring(2).dropRight(1).toFloat / 100
     //      val referenceLibs = ComposerBuild.symbolicMemoryResources.map(p => p/)
     os.write(synwd / "pnr.tcl",
       f"""set top_module ComposerTop
          |# set design_verilog "src/composer.v"
          |set LIBRARY_CONFIGURATION_FLOW true
-         |set_app_var link_library "* $stdCellDBs $memoryDBs"
+         |set_app_var link_library "* $processPath $memoryDBs"
          |
-         |create_lib -scale_factor 4000 -technology $tech_file c1.nlib
+         |create_lib -technology $tech_file c1.nlib
          |
-         |set_ref_libs -library c1.nlib -ref_libs { $mem_lefs_scaled $stdCellLEFs_scaled}
+         |set_ref_libs -library c1.nlib -ref_libs {  $baseStdCell/lef/saed14nm_${stdcell_suffix}_1p9m.lef  $baseStdCell/ndm/saed14${stdcell_suffix}_frame_only.ndm $baseMemories/lef/saed14_sram_2rw.lef $baseMemories/ndm/saed14_sram_2rw_frame_only.ndm }
          |
          |derive_design_level_via_regions
          |
@@ -197,12 +197,12 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
          |if { [get_modes func -quiet] == "" } {
          |    create_mode func
          |}
-         |if { [get_corner ${cornerString}_cmax -quiet] == "" } {
-         |    create_corner ${cornerString}_cmax
+         |if { [get_corner $cornerString$voltageString${tempString}_cmax -quiet] == "" } {
+         |    create_corner $cornerString$voltageString${tempString}_cmax
          |}
-         |create_scenario -mode func -corner ${cornerString}_cmax -name func_${cornerString}_cmax
-         |current_scenario func_${cornerString}_cmax
-         |read_parasitic_tech -layermap $layermap -tlup $tluplus -name maxTLU
+         |create_scenario -mode func -corner $cornerString$voltageString${tempString}_cmax -name func_$cornerString$voltageString${tempString}_cmax
+         |current_scenario func_$cornerString$voltageString${tempString}_cmax
+         |read_parasitic_tech -layermap $itf_map -tlup $cmax -name maxTLU
          |remove_sdc -scenarios [current_scenario]
          |
          |### Clock Settings
@@ -212,10 +212,10 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
          |
          |### Voltage Settings
          |set_parasitic_parameters -early_spec maxTLU -late_spec maxTLU
-         |set_temperature 25
+         |set_temperature $tempInt
          |set_process_number 0.99
          |set_process_label $processSpeedStr
-         |set_voltage 0.7 -object_list VDD
+         |set_voltage $voltageFloat  -object_list VDD
          |set_voltage 0.00  -object_list VSS
          |
          |### Timing Model
@@ -226,23 +226,10 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
          |set_max_capacitance 150 [current_design]
          |
          |### Finalize Scenarios
-         |set_scenario_status func_${cornerString}_cmax -active true -setup true -hold true -max_capacitance true -max_transition true -min_capacitance true -leakage_power false -dynamic_power false
+         |set_scenario_status func_$cornerString$voltageString${tempString}_cmax -active true -setup true -hold true -max_capacitance true -max_transition true -min_capacitance true -leakage_power false -dynamic_power false
          |
          |### Floorplan
-         |initialize_floorplan
-         |
-         |# Place output pins
-         |set_app_options -name plan.pins.incremental -value false -block [current_block]
-         |place_pins -self -ports *
-         |
-         |# Place design cells
-         |set_app_options -name place.coarse.fix_hard_macros -value false
-         |set_app_options -name plan.place.auto_create_blockages -value auto
-         |create_placement -floorplan -effort high
-         |
-         |# optimize placement
-         |place_opt
-         |
+         |initialize_floorplan -honor_pad_limit
          |connect_pg_net -automatic -all_blocks
          |
          |####################################

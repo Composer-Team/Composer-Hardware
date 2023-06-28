@@ -3,8 +3,8 @@ package composer.RoccHelpers
 import chipsalliance.rocketchip.config._
 import chisel3.util._
 import chisel3._
-import composer.FrontBusBeatBytes
 import composer.common.{ComposerRoccResponse, hasRoccResponseFields}
+import composer.Platforms.FrontBusBeatBytes
 import freechips.rocketchip.tile.RoCCResponse
 
 class RoccToAXIL(implicit val p: Parameters) extends Module {

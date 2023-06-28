@@ -5,6 +5,7 @@ import composer.Systems._
 import composer._
 import composer.MemoryStreams._
 import composer.common._
+import composer.Platforms.WithAWSPlatform
 
 //TODO: Will we ever need to take more inputs in the middle of a calculation? Or only at the beginning?
 

@@ -3,10 +3,11 @@ package composer.MemoryStreams
 import chipsalliance.rocketchip.config._
 import chisel3.{Reg, _}
 import chisel3.util._
-import composer.{PlatformType, PlatformTypeKey, PrefetchSourceMultiplicity}
+import composer.PrefetchSourceMultiplicity
 import composer.Systems.DataChannelIO
 import composer.common.{CLog2Up, ShiftReg}
-import composer.MemoryStreams.RAM.{SimpleDRAMHintKey, SyncReadMemMem}
+import composer.MemoryStreams.RAM.SyncReadMemMem
+import composer.Platforms.{PlatformType, PlatformTypeKey}
 import freechips.rocketchip.diplomacy.ValName
 import freechips.rocketchip.tilelink._
 
@@ -293,5 +294,5 @@ class CReader(dataBytes: Int,
       channel_buffer_q.io.deq.ready := true.B
     }
   }
-  io.req.ready := !(state =/= s_idle || reads_in_flight > 0.U || (prefetch_readIdx =/= prefetch_writeIdx))
+  io.req.ready := !(state =/= s_idle || reads_in_flight > 0.U || (prefetch_readIdx =/= prefetch_writeIdx) || queue_occupancy =/= 0.U)
 }

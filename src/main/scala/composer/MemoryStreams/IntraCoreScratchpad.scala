@@ -6,6 +6,7 @@ import chisel3.util._
 import composer._
 import composer.Generation._
 import composer.common.ShiftReg
+import composer.Platforms.{ASICMemoryCompilerKey, PlatformType, PlatformTypeKey}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
@@ -57,6 +58,7 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
     case PlatformType.ASIC => p(ASICMemoryCompilerKey).mems.keys.max
   }
   val nDuplicates = (nPorts.toFloat / mostPortsSupported).ceil.toInt
+  private val scReqBits = log2Up(nDatas)
   val IOs = Seq.fill(nPorts)(IO(new CScratchpadAccessPort(scReqBits, dataWidthBits)))
   val (in, edge) = outer.mem_slave_node.in(0)
   val responseQ = Queue(in.a.map(_.source), entries = 4)
@@ -67,6 +69,7 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
     mem.clock := clock.asBool
     access_group.indices.foreach { port_idx =>
       val port = access_group(port_idx)
+      dontTouch(port.req.bits.addr)
       mem.addr(port_idx) := port.req.bits.addr
       mem.chip_select(port_idx) := port.req.valid
       mem.read_enable(port_idx) := !port.req.bits.write_enable
@@ -91,7 +94,6 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
       }
     }
   }
-  private val scReqBits = log2Up(nDatas)
   in.d <> responseQ.map { source => edge.AccessAck(source, log2Up(in.params.dataBits / 8).U) }
 
   when(in.a.valid) {

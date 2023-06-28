@@ -4,6 +4,8 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import composer._
 import composer.common.BUFG
+import composer.Platforms._
+import composer.Platforms.FPGA._
 import freechips.rocketchip.diplomacy._
 import os.Path
 

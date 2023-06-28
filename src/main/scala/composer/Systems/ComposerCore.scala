@@ -9,7 +9,7 @@ import composer.MemoryStreams._
 import composer.RoccHelpers._
 import composer.TLManagement.{ComposerIntraCoreIOModule, TLClientModule}
 import composer.common._
-import composer.MemoryStreams.RAM.SimpleDRAMHintKey
+import composer.Platforms.FPGA.Xilinx.SimpleDRAMHintKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
