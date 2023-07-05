@@ -37,15 +37,14 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
   private val s_idle :: s_data :: s_allocate :: s_mem :: Nil = Enum(4)
   private val state = RegInit(s_idle)
 
-  private val tx_inactive :: tx_inProgress :: Nil = Enum(2)
   private val nSources = edge.master.endSourceId
 //  println(nSources)
   private val txIDBits = log2Up(nSources)
-  private val txStates = RegInit(VecInit(Seq.fill(nSources)(tx_inactive)))
-  private val txPriority = PriorityEncoderOH(txStates map (_ === tx_inactive))
+  private val txBusyBits = RegInit(VecInit(Seq.fill(nSources)(false.B)))
+  private val txPriority = PriorityEncoderOH(txBusyBits map (!_))
 
-  private val haveTransactionToDo = txStates.map(_ === tx_inProgress).reduce(_ || _)
-  private val haveAvailableTxSlot = txStates.map(_ === tx_inactive).reduce(_ || _)
+  private val haveTransactionToDo = txBusyBits.reduce(_ || _)
+  private val haveAvailableTxSlot = txBusyBits.map(!_).reduce(_ || _)
 
 //  val isReallyIdle = state === s_idle && !haveTransactionToDo
   io.channel.channelIdle := !haveTransactionToDo
@@ -72,14 +71,13 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
   private val wmask = FillInterleaved(nBytes, dataValid)
 
   private val allocatedTransaction = RegInit(0.U(txIDBits.W))
-  private val earlyFinish = RegInit(false.B)
 
   tl_out.a.bits := DontCare
   tl_out.a.valid := false.B
   // handle TileLink 'd' interface (response from slave)
   tl_out.d.ready := haveTransactionToDo
   when(tl_out.d.fire) {
-    txStates(tl_out.d.bits.source) := tx_inactive
+    txBusyBits(tl_out.d.bits.source) := false.B
   }
 
   switch(state) {
@@ -137,13 +135,12 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
 
       // handle TileLink 'a' interface (request to slave)
       when(tl_out.a.fire) {
-        txStates(allocatedTransaction) := tx_inProgress
+        txBusyBits(allocatedTransaction) := true.B
         addr := nextAddr
         idx := 0.U
         dataValid := 0.U
-        when(req_len === 0.U || earlyFinish) {
+        when(req_len === 0.U) {
           state := s_idle
-          earlyFinish := false.B
         }.otherwise {
           state := s_data
         }

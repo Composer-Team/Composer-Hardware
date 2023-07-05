@@ -171,8 +171,12 @@ private[composer] class FPGAMemoryCompiler(latency: Int,
 
   ComposerBuild.addSource(component)
 
+  // We need keep hirarchy because in some rare circumstances, cross boundary optimization
+  // prevents the memory from being inferred, and further, the memory is completely unrecongized,
+  // mapped to a black box, and causes unrecoverable errors during logic synthesis... (Vivado 2022.1)
   val src =
     f"""
+       |(* keep_hierarchy = "yes" *)
        |module $desiredName (
        |  input CE,
        |  input WEB1,

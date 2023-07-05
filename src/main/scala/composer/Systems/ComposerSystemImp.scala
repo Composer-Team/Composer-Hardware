@@ -287,11 +287,13 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
       case None => recursivelyGroupCmds(SLRHelper.SLRCmdRoutingFanout, 1, slr_endpoints.flatMap(_._2).toSeq, None)(0)._1
       case Some(path) =>
         recursivelyGroupCmds(SLRHelper.SLRRespRoutingFanout, 1,
-
           path.foldRight(Seq[(DecoupledIO[CommandSrcPair], Seq[Int])]()) { case (slr_id, acc) =>
           recursivelyGroupCmds(SLRHelper.SLRCmdRoutingFanout, SLRHelper.CmdEndpointsPerSLR,
             connectCoreGroup(1, acc, None) ++
-              slr_endpoints.find(_._1 == slr_id).get._2,
+              (slr_endpoints.find(_._1 == slr_id) match {
+                case None => Seq()
+                case Some(q) => q._2
+              }),
             Some(slr_id))
 
         }, Some(SLRHelper.getFrontBusSLR))(0)._1
