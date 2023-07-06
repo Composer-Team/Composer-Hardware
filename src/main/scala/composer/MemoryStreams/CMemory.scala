@@ -7,7 +7,7 @@ import composer._
 import composer.MemoryStreams.RAM.SyncReadMemMem
 import composer.Platforms.{ASICMemoryCompilerKey, PlatformType, PlatformTypeKey}
 import composer.Platforms.ASIC.MemoryCompiler
-import composer.Platforms.FPGA.Xilinx.FPGAMemoryCompiler
+import composer.Platforms.FPGA.Xilinx.{XilinxBRAMSDP, XilinxBRAMTDP}
 import freechips.rocketchip.diplomacy.ValName
 
 object CMemory {
@@ -31,8 +31,8 @@ object CMemory {
           require(latency >= 1)
           val mio = Wire(Output(new CMemoryIOBundle(nPorts, addrBits = log2Up(nRows), dataWidth)))
           if (latency >= 3 && nPorts <= 2) {
-            val memoryWidth = FPGAMemoryCompiler.get_bram_width(dataWidth)
-            val banks = (dataWidth.toFloat / memoryWidth).ceil.toInt
+            val memoryWidth = dataWidth // XilinxBRAMTDP.get_bram_width(dataWidth)
+            val banks = 1 // (dataWidth.toFloat / memoryWidth).ceil.toInt
             val rowRoundPow2 = nRows
 
             val mems = Seq.tabulate(banks) { bank_idx =>
@@ -41,45 +41,60 @@ object CMemory {
                 if (q >= dataWidth) dataWidth - 1 else q
               }
               val low_idx = bank_idx * memoryWidth
-              val cmem = Module(new FPGAMemoryCompiler(
-                latency - 2,
-                high_idx - low_idx + 1,
-                rowRoundPow2,
-                debugName = debugName.getOrElse(valName.name)))
-              cmem.suggestName(valName.name)
-              cmem.io.I1 := mio.data_in(0)(high_idx, low_idx)
-              cmem.io.CE := mio.clock.asBool
-              cmem.io.A1 := mio.addr(0)
-              cmem.io.CSB1 := mio.chip_select(0)
-              cmem.io.WEB1 := mio.write_enable(0)
-              cmem.io.OEB1 := mio.read_enable(0)
-              mio.data_out(0) := cmem.io.O1
-              if (nPorts == 1) {
-                cmem.io.I2 := DontCare
-                cmem.io.A2 := DontCare
-                cmem.io.CSB2 := false.B
-                cmem.io.OEB2 := DontCare
-                cmem.io.WEB2 := DontCare
+
+
+              val cmem = if (nPorts == 1) {
+                val cmem = Module(new XilinxBRAMSDP(
+                  latency - 2,
+                  high_idx - low_idx + 1,
+                  rowRoundPow2,
+                  debugName = debugName.getOrElse(valName.name)))
+                cmem.suggestName(valName.name)
+                cmem.io.I := mio.data_in(0)(high_idx, low_idx)
+                cmem.io.CE := mio.clock.asBool
+                cmem.io.A_read := mio.addr(0)
+                cmem.io.A_write := mio.addr(1)
+                cmem.io.OEB := mio.read_enable(0)
+                cmem.io.CSB_read := mio.chip_select(0)
+                cmem.io.CSB_write := mio.chip_select(0)
+                cmem.io.WEB := mio.write_enable(0)
+                mio.data_out(0) := cmem.io.O
+                cmem
               } else {
+                val cmem = Module(new XilinxBRAMTDP(
+                  latency - 2,
+                  high_idx - low_idx + 1,
+                  rowRoundPow2,
+                  debugName = debugName.getOrElse(valName.name)))
+                cmem.suggestName(valName.name)
+                cmem.io.I1 := mio.data_in(0)(high_idx, low_idx)
+                cmem.io.CE := mio.clock.asBool
+                cmem.io.A1 := mio.addr(0)
+                cmem.io.CSB1 := mio.chip_select(0)
+                cmem.io.WEB1 := mio.write_enable(0)
+                cmem.io.OEB1 := mio.read_enable(0)
+                mio.data_out(0) := cmem.io.O1
                 cmem.io.I2 := mio.data_in(1)(high_idx, low_idx)
                 cmem.io.A2 := mio.addr(1)
                 cmem.io.CSB2 := mio.chip_select(1)
                 cmem.io.WEB2 := mio.write_enable(1)
                 cmem.io.OEB2 := mio.read_enable(1)
                 mio.data_out(1) := cmem.io.O2
+                cmem
               }
               (cmem, bank_idx)
             }
-            mio.data_out(0) := Cat(mems.map(_._1.io.O1).reverse)
+
+            mio.data_out(0) := Cat(mems.map(_._1.data_out(0)).reverse)
             if (nPorts == 2) {
-              mio.data_out(1) := Cat(mems.map(_._1.io.O2).reverse)
+              mio.data_out(1) := Cat(mems.map(_._1.data_out(1)).reverse)
             }
           } else {
             val cmem = Module(new SyncReadMemMem(nPorts, nRows, dataWidth, latency))
             mio <> cmem.mio
-            val allocInfo = FPGAMemoryCompiler.getMemoryResources(nRows, dataWidth, debugName.getOrElse("anonymous"))
-            FPGAMemoryCompiler.allocateURAM(allocInfo.urams)
-            FPGAMemoryCompiler.allocateBRAM(allocInfo.brams)
+            val allocInfo = XilinxBRAMTDP.getMemoryResources(nRows, dataWidth, debugName.getOrElse("anonymous"))
+            XilinxBRAMTDP.allocateURAM(allocInfo.urams)
+            XilinxBRAMTDP.allocateBRAM(allocInfo.brams)
             // latency == 1 or 2. Recognizing URAM/BRAM is now in god's hands
           }
           mio

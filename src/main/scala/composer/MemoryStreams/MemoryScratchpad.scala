@@ -202,7 +202,7 @@ class CScratchpadImp(csp: CScratchpadParams,
       writer.tl_out.a.ready := false.B
       writer.tl_out.d.valid := false.B
       writer.tl_out.d.bits := DontCare
-      val wb_idle :: wb_read :: wb_rewind :: wb_write :: Nil = Enum(4)
+      val wb_idle :: wb_read :: wb_rewind :: Nil = Enum(3)
       val wb_state = RegInit(wb_idle)
 
       when(wb_state =/= wb_idle) {
@@ -210,20 +210,22 @@ class CScratchpadImp(csp: CScratchpadParams,
         writer.tl_out <> outer.mem_master_node.get.out(0)._1
       }
       writer.io.req.valid := req.writeback.valid
-      req.writeback.ready := writer.io.req.ready
       writer.io.req.bits.len := req.writeback.bits.len
       writer.io.req.bits.addr := req.writeback.bits.memAddr
       val channel = writer.io.channel
       val writebackIdx, written = Reg(UInt(log2Up(realNRows).W))
 
-      channel.data.valid := ShiftReg(memory(0).read_enable(0), latency) && wb_state === wb_read
+      val mem_valid = ShiftReg(memory(0).read_enable(0) && wb_state === wb_read, latency)
+      channel.data.valid := mem_valid && wb_state === wb_read
       channel.data.bits := memory(0).data_out(0)
       when (wb_state =/= wb_idle) {
         IOs foreach (port => port.req.ready := false.B )
       }
+      req.writeback.ready := false.B
 
       switch(wb_state) {
         is(wb_idle) {
+          req.writeback.ready := writer.io.req.ready
           when(req.writeback.fire) {
             writebackIdx := req.writeback.bits.scAddr
             written := req.writeback.bits.scAddr
@@ -244,23 +246,14 @@ class CScratchpadImp(csp: CScratchpadParams,
           when(!channel.data.ready) {
             wb_state := wb_rewind
           }
-          when(writer.io.req.ready) {
-            wb_state := wb_write
-          }
         }
         is(wb_rewind) {
-          req.request.ready := false.B
-          when(channel.data.ready) {
+          when(writer.io.req.ready && channel.channelIdle) {
+            wb_state := wb_idle
+          }
+          when(channel.data.ready && !mem_valid) {
             wb_state := wb_read
             writebackIdx := written
-          }
-          when(writer.io.req.ready) {
-            wb_state := wb_write
-          }
-        }
-        is(wb_write) {
-          when(channel.channelIdle) {
-            wb_state := wb_idle
           }
         }
       }
