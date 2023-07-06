@@ -53,7 +53,7 @@ object CMemory {
                 cmem.io.I := mio.data_in(0)(high_idx, low_idx)
                 cmem.io.CE := mio.clock.asBool
                 cmem.io.A_read := mio.addr(0)
-                cmem.io.A_write := mio.addr(1)
+                cmem.io.A_write := mio.addr(0)
                 cmem.io.OEB := mio.read_enable(0)
                 cmem.io.CSB_read := mio.chip_select(0)
                 cmem.io.CSB_write := mio.chip_select(0)

@@ -39,7 +39,7 @@ class ComposerCommandBundler[T1 <: ComposerCommand, T2 <: ComposerUserResponse](
   val reqPayload = Reg(Vec(nSources, Vec(nReqBeatsRequired, UInt(128.W))))
 
   io.req.valid := req_state === s_done
-  cio.cmd.req.ready := req_state =/= s_done && io.req.ready
+  cio.cmd.req.ready := req_state =/= s_done
   val succeedingSource = Reg(UInt(log2Up(nSources).W))
   when(req_state === s_req_idle) {
     val source = cio.cmd_in_source

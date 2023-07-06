@@ -39,7 +39,7 @@ object XilinxBRAMTDP {
   def getMemoryResources(nRows: Int, dwidth: Int, debugName: String, isSimple: Boolean)(implicit p: Parameters): FPGAMemoryPrimitiveConsumer = {
     def get_n_brams(widthRequested: Int, rowsRequested: Int): Int = {
       val w = get_bram_width(widthRequested, isSimple)
-      val rows_per_bram = bram_width2rows(p)(w)
+      val rows_per_bram = bram_width2rows(isSimple)(w)
       // if asking for a super wide BRAM, then they're likely going to be cascaded together
       val cascade = if (widthRequested > w) {
         (widthRequested.toFloat / w).ceil.toInt
@@ -53,7 +53,9 @@ object XilinxBRAMTDP {
       width_mult * row_consumption
     }
 
-    val useURAM = if (nRows > 4 * 1024 && dwidth < 64) {
+    val useURAM = nRows >= 4 * 1024 && dwidth >= 64
+
+    if(nRows >= 4 * 1024 && dwidth < 64) {
       if (!p(ComposerQuiet) && warningsIssued < 5) {
         System.err.println(
           s"One of the memory modules ($debugName) has a data width less than 64 ($dwidth) but has a total\n" +
@@ -62,14 +64,14 @@ object XilinxBRAMTDP {
         )
         warningsIssued += 1
       }
-      false
-    } else false
+    }
+
     // appropriate data width and at least 90% capacity
     val uram_consumption = get_n_urams(dwidth, nRows)
     val bram_consumption = get_n_brams(dwidth, nRows)
-    val have_enough_uram = uram_used + uram_consumption < p(PlatformNURAM)
-    val have_enough_bram = bram_used + bram_consumption < p(PlatformNBRAM)
-    val usage = if (useURAM) FPGAMemoryPrimitiveConsumer(0, uram_consumption, "(* ram_style = \"ultra\" *)", "URAM")
+    val have_enough_uram = uram_used + uram_consumption <= p(PlatformNURAM)
+    val have_enough_bram = bram_used + bram_consumption <= p(PlatformNBRAM)
+    val usage = if (useURAM && have_enough_uram) FPGAMemoryPrimitiveConsumer(0, uram_consumption, "(* ram_style = \"ultra\" *)", "URAM")
     else if (have_enough_bram) FPGAMemoryPrimitiveConsumer(bram_consumption, 0, "(* ram_style = \"block\" *)", "BRAM")
     else if (have_enough_uram) FPGAMemoryPrimitiveConsumer(0, uram_consumption, "(* ram_style = \"ultra\" *)", "URAM")
     else {
@@ -81,22 +83,22 @@ object XilinxBRAMTDP {
     }
 
     if (!p(ComposerQuiet)) {
-      System.err.println(s"Using ${usage.brams} BRAMs and ${usage.urams} URAMs for $debugName.")
-      System.err.println(s"Total Usage - BRAM(${XilinxBRAMTDP.bram_used}/${p(PlatformNBRAM)}) URAM(${XilinxBRAMTDP.uram_used}/${p(PlatformNURAM)})")
+      System.out.println(s"Using ${usage.brams} BRAMs and ${usage.urams} URAMs for $debugName.")
+      System.out.println(s"Total Usage - BRAM(${XilinxBRAMTDP.bram_used + usage.brams}/${p(PlatformNBRAM)}) URAM(${XilinxBRAMTDP.uram_used + usage.urams}/${p(PlatformNURAM)})")
     }
     usage
   }
 
-  private def bram_maxdwidth = 32
+  private def bram_maxdwidth(isSimple: Boolean) = if (isSimple) 72 else 36
 
-  private def bram_width2rows(implicit p: Parameters) = Map.from({
+  private def bram_width2rows(isSimple: Boolean) = Map.from({
     Seq(
       (1, 32 * 1024),
       (2, 16 * 1024),
       (4, 8 * 1024),
       (9, 4 * 1024),
       (18, 2 * 1024),
-      (36, 1024))
+      (36, 1024)) ++ (if (isSimple) Seq((72, 512)) else Seq())
   })
 
   def allocateBRAM(nBRAM: Int): Unit = {
@@ -156,7 +158,7 @@ private[composer] class XilinxBRAMTDP(latency: Int,
     if (
       p(ConstraintHintsKey).contains(ComposerConstraintHint.MemoryConstrained)
     ) {
-      val info = XilinxBRAMTDP.getMemoryResources(nRows, dataWidth, debugName, false)
+      val info = XilinxBRAMTDP.getMemoryResources(nRows, dataWidth, debugName, isSimple = false)
       XilinxBRAMTDP.allocateBRAM(info.brams)
       XilinxBRAMTDP.allocateURAM(info.urams)
       (info.verilogAnnotations, info.fileNameAnnotation)
