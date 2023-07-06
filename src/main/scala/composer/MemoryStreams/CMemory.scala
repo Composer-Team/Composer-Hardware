@@ -92,7 +92,7 @@ object CMemory {
           } else {
             val cmem = Module(new SyncReadMemMem(nPorts, nRows, dataWidth, latency))
             mio <> cmem.mio
-            val allocInfo = XilinxBRAMTDP.getMemoryResources(nRows, dataWidth, debugName.getOrElse("anonymous"))
+            val allocInfo = XilinxBRAMTDP.getMemoryResources(nRows, dataWidth, debugName.getOrElse("anonymous"), nPorts == 1)
             XilinxBRAMTDP.allocateURAM(allocInfo.urams)
             XilinxBRAMTDP.allocateBRAM(allocInfo.brams)
             // latency == 1 or 2. Recognizing URAM/BRAM is now in god's hands

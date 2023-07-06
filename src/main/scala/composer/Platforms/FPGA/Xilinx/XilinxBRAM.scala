@@ -22,23 +22,23 @@ object XilinxBRAMTDP {
   private val uram_dwidth = 72
   private val uram_nrows = 4 * 1024
 
-  private[composer] def bram_dwidth(implicit p: Parameters) = List(1, 2, 4, 9, 16, 32) ++ (if (p(SimpleDRAMHintKey)) Seq(64) else Seq())
+  private[composer] def bram_dwidth(isSimple: Boolean) = List(1, 2, 4, 9, 18, 36) ++ (if (isSimple) Seq(72) else Seq())
 
-  def get_bram_width(requested: Int)(implicit p: Parameters): Int = {
+  def get_bram_width(requested: Int, isSimple: Boolean): Int = {
     @tailrec
     def help(h: List[Int]): Int = {
-      if (h.isEmpty) bram_dwidth(p).max
+      if (h.isEmpty) bram_dwidth(isSimple).max
       else if (requested <= h.head) h.head
       else help(h.tail)
     }
 
-    help(bram_dwidth(p))
+    help(bram_dwidth(isSimple))
   }
 
   // get bram and uram usage respectively for a given memory
-  def getMemoryResources(nRows: Int, dwidth: Int, debugName: String)(implicit p: Parameters): FPGAMemoryPrimitiveConsumer = {
+  def getMemoryResources(nRows: Int, dwidth: Int, debugName: String, isSimple: Boolean)(implicit p: Parameters): FPGAMemoryPrimitiveConsumer = {
     def get_n_brams(widthRequested: Int, rowsRequested: Int): Int = {
-      val w = get_bram_width(widthRequested)
+      val w = get_bram_width(widthRequested, isSimple)
       val rows_per_bram = bram_width2rows(p)(w)
       // if asking for a super wide BRAM, then they're likely going to be cascaded together
       val cascade = if (widthRequested > w) {
@@ -87,7 +87,7 @@ object XilinxBRAMTDP {
     usage
   }
 
-  private def bram_maxdwidth(implicit p: Parameters) = if (p(SimpleDRAMHintKey)) 64 else 32
+  private def bram_maxdwidth = 32
 
   private def bram_width2rows(implicit p: Parameters) = Map.from({
     Seq(
@@ -95,8 +95,8 @@ object XilinxBRAMTDP {
       (2, 16 * 1024),
       (4, 8 * 1024),
       (9, 4 * 1024),
-      (16, 2 * 1024),
-      (32, 1024)) ++ (if (p(SimpleDRAMHintKey)) Seq(Tuple2(64, 512)) else Seq())
+      (18, 2 * 1024),
+      (36, 1024))
   })
 
   def allocateBRAM(nBRAM: Int): Unit = {
@@ -156,7 +156,7 @@ private[composer] class XilinxBRAMTDP(latency: Int,
     if (
       p(ConstraintHintsKey).contains(ComposerConstraintHint.MemoryConstrained)
     ) {
-      val info = XilinxBRAMTDP.getMemoryResources(nRows, dataWidth, debugName)
+      val info = XilinxBRAMTDP.getMemoryResources(nRows, dataWidth, debugName, false)
       XilinxBRAMTDP.allocateBRAM(info.brams)
       XilinxBRAMTDP.allocateURAM(info.urams)
       (info.verilogAnnotations, info.fileNameAnnotation)
@@ -331,7 +331,7 @@ private[composer] class XilinxBRAMSDP(latency: Int,
     if (
       p(ConstraintHintsKey).contains(ComposerConstraintHint.MemoryConstrained)
     ) {
-      val info = XilinxBRAMTDP.getMemoryResources(nRows, dataWidth, debugName)
+      val info = XilinxBRAMTDP.getMemoryResources(nRows, dataWidth, debugName, true)
       XilinxBRAMTDP.allocateBRAM(info.brams)
       XilinxBRAMTDP.allocateURAM(info.urams)
       (info.verilogAnnotations, info.fileNameAnnotation)
