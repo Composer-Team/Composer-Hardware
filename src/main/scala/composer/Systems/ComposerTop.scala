@@ -131,7 +131,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     (composer_mem
       := AXI4Buffer()
       := TLToAXI4()
-      := TLSourceShrinker(availableComposerSources)
+      := TLSourceShrinker2(availableComposerSources)
       := m)
     composer_mem
   }

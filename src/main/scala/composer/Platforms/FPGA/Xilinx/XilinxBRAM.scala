@@ -1,6 +1,6 @@
 package composer.Platforms.FPGA.Xilinx
 
-import chipsalliance.rocketchip.config.{Field, Parameters}
+import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util.log2Up
 import composer._
@@ -9,8 +9,6 @@ import composer.Platforms.{PlatformNBRAM, PlatformNURAM}
 
 import java.io.FileWriter
 import scala.annotation.tailrec
-
-case object SimpleDRAMHintKey extends Field[Boolean]
 
 case class FPGAMemoryPrimitiveConsumer(brams: Int, urams: Int, verilogAnnotations: String, fileNameAnnotation: String)
 
@@ -76,15 +74,15 @@ object XilinxBRAMTDP {
     else if (have_enough_uram) FPGAMemoryPrimitiveConsumer(0, uram_consumption, "(* ram_style = \"ultra\" *)", "URAM")
     else {
       System.err.println(
-        s"Memory module $debugName requires ${bram_consumption} BRAMs and ${uram_consumption} URAMs,\n" +
+        s"Memory module $debugName requires $bram_consumption BRAMs and $uram_consumption URAMs,\n" +
           s" but only ${p(PlatformNBRAM) - bram_used} BRAMs and ${p(PlatformNURAM) - uram_used} URAMs\n" +
           s"are available.")
       FPGAMemoryPrimitiveConsumer(0, 0, "", "")
     }
 
     if (!p(ComposerQuiet)) {
-      System.out.println(s"Using ${usage.brams} BRAMs and ${usage.urams} URAMs for $debugName.")
-      System.out.println(s"Total Usage - BRAM(${XilinxBRAMTDP.bram_used + usage.brams}/${p(PlatformNBRAM)}) URAM(${XilinxBRAMTDP.uram_used + usage.urams}/${p(PlatformNURAM)})")
+      System.err.println(s"Using ${usage.brams} BRAMs and ${usage.urams} URAMs for $debugName: $nRows x $dwidth")
+      System.err.println(s"Total Usage - BRAM(${XilinxBRAMTDP.bram_used + usage.brams}/${p(PlatformNBRAM)}) URAM(${XilinxBRAMTDP.uram_used + usage.urams}/${p(PlatformNURAM)})")
     }
     usage
   }

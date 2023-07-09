@@ -3,7 +3,6 @@ package composer
 import chipsalliance.rocketchip.config._
 import composer.ComposerConstraintHint.ComposerConstraintHint
 import composer.MemoryStreams._
-import composer.Platforms.FPGA.Xilinx.SimpleDRAMHintKey
 import composer.Systems.{ComposerCore, ComposerCoreWrapper}
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.devices.tilelink._
@@ -73,11 +72,9 @@ class WithComposer(
       case PgLevels             => 5
       case XLen                 => 64 // Applies to all cores
       case PrefetchSourceMultiplicity => 8
-      case SimpleDRAMHintKey => false
       case CmdRespBusWidthBytes => 4
       case UseConfigAsOutputNameKey => useConfigAsOutputName
-      case MaxHartIdBits =>
-        1 // log2Up(site(TilesLocated(InSubsystem)).map(_.tileParams.hartId).max+1)
+      case MaxHartIdBits => 1
       // Interconnect parameters
       case SystemBusKey =>
         SystemBusParams(

@@ -40,7 +40,7 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
           mem.io.sdel := 0.U
           mem
         } else {
-          Module(new RegMem(nRows, nColumns, nPorts))
+          Module(new RegMem(nRows, nColumns, nPorts, 1))
         }
       }
       makeMemory

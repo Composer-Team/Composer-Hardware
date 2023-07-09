@@ -39,7 +39,7 @@ class WithSAED(corner: ProcessCorner = ProcessCorner.Typical,
         } else if (nPorts == 2) {
           new SAED_2RW_SRAM(nRows, nColumns)
         } else {
-          new RegMem(nRows, nColumns, nPorts)
+          new RegMem(nRows, nColumns, nPorts, 1)
         }
       }
       makeMemory

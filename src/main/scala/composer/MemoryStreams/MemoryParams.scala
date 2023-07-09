@@ -5,7 +5,6 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import composer._
-import composer.Platforms.FPGA.Xilinx.SimpleDRAMHintKey
 import freechips.rocketchip.subsystem.ExtMem
 
 /**
@@ -115,9 +114,7 @@ case class CScratchpadParams(name: String,
   extends CChannelParams {
   override val nChannels: Int = 1
   private[composer] def make(implicit p: Parameters): MemoryScratchpad = {
-    new MemoryScratchpad(this)(p.alterPartial({
-      case SimpleDRAMHintKey => false
-    }))
+    new MemoryScratchpad(this)
   }
 }
 

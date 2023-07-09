@@ -9,7 +9,6 @@ import composer.MemoryStreams._
 import composer.RoccHelpers._
 import composer.TLManagement.{ComposerIntraCoreIOModule, TLClientModule}
 import composer.common._
-import composer.Platforms.FPGA.Xilinx.SimpleDRAMHintKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
@@ -102,9 +101,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
           dataWidthBits = mp.dataWidthBits,
           nDatas = mp.nDatas,
           latency = mp.latency,
-          nPorts = 1)(p.alterPartial {
-          case SimpleDRAMHintKey => true
-        }))
+          nPorts = 1))
         sp.mem_slave_node := intraCoreMemXbar
         (intraCoreMemXbar, sp)
       }

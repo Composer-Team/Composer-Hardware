@@ -3,8 +3,9 @@ package composer.MemoryStreams.RAM
 import chisel3._
 import chisel3.util._
 import composer.MemoryStreams._
+import composer.common.ShiftReg
 
-class RegMem(nRows: Int, nColumns: Int, nPorts: Int) extends RawModule with HasMemoryInterface {
+class RegMem(nRows: Int, nColumns: Int, nPorts: Int, latency: Int) extends RawModule with HasMemoryInterface {
   val io = IO(new CMemoryIOBundle(nPorts, log2Up(nRows), nColumns))
 
   override def data_in: Seq[UInt] = io.data_in
@@ -26,6 +27,8 @@ class RegMem(nRows: Int, nColumns: Int, nPorts: Int) extends RawModule with HasM
   withClock(clock) {
     val mem = Reg(Vec(nRows, UInt(nColumns.W)))
     val out_regs = Reg(Vec(nPorts, UInt(nColumns.W)))
+    val out_regs_delayed = ShiftReg(out_regs, latency - 1)
+    io.data_out zip out_regs_delayed foreach { case (i, r) => i := r }
 
 
     data_out zip out_regs foreach { case (o, r) => o := r }

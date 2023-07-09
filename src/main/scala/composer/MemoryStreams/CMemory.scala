@@ -24,6 +24,7 @@ object CMemory {
     }
     if (nPorts > mostPortsSupported) {
       val regMem = Module(new SyncReadMemMem(nPorts, nRows, dataWidth, latency))
+      require(nPorts < 16)
       regMem.mio
     } else {
       p(PlatformTypeKey) match {
@@ -41,7 +42,6 @@ object CMemory {
                 if (q >= dataWidth) dataWidth - 1 else q
               }
               val low_idx = bank_idx * memoryWidth
-
 
               val cmem = if (nPorts == 1) {
                 val cmem = Module(new XilinxBRAMSDP(
