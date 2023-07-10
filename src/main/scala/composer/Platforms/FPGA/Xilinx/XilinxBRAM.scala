@@ -199,18 +199,14 @@ private[composer] class XilinxBRAMTDP(latency: Int,
      |reg [${dataWidth - 1}:0] memreg2;
      |reg [${dataWidth - 1}:0] mem_pipe_reg1 [${latency - 1}:0];    // Pipelines for memory
      |reg [${dataWidth - 1}:0] mem_pipe_reg2 [${latency - 1}:0];    // Pipelines for memory
-     |reg [$latency:0] mem_en_pipe_reg1;                // Pipelines for memory enable
-     |reg [$latency:0] mem_en_pipe_reg2;                // Pipelines for memory enable
      |
      |integer          i;
      |always @ (posedge CE)
      |begin
      |  if(CSB1) begin
+     |    memreg1 <= mem[A1];
      |    if (WEB1) begin
      |      mem[A1] <= I1;
-     |    end
-     |    if (OEB1) begin
-     |      memreg1 <= mem[A1];
      |    end
      |  end
      |end
@@ -218,65 +214,23 @@ private[composer] class XilinxBRAMTDP(latency: Int,
      |always @ (posedge CE)
      |begin
      |  if(CSB2) begin
+     |    memreg2 <= mem[A2];
      |    if (WEB2) begin
      |      mem[A2] <= I2;
      |    end
-     |    if (OEB2) begin
-     |      memreg2 <= mem[A2];
-     |    end
      |  end
      |end
      |
      |always @ (posedge CE)
      |begin
-     |  mem_en_pipe_reg1[0] <= CSB1 && OEB1;
-     |  for (i=0; i<$latency; i=i+1) begin
-     |    mem_en_pipe_reg1[i+1] <= mem_en_pipe_reg1[i];
-     |  end
-     |
-     |  mem_en_pipe_reg2[0] <= CSB2 && OEB2;
-     |  for (i=0; i<$latency; i=i+1) begin
-     |    mem_en_pipe_reg2[i+1] <= mem_en_pipe_reg2[i];
-     |  end
-     |
-     |end
-     |
-     |// RAM output data goes through a pipeline.
-     |always @ (posedge CE)
-     |begin
-     |  if (mem_en_pipe_reg1[0]) begin
-     |    mem_pipe_reg1[0] <= memreg1;
-     |  end
-     |  if (mem_en_pipe_reg2[0]) begin
-     |    mem_pipe_reg2[0] <= memreg2;
-     |  end
-     |
-     |end
-     |
-     |always @ (posedge CE)
-     |begin
+     |  mem_pipe_reg1[0] <= memreg1;
+     |  mem_pipe_reg2[0] <= memreg2;
      |  for (i = 0; i < $latency-1; i = i+1) begin
-     |    if (mem_en_pipe_reg1[i+1]) begin
      |      mem_pipe_reg1[i+1] <= mem_pipe_reg1[i];
-     |    end
-     |    if (mem_en_pipe_reg2[i+1]) begin
      |      mem_pipe_reg2[i+1] <= mem_pipe_reg2[i];
-     |    end
-     |
      |  end
-     |end
-     |
-     |// Final output register gives user the option to add a reset and
-     |// an additional enable signal just for the data ouptut
-     |always @ (posedge CE)
-     |begin
-     |  if (mem_en_pipe_reg1[$latency]) begin
-     |    O1 <= mem_pipe_reg1[$latency-1];
-     |  end
-     |  if (mem_en_pipe_reg2[$latency]) begin
-     |    O2 <= mem_pipe_reg2[$latency-1];
-     |  end
-     |
+     |  O1 <= mem_pipe_reg1[$latency-1];
+     |  O2 <= mem_pipe_reg2[$latency-1];
      |end
      |endmodule
      |
@@ -368,15 +322,12 @@ private[composer] class XilinxBRAMSDP(latency: Int,
      |reg [${dataWidth - 1}:0] mem [${nRows - 1}:0];        // Memory Declaration
      |reg [${dataWidth - 1}:0] memreg;
      |reg [${dataWidth - 1}:0] mem_pipe_reg [${latency - 1}:0];    // Pipelines for memory
-     |reg [$latency:0] mem_en_pipe_reg;                // Pipelines for memory enable
      |
      |integer          i;
      |always @ (posedge CE)
      |begin
      |  if(CSB_read) begin
-     |    if (OEB) begin
-     |      memreg <= mem[A_read];
-     |    end
+     |    memreg <= mem[A_read];
      |  end
      |end
      |
@@ -389,41 +340,15 @@ private[composer] class XilinxBRAMSDP(latency: Int,
      |  end
      |end
      |
-     |always @ (posedge CE)
-     |begin
-     |  mem_en_pipe_reg[0] <= CSB_read && OEB;
-     |  for (i=0; i<$latency; i=i+1) begin
-     |    mem_en_pipe_reg[i+1] <= mem_en_pipe_reg[i];
-     |  end
-     |
-     |end
-     |
      |// RAM output data goes through a pipeline.
      |always @ (posedge CE)
      |begin
-     |  if (mem_en_pipe_reg[0]) begin
-     |    mem_pipe_reg[0] <= memreg;
-     |  end
-     |
-     |end
-     |
-     |always @ (posedge CE)
-     |begin
+     |  mem_pipe_reg[0] <= memreg;
      |  for (i = 0; i < $latency-1; i = i+1) begin
-     |    if (mem_en_pipe_reg[i+1]) begin
-     |      mem_pipe_reg[i+1] <= mem_pipe_reg[i];
-     |    end
-     |
+     |    mem_pipe_reg[i+1] <= mem_pipe_reg[i];
      |  end
-     |end
+     |  O <= mem_pipe_reg[$latency-1];
      |
-     |// Final output register gives user the option to add a reset and
-     |// an additional enable signal just for the data ouptut
-     |always @ (posedge CE)
-     |begin
-     |  if (mem_en_pipe_reg[$latency]) begin
-     |    O <= mem_pipe_reg[$latency-1];
-     |  end
      |end
      |endmodule
      |
