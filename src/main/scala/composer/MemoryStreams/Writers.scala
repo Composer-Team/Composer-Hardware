@@ -18,10 +18,10 @@ class SequentialWriteChannelIO(maxBytes: Int)(implicit p: Parameters) extends Bu
 }
 
 /**
-  * Writes out a set number of fixed-size items sequentially to memory.
-  *
-  * @param nBytes the number of bytes in a single item
-  */
+ * Writes out a set number of fixed-size items sequentially to memory.
+ *
+ * @param nBytes the number of bytes in a single item
+ */
 class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
                       (implicit p: Parameters) extends Module {
   val (tl_outer, edge) = TLClientNode.out(0)
@@ -37,16 +37,17 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
   private val s_idle :: s_data :: s_allocate :: s_mem :: Nil = Enum(4)
   private val state = RegInit(s_idle)
 
+  private val tx_inactive :: tx_inProgress :: Nil = Enum(2)
   private val nSources = edge.master.endSourceId
-//  println(nSources)
+  //  println(nSources)
   private val txIDBits = log2Up(nSources)
-  private val txBusyBits = RegInit(VecInit(Seq.fill(nSources)(false.B)))
-  private val txPriority = PriorityEncoderOH(txBusyBits map (!_))
+  private val txStates = RegInit(VecInit(Seq.fill(nSources)(tx_inactive)))
+  private val txPriority = PriorityEncoderOH(txStates map (_ === tx_inactive))
 
-  private val haveTransactionToDo = txBusyBits.reduce(_ || _)
-  private val haveAvailableTxSlot = txBusyBits.map(!_).reduce(_ || _)
+  private val haveTransactionToDo = txStates.map(_ === tx_inProgress).reduce(_ || _)
+  private val haveAvailableTxSlot = txStates.map(_ === tx_inactive).reduce(_ || _)
 
-//  val isReallyIdle = state === s_idle && !haveTransactionToDo
+  //  val isReallyIdle = state === s_idle && !haveTransactionToDo
   io.channel.channelIdle := !haveTransactionToDo
 
   require(nBytes >= 1)
@@ -71,13 +72,14 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
   private val wmask = FillInterleaved(nBytes, dataValid)
 
   private val allocatedTransaction = RegInit(0.U(txIDBits.W))
+  private val earlyFinish = RegInit(false.B)
 
   tl_out.a.bits := DontCare
   tl_out.a.valid := false.B
   // handle TileLink 'd' interface (response from slave)
   tl_out.d.ready := haveTransactionToDo
   when(tl_out.d.fire) {
-    txBusyBits(tl_out.d.bits.source) := false.B
+    txStates(tl_out.d.bits.source) := tx_inactive
   }
 
   switch(state) {
@@ -135,12 +137,13 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
 
       // handle TileLink 'a' interface (request to slave)
       when(tl_out.a.fire) {
-        txBusyBits(allocatedTransaction) := true.B
+        txStates(allocatedTransaction) := tx_inProgress
         addr := nextAddr
         idx := 0.U
         dataValid := 0.U
-        when(req_len === 0.U) {
+        when(req_len === 0.U || earlyFinish) {
           state := s_idle
+          earlyFinish := false.B
         }.otherwise {
           state := s_data
         }

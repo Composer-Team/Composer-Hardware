@@ -113,25 +113,25 @@ class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters)
   def tieClocks(): Unit = {
     if (!ConstraintGeneration.canDistributeOverSLRs()) return
 
-    val slr_ctrls: Map[Int, Clock] = Map.from((0 until p(PlatformNumSLRs)).filter(_ != SLRHelper.DEFAULT_SLR).map { slr =>
-      val CLmodName = f"${wrapper.baseName}_SLRClockCrossing_${slr}_clock"
-      val cl_mod = Module(new BUFG)
-      cl_mod.suggestName(CLmodName)
-      cl_mod.io.I := clock.asBool
-      ConstraintGeneration.addToSLR(CLmodName, slr)
-      (slr, cl_mod.io.O.asClock)
-    } ++ Seq((SLRHelper.DEFAULT_SLR, clock)))
-
-
-    wrapper.lazyClockMap.foreach { case (lm, slr) =>
-      val imp = lm.module.asInstanceOf[LazyModuleImp]
-      imp.clock := slr_ctrls(slr)
-
-    }
-
-    clockMap.foreach { case (m, slr) =>
-      m.clock := slr_ctrls(slr)
-    }
+//    val slr_ctrls: Map[Int, Clock] = Map.from((0 until p(PlatformNumSLRs)).filter(_ != SLRHelper.DEFAULT_SLR).map { slr =>
+//      val CLmodName = f"${wrapper.baseName}_SLRClockCrossing_${slr}_clock"
+//      val cl_mod = Module(new BUFG)
+//      cl_mod.suggestName(CLmodName)
+//      cl_mod.io.I := clock.asBool
+//      ConstraintGeneration.addToSLR(CLmodName, slr)
+//      (slr, cl_mod.io.O.asClock)
+//    } ++ Seq((SLRHelper.DEFAULT_SLR, clock)))
+//
+//
+//    wrapper.lazyClockMap.foreach { case (lm, slr) =>
+//      val imp = lm.module.asInstanceOf[LazyModuleImp]
+//      imp.clock := slr_ctrls(slr)
+//
+//    }
+//
+//    clockMap.foreach { case (m, slr) =>
+//      m.clock := slr_ctrls(slr)
+//    }
   }
 }
 
