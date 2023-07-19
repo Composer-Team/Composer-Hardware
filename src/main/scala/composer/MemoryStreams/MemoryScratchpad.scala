@@ -68,7 +68,7 @@ class MemoryScratchpad(csp: CScratchpadParams)(implicit p: Parameters) extends L
 
   val blockBytes = p(CacheBlockBytes)
   lazy val module = new CScratchpadImp(csp,this)
-  val mem_master_node = if (csp.supportMemRequest) {
+  val mem_master_node = if (csp.features.supportMemRequest) {
     require(csp.dataWidthBits.intValue() <= channelWidthBytes * 8 * p(PrefetchSourceMultiplicity))
     Some(TLClientNode(Seq(TLMasterPortParameters.v2(
       masters = Seq(TLMasterParameters.v1(
@@ -91,12 +91,12 @@ class MemoryScratchpad(csp: CScratchpadParams)(implicit p: Parameters) extends L
 class CScratchpadImp(csp: CScratchpadParams,
                      outer: MemoryScratchpad) extends LazyModuleImp(outer) {
   val nDatas = csp.nDatas.intValue()
-  val datasPerCacheLine = csp.datasPerCacheLine
+  val datasPerCacheLine = csp.features.datasPerCacheLine
   val dataWidthBits = csp.dataWidthBits.intValue()
   val nPorts = csp.nPorts
   val latency = csp.latency.intValue()
-  val specialization = csp.specialization
-  val supportWriteback = csp.supportWriteback
+  val specialization = csp.features.specialization
+  val supportWriteback = csp.features.supportWriteback
 
   private val realNRows = Math.max((nDatas.toFloat / datasPerCacheLine).ceil.toInt, outer.channelWidthBytes * 8 / dataWidthBits)
   val memoryLengthBits = log2Up(realNRows * dataWidthBits) + 1
