@@ -15,22 +15,63 @@ object CMemory {
       latency: Int,
       dataWidth: Int,
       nRows: Int,
-      nPorts: Int,
+      nReadPorts: Int,
+      nWritePorts: Int,
+      nReadWritePorts: Int,
       debugName: Option[String] = None
   )(implicit p: Parameters, valName: ValName): CMemoryIOBundle = {
     val mostPortsSupported = p(PlatformTypeKey) match {
       case PlatformType.FPGA => 2
       case PlatformType.ASIC => p(ASICMemoryCompilerKey).mems.keys.max
     }
-    if (nPorts > mostPortsSupported) {
+    val nPorts = nReadPorts + nWritePorts + nReadWritePorts
+
+    if (nPorts > mostPortsSupported && nWritePorts + nReadWritePorts > 1) {
       val regMem = Module(new SyncReadMemMem(nPorts, nRows, dataWidth, latency))
       require(nPorts < 16)
       regMem.mio
+    } else if (nPorts > mostPortsSupported) {
+      // duplicate the memory
+      val nDuplicates = (nPorts.toFloat / (mostPortsSupported - 1)).ceil.toInt
+      val mems = Seq.tabulate(nDuplicates) { i =>
+        CMemory(
+          latency,
+          dataWidth,
+          nRows,
+          mostPortsSupported - 1,
+          nWritePorts,
+          nReadWritePorts,
+          debugName = debugName.map(_ + s"_duplicate_$i")
+        )
+      }
+      val mio = Wire(Output(new CMemoryIOBundle(log2Up(nRows), nReadPorts, nWritePorts, nReadWritePorts, dataWidth)))
+      mems.zipWithIndex.foreach { case (mem, mem_idx) =>
+        if (nReadWritePorts > 0) {
+          val rw = mem.getReadWritePort(0)
+          rw <> mio.getReadWritePort(0)
+          if (mem_idx > 0) {
+            rw.chip_select := mio.getReadWritePort(0).chip_select && mio.getReadWritePort(0).write_enable
+          }
+        } else if (nWritePorts > 0) {
+          val w = mem.getWritePort(0)
+          w <> mio.getWritePort(0)
+          if (mem_idx > 0) {
+            w.chip_select := mio.getWritePort(0).chip_select && mio.getWritePort(0).write_enable
+          }
+        }
+      }
+      (0 until nReadPorts) foreach { read_idx =>
+        val idx = read_idx / (mostPortsSupported - 1)
+        val sub_idx = read_idx % (mostPortsSupported - 1)
+        val r = mems(idx).getReadPort(sub_idx)
+        r <> mio.getReadPort(read_idx)
+      }
+      mio
     } else {
       p(PlatformTypeKey) match {
         case PlatformType.FPGA =>
           require(latency >= 1)
-          val mio = Wire(Output(new CMemoryIOBundle(nPorts, addrBits = log2Up(nRows), dataWidth)))
+          val mio = Wire(Output(new CMemoryIOBundle(log2Up(nRows), nReadPorts, nWritePorts, nReadWritePorts, dataWidth)))
           if (latency >= 3 && nPorts <= 2) {
             val memoryWidth = dataWidth // XilinxBRAMTDP.get_bram_width(dataWidth)
             val banks = 1 // (dataWidth.toFloat / memoryWidth).ceil.toInt
@@ -118,6 +159,19 @@ class CMemorySinglePortIOBundle(val addrBits: Int, dataWidth: Int) extends Bundl
   val write_enable = Input(Bool())
 }
 
+class CMemorySingleReadPortIOBundle(addrBits: Int, dataWidth: Int) extends Bundle {
+  val addr = Input(UInt(addrBits.W))
+  val data_out = Output(UInt(dataWidth.W))
+  val chip_select = Input(Bool())
+}
+
+class CMemorySingleWritePortIOBundle(addrBits: Int, dataWidth: Int) extends Bundle {
+  val addr = Input(UInt(addrBits.W))
+  val data_in = Input(UInt(dataWidth.W))
+  val chip_select = Input(Bool())
+  val write_enable = Input(Bool())
+}
+
 object CMemorySinglePortIOBundle {
   // constructor for series of single port IOs from a CMemoryIOBundle
   def fromTransposeInput(in: CMemoryIOBundle): Vec[CMemorySinglePortIOBundle] = {
@@ -149,10 +203,14 @@ object CMemorySinglePortIOBundle {
     }
     io
   }
-
 }
 
-class CMemoryIOBundle(val nPorts: Int, val addrBits: Int, val dataWidth: Int) extends Bundle {
+class CMemoryIOBundle(val nReadPorts: Int,
+                      val nWritePorts: Int,
+                      val nReadWritePorts: Int,
+                      val addrBits: Int,
+                      val dataWidth: Int) extends Bundle {
+  val nPorts = nReadPorts + nWritePorts + nReadWritePorts
   val addr = Input(Vec(nPorts, UInt(addrBits.W)))
 
   val data_in = Input(Vec(nPorts, UInt(dataWidth.W)))
@@ -163,6 +221,45 @@ class CMemoryIOBundle(val nPorts: Int, val addrBits: Int, val dataWidth: Int) ex
   val write_enable = Input(Vec(nPorts, Bool()))
 
   val clock = Input(Bool())
+
+  def getReadPort(idx: Int): CMemorySingleReadPortIOBundle = {
+    require(idx < nReadPorts)
+    // wrap with Output to enforce default direction
+    val io = Wire(Output(new CMemorySingleReadPortIOBundle(addrBits, dataWidth)))
+    addr(idx) := io.addr
+    io.data_out := data_out(idx)
+    data_in(idx) := DontCare
+    chip_select(idx) := io.chip_select
+    read_enable(idx) := true.B
+    write_enable(idx) := false.B
+    io
+  }
+
+  def getWritePort(idx: Int): CMemorySingleWritePortIOBundle = {
+    require(idx < nWritePorts)
+    // wrap with Output to enforce default direction
+    val io = Wire(Output(new CMemorySingleWritePortIOBundle(addrBits, dataWidth)))
+    addr(idx + nReadPorts) := io.addr
+    io.data_in := data_in(idx + nReadPorts)
+    data_out(idx + nReadPorts) := DontCare
+    chip_select(idx + nReadPorts) := io.chip_select
+    read_enable(idx + nReadPorts) := false.B
+    write_enable(idx + nReadPorts) := true.B
+    io
+  }
+
+  def getReadWritePort(idx: Int): CMemorySinglePortIOBundle = {
+    require(idx < nReadWritePorts)
+    // wrap with Output to enforce default direction
+    val io = Wire(Output(new CMemorySinglePortIOBundle(addrBits, dataWidth)))
+    addr(idx + nReadPorts + nWritePorts) := io.addr
+    io.data_in := data_in(idx + nReadPorts + nWritePorts)
+    data_out(idx + nReadPorts + nWritePorts) := io.data_out
+    chip_select(idx + nReadPorts + nWritePorts) := io.chip_select
+    read_enable(idx + nReadPorts + nWritePorts) := true.B
+    write_enable(idx + nReadPorts + nWritePorts) := true.B
+    io
+  }
 }
 
 
@@ -203,6 +300,6 @@ class CASICMemory(latency: Int, dataWidth: Int, nRowsSuggested: Int, nPorts: Int
     with HasCMemoryIO {
   private val nRows = Math.max(nRowsSuggested, 4 * latency)
   override val desiredName = f"CMemoryASIC_l${latency}dw${dataWidth}r$nRows"
-  implicit val io = IO(new CMemoryIOBundle(nPorts, log2Up(nRows), dataWidth))
+  implicit val io = IO(new CMemoryIOBundle(log2Up(nRows), 0, 0, nPorts, dataWidth))
   MemoryCompiler.buildSRAM(latency, dataWidth, nRows, nPorts)
 }

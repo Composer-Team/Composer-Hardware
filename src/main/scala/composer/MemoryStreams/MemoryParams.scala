@@ -102,16 +102,18 @@ object CScratchpadSpecialization {
 case class CCachedReadChannelParams(name: String, nChannels: Int, cacheParams: CCacheParams) extends CChannelParams {
 }
 
+case class CScratchpadFeatures(readOnly: Boolean = false,
+                               supportWriteback: Boolean = false,
+                               supportMemRequest: Boolean = true,
+                               specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked,
+                               datasPerCacheLine: Int = 1)
+
 case class CScratchpadParams(name: String,
-                             supportWriteback: Boolean,
                              dataWidthBits: Number,
                              nDatas: Number,
                              latency: Number = 3,
                              nPorts: Int = 2,
-                             supportMemRequest: Boolean = true,
-                             specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked,
-                             datasPerCacheLine: Int = 1)
-  extends CChannelParams {
+                             features: CScratchpadFeatures = CScratchpadFeatures())extends CChannelParams {
   override val nChannels: Int = 1
   private[composer] def make(implicit p: Parameters): MemoryScratchpad = {
     new MemoryScratchpad(this)
