@@ -71,7 +71,7 @@ class WithComposer(
       case TLInterconnectWidthBytes => 16
       case PgLevels             => 5
       case XLen                 => 64 // Applies to all cores
-      case PrefetchSourceMultiplicity => 8
+      case PrefetchSourceMultiplicity => 16
       case CmdRespBusWidthBytes => 4
       case UseConfigAsOutputNameKey => useConfigAsOutputName
       case MaxHartIdBits => 1
