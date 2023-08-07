@@ -3,11 +3,10 @@ package composer.MemoryStreams
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import composer._
 import composer.MemoryStreams.RAM.SyncReadMemMem
-import composer.Platforms.{ASICMemoryCompilerKey, PlatformType, PlatformTypeKey}
 import composer.Platforms.ASIC.MemoryCompiler
 import composer.Platforms.FPGA.Xilinx.{XilinxBRAMSDP, XilinxBRAMTDP}
+import composer.Platforms.{ASICMemoryCompilerKey, PlatformType, PlatformTypeKey}
 import freechips.rocketchip.diplomacy.ValName
 
 object CMemory {
@@ -20,58 +19,71 @@ object CMemory {
       nReadWritePorts: Int,
       debugName: Option[String] = None
   )(implicit p: Parameters, valName: ValName): CMemoryIOBundle = {
+    println(s"Creating CMemory with $nReadPorts read ports, $nWritePorts write ports, $nReadWritePorts read/write ports: $debugName, $valName")
     val mostPortsSupported = p(PlatformTypeKey) match {
       case PlatformType.FPGA => 2
       case PlatformType.ASIC => p(ASICMemoryCompilerKey).mems.keys.max
     }
     val nPorts = nReadPorts + nWritePorts + nReadWritePorts
 
-    if (nPorts > mostPortsSupported && nWritePorts + nReadWritePorts > 1) {
-      val regMem = Module(new SyncReadMemMem(nPorts, nRows, dataWidth, latency))
+    if (nPorts > mostPortsSupported && (nWritePorts + nReadWritePorts > 1 || mostPortsSupported == 1)) {
+      println("Making Syncread mem becaused " + nPorts + " ports is too many for " + mostPortsSupported + " ports")
+      val regMem = Module(new SyncReadMemMem(nReadPorts, nWritePorts, nReadWritePorts, nRows, dataWidth, latency))
       require(nPorts < 16)
+      (0 until nReadPorts) foreach { idx =>
+        val ridx = regMem.mio.getReadPortIdx(idx)
+        regMem.mio.data_in(ridx) := DontCare
+        regMem.mio.chip_select(ridx) := DontCare
+      }
       regMem.mio
     } else if (nPorts > mostPortsSupported) {
       // duplicate the memory
-      val nDuplicates = (nPorts.toFloat / (mostPortsSupported - 1)).ceil.toInt
+      val nDuplicates = ((nPorts - 1).toFloat / (mostPortsSupported - 1)).ceil.toInt
+      println("Duplicate memory " + nDuplicates + " times for " + nPorts + " ports")
       val mems = Seq.tabulate(nDuplicates) { i =>
         CMemory(
           latency,
           dataWidth,
           nRows,
           mostPortsSupported - 1,
-          nWritePorts,
-          nReadWritePorts,
+          0,
+          1,
           debugName = debugName.map(_ + s"_duplicate_$i")
         )
       }
-      val mio = Wire(Output(new CMemoryIOBundle(log2Up(nRows), nReadPorts, nWritePorts, nReadWritePorts, dataWidth)))
-      mems.zipWithIndex.foreach { case (mem, mem_idx) =>
-        if (nReadWritePorts > 0) {
-          val rw = mem.getReadWritePort(0)
-          rw <> mio.getReadWritePort(0)
-          if (mem_idx > 0) {
-            rw.chip_select := mio.getReadWritePort(0).chip_select && mio.getReadWritePort(0).write_enable
-          }
-        } else if (nWritePorts > 0) {
-          val w = mem.getWritePort(0)
-          w <> mio.getWritePort(0)
-          if (mem_idx > 0) {
-            w.chip_select := mio.getWritePort(0).chip_select && mio.getWritePort(0).write_enable
-          }
-        }
+      val mio = Wire(Output(new CMemoryIOBundle(nReadPorts, nWritePorts, nReadWritePorts, log2Up(nRows), dataWidth)))
+      mems.foreach(_.clock := mio.clock)
+      val writer_idx = if (nReadWritePorts > 0) mio.getReadWritePortIdx(0) else mio.getWritePortIdx(0)
+      // connect writer port to all memories
+      mems.zipWithIndex.foreach { case (mem, i) =>
+        val memRW = mem.getReadWritePortIdx(0)
+//        println("Connecting writer port " + writer_idx + " to memory " + i + " port " + memRW)
+        mem.data_in(memRW) := mio.data_in(writer_idx)
+        mem.addr(memRW) := mio.addr(writer_idx)
+        mem.write_enable(memRW) := mio.write_enable(writer_idx)
+        mem.chip_select(memRW) := mio.chip_select(writer_idx)
+        mem.read_enable(memRW) := mio.read_enable(writer_idx)
+        mio.data_out(writer_idx) := mem.data_out(memRW)
       }
-      (0 until nReadPorts) foreach { read_idx =>
-        val idx = read_idx / (mostPortsSupported - 1)
-        val sub_idx = read_idx % (mostPortsSupported - 1)
-        val r = mems(idx).getReadPort(sub_idx)
-        r <> mio.getReadPort(read_idx)
+      // connect reader ports to all memories
+      (0 until nReadPorts).foreach { reader_idx =>
+        val memIdx = reader_idx  / (mostPortsSupported - 1)
+        val memSubIdx = reader_idx % (mostPortsSupported - 1)
+        val memRW = mems(memIdx).getReadPortIdx(memSubIdx)
+//        println("Connecting reader port " + reader_idx + " to memory " + memIdx + " port " + memRW )
+        mems(memIdx).data_in(memRW) := DontCare // mio.data_in(reader_idx)
+        mems(memIdx).addr(memRW) := mio.addr(reader_idx)
+        mems(memIdx).write_enable(memRW) := false.B // mio.write_enable(reader_idx)
+        mems(memIdx).chip_select(memRW) := mio.chip_select(reader_idx)
+        mems(memIdx).read_enable(memRW) := true.B // mio.read_enable(reader_idx)
+        mio.data_out(reader_idx) := mems(memIdx).data_out(memRW)
       }
       mio
     } else {
       p(PlatformTypeKey) match {
         case PlatformType.FPGA =>
           require(latency >= 1)
-          val mio = Wire(Output(new CMemoryIOBundle(log2Up(nRows), nReadPorts, nWritePorts, nReadWritePorts, dataWidth)))
+          val mio = Wire(Output(new CMemoryIOBundle(nReadPorts, nWritePorts, nReadWritePorts, log2Up(nRows), dataWidth)))
           if (latency >= 3 && nPorts <= 2) {
             val memoryWidth = dataWidth // XilinxBRAMTDP.get_bram_width(dataWidth)
             val banks = 1 // (dataWidth.toFloat / memoryWidth).ceil.toInt
@@ -131,7 +143,7 @@ object CMemory {
               mio.data_out(1) := Cat(mems.map(_._1.data_out(1)).reverse)
             }
           } else {
-            val cmem = Module(new SyncReadMemMem(nPorts, nRows, dataWidth, latency))
+            val cmem = Module(new SyncReadMemMem(nReadPorts, nWritePorts, nReadWritePorts, nRows, dataWidth, latency))
             mio <> cmem.mio
             val allocInfo = XilinxBRAMTDP.getMemoryResources(nRows, dataWidth, debugName.getOrElse("anonymous"), nPorts == 1)
             XilinxBRAMTDP.allocateURAM(allocInfo.urams)
@@ -156,19 +168,6 @@ class CMemorySinglePortIOBundle(val addrBits: Int, dataWidth: Int) extends Bundl
 
   val chip_select = Input(Bool())
   val read_enable = Input(Bool())
-  val write_enable = Input(Bool())
-}
-
-class CMemorySingleReadPortIOBundle(addrBits: Int, dataWidth: Int) extends Bundle {
-  val addr = Input(UInt(addrBits.W))
-  val data_out = Output(UInt(dataWidth.W))
-  val chip_select = Input(Bool())
-}
-
-class CMemorySingleWritePortIOBundle(addrBits: Int, dataWidth: Int) extends Bundle {
-  val addr = Input(UInt(addrBits.W))
-  val data_in = Input(UInt(dataWidth.W))
-  val chip_select = Input(Bool())
   val write_enable = Input(Bool())
 }
 
@@ -222,43 +221,18 @@ class CMemoryIOBundle(val nReadPorts: Int,
 
   val clock = Input(Bool())
 
-  def getReadPort(idx: Int): CMemorySingleReadPortIOBundle = {
-    require(idx < nReadPorts)
-    // wrap with Output to enforce default direction
-    val io = Wire(Output(new CMemorySingleReadPortIOBundle(addrBits, dataWidth)))
-    addr(idx) := io.addr
-    io.data_out := data_out(idx)
-    data_in(idx) := DontCare
-    chip_select(idx) := io.chip_select
-    read_enable(idx) := true.B
-    write_enable(idx) := false.B
-    io
+  def getReadPortIdx(idx: Int): Int = {
+    idx
   }
 
-  def getWritePort(idx: Int): CMemorySingleWritePortIOBundle = {
+  def getWritePortIdx(idx: Int): Int = {
     require(idx < nWritePorts)
-    // wrap with Output to enforce default direction
-    val io = Wire(Output(new CMemorySingleWritePortIOBundle(addrBits, dataWidth)))
-    addr(idx + nReadPorts) := io.addr
-    io.data_in := data_in(idx + nReadPorts)
-    data_out(idx + nReadPorts) := DontCare
-    chip_select(idx + nReadPorts) := io.chip_select
-    read_enable(idx + nReadPorts) := false.B
-    write_enable(idx + nReadPorts) := true.B
-    io
+    idx + nReadPorts
   }
 
-  def getReadWritePort(idx: Int): CMemorySinglePortIOBundle = {
+  def getReadWritePortIdx(idx: Int): Int = {
     require(idx < nReadWritePorts)
-    // wrap with Output to enforce default direction
-    val io = Wire(Output(new CMemorySinglePortIOBundle(addrBits, dataWidth)))
-    addr(idx + nReadPorts + nWritePorts) := io.addr
-    io.data_in := data_in(idx + nReadPorts + nWritePorts)
-    data_out(idx + nReadPorts + nWritePorts) := io.data_out
-    chip_select(idx + nReadPorts + nWritePorts) := io.chip_select
-    read_enable(idx + nReadPorts + nWritePorts) := true.B
-    write_enable(idx + nReadPorts + nWritePorts) := true.B
-    io
+    idx + nReadPorts + nWritePorts
   }
 }
 
@@ -300,6 +274,6 @@ class CASICMemory(latency: Int, dataWidth: Int, nRowsSuggested: Int, nPorts: Int
     with HasCMemoryIO {
   private val nRows = Math.max(nRowsSuggested, 4 * latency)
   override val desiredName = f"CMemoryASIC_l${latency}dw${dataWidth}r$nRows"
-  implicit val io = IO(new CMemoryIOBundle(log2Up(nRows), 0, 0, nPorts, dataWidth))
+  implicit val io = IO(new CMemoryIOBundle(0, 0, nPorts, log2Up(nRows), dataWidth))
   MemoryCompiler.buildSRAM(latency, dataWidth, nRows, nPorts)
 }

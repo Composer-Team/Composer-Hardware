@@ -18,7 +18,8 @@ import java.time.format.DateTimeFormatter
 
 class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
                 threshold: ProcessVoltageThreshold = ProcessVoltageThreshold.Regular,
-                clockRateMHz: Float = 1000) extends Config((_, _, _) => {
+                clockRateMHz: Float = 1000,
+                skipScripts: Boolean = false) extends Config((_, _, _) => {
   case ASICMemoryCompilerKey => new MemoryCompiler {
     override val isActiveHighSignals: Boolean = true
     override val mems: Map[Int, Seq[SD]] = Map.from(Seq((1, Seq(
@@ -51,7 +52,7 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
       f"srambank_${nRows / 4}x4x${nColumns}_6t122"
     }
   }
-  case PostProcessorMacro => c: Config => {
+  case PostProcessorMacro => if (skipScripts) {_: Config => ;} else {c: Config => {
     val mName = c.getClass.getCanonicalName.split('.').last
     val cwd = os.Path(ComposerBuild.composerGenDir)
     val timestamp = LocalDateTime.now()
@@ -137,23 +138,14 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
          |link
          |uniquify
          |
-         |# 1/s^-6 -> s^12
          |set peri [expr 1000.0 / ($clockRateMHz / 1000.0)]
-         |set_wire_load_model -name "ForQA"
          |create_clock clock -name "clock" -period $$peri
          |set_cost_priority -delay
-         |compile_ultra -retime -scan
+         |compile_ultra -retime -scan -no_autoungroup
          |# enable this if timing is really tight
          |# optimize_registers -delay_threshold=$$peri -minimum_period_only
          |link
          |check_design
-         |
-         |write -f verilog -output out/dc_netlist.v
-         |report_cell > out/cell_usage.txt
-         |report_area -hierarchy > out/area.txt
-         |report_timing -nworst 32 > out/timing.txt
-         |report_net_fanout > out/fanout.txt
-         |report_power -cell -hierarchy -analysis_effort high > out/power.txt
          |
          |write_sdc composer.sdc
          |write -hierarchy -format verilog -output out/composer.netlist.v""".stripMargin
@@ -175,8 +167,11 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
       case ProcessCorner.Typical => "typical"
       case ProcessCorner.Slow => "slow"
     }
-    // drop 0p, drop v, divide by 100 to get decimal back
-    //      val referenceLibs = ComposerBuild.symbolicMemoryResources.map(p => p/)
+
+    // create macro arrays
+    val macroArrays = MemoryCompiler.registeredMemoryArrays.map { ar =>
+      s"create_macro_array -fill_pattern by_row -horizontal_channel_height 10 -vertical_channel_height 10 -num_rows ${ar.rows} -num_cols ${ar.cols} -create_group true -name_edit_group ${ar.name} ${ar. reduce (_ + " " + _)}"
+    }
     os.write(synwd / "pnr.tcl",
       f"""set top_module ComposerTop
          |# set design_verilog "src/composer.v"
@@ -234,57 +229,23 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
          |### Floorplan
          |initialize_floorplan
          |
+         |set_app_options -name plan.macro.style -value freeform
+         |set_app_options -name plan.macro.integrated -value true
+         |set_host_options -max_cores 48 # change this to whatever
+         |
+         |${macroArrays mkString "\n"}
+         |
          |# Place output pins
-         |set_app_options -name plan.pins.incremental -value false -block [current_block]
-         |place_pins -self -ports *
+         |# set_app_options -name plan.pins.incremental -value false -block [current_block]
+         |# place_pins -self -ports *
          |
          |# Place design cells
-         |set_app_options -name place.coarse.fix_hard_macros -value false
-         |set_app_options -name plan.place.auto_create_blockages -value auto
-         |create_placement -floorplan -effort high
+         |# set_app_options -name place.coarse.fix_hard_macros -value false
+         |# set_app_options -name plan.place.auto_create_blockages -value auto
+         |# create_placement -floorplan -effort high
          |
          |# optimize placement
-         |place_opt
-         |
-         |connect_pg_net -automatic -all_blocks
-         |
-         |####################################
-         |### Place IO
-         |######################################
-         |place_io
-         |
-         |####################################
-         |### Memory Placement
-         |######################################
-         |if [sizeof_collection [get_cells -hier -filter is_hard_macro==true -quiet]] {
-         |   set all_macros [get_cells -hier -filter is_hard_macro==true]
-         |   # Check top-level
-         |   report_macro_constraints -allowed_orientations -preferred_location -alignment_grid -align_pins_to_tracks $$all_macros > out/report_macro_constraints.rpt
-         |}
-         |
-         |### Placement
-         |set_app_options -name place.coarse.continue_on_missing_scandef -value true
-         |place_opt
-         |
-         |### Clock Tree Synthesis
-         |clock_opt -from build_clock -to remote_clock
-         |clock_opt -from final_opto -to final_opto
-         |
-         |### Route
-         |route_auto
-         |route_opt
-         |
-         |### Power Networks
-         |connect_pg_net -automatic
-         |
-         |### Report Result
-         |report_qor > out/pnr_qor.rpt
-         |
-         |### Save Block and Export GDS
-         |save_block
-         |write_gds out/composer.gds
-         |
+         |# place_opt
          |""".stripMargin)
-  }
-
+  }}
 })

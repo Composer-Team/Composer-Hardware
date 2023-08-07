@@ -101,7 +101,8 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
           dataWidthBits = mp.dataWidthBits,
           nDatas = mp.nDatas,
           latency = mp.latency,
-          nPorts = 1))
+          nPorts = 1,
+          readOnly = mp.readOnly))
         sp.mem_slave_node := intraCoreMemXbar
         (intraCoreMemXbar, sp)
       }

@@ -27,7 +27,7 @@ private[composer] class U200Base(nMemoryChannels: Int)
     case PlatformPhysicalMemoryBytes => (16L << 30) * nMemoryChannels
     case HasDMA => Some(2)
     // TODO this can be tuned
-    case CXbarMaxDegree => 32
+    case CXbarMaxDegree => 8
     case HasDiscreteMemory => true
 
     case PlatformTypeKey => PlatformType.FPGA

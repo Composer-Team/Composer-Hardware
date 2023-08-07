@@ -3,10 +3,9 @@ package composer.MemoryStreams
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
-import composer._
 import composer.Generation._
-import composer.common.ShiftReg
 import composer.Platforms.{ASICMemoryCompilerKey, PlatformType, PlatformTypeKey}
+import composer.common.ShiftReg
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
@@ -28,6 +27,7 @@ class IntraCoreScratchpad(asMemorySlave: TLSlavePortParameters,
                           dataWidthBits: Number,
                           nDatas: Number,
                           latency: Number,
+                          readOnly: Boolean,
                           nPorts: Int)(implicit p: Parameters) extends LazyModule {
   require(dataWidthBits.intValue() > 0)
   require(nDatas.intValue() > 0)
@@ -36,6 +36,7 @@ class IntraCoreScratchpad(asMemorySlave: TLSlavePortParameters,
     nDatas.intValue(),
     latency.intValue(),
     nPorts,
+    readOnly,
     this)
   val channelWidthBytes = p(ExtMem).get.master.beatBytes
   val blockBytes = p(CacheBlockBytes)
@@ -52,49 +53,56 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
                              nDatas: Int,
                              latency: Int,
                              nPorts: Int,
+                             readOnly: Boolean,
                              outer: IntraCoreScratchpad) extends LazyModuleImp(outer) {
-  val mostPortsSupported = p(PlatformTypeKey) match {
-    case PlatformType.FPGA => 2
-    case PlatformType.ASIC => p(ASICMemoryCompilerKey).mems.keys.max
-  }
-  val nDuplicates = (nPorts.toFloat / mostPortsSupported).ceil.toInt
   private val scReqBits = log2Up(nDatas)
   val IOs = Seq.fill(nPorts)(IO(new CScratchpadAccessPort(scReqBits, dataWidthBits)))
   val (in, edge) = outer.mem_slave_node.in(0)
   val responseQ = Queue(in.a.map(_.source), entries = 4)
   private val realNRows = nDatas
-  private val memory = Seq.fill(nDuplicates)(CMemory(latency, dataWidth = dataWidthBits, nRows = realNRows, debugName = Some(outer.name), nPorts = mostPortsSupported))
+  private val memory = CMemory(latency, dataWidth = dataWidthBits, nRows = realNRows, debugName = Some(outer.name),
+    nReadPorts = if (readOnly) nPorts else 0,
+    nWritePorts = 0,
+    nReadWritePorts = if (readOnly) 1 else nPorts + 1)
 
-  IOs.grouped(mostPortsSupported) zip memory foreach { case (access_group, mem) =>
-    mem.clock := clock.asBool
-    access_group.indices.foreach { port_idx =>
-      val port = access_group(port_idx)
-      dontTouch(port.req.bits.addr)
-      mem.addr(port_idx) := port.req.bits.addr
-      mem.chip_select(port_idx) := port.req.valid
-      mem.read_enable(port_idx) := !port.req.bits.write_enable
-      mem.write_enable(port_idx) := port.req.bits.write_enable
-      mem.data_in(port_idx) := port.req.bits.data
-      port.res.valid := ShiftReg(port.req.valid && !port.req.bits.write_enable, latency)
-      port.res.bits := mem.data_out(port_idx)
+  if (readOnly) {
+    IOs.foreach { io =>
+      assert(!io.req.valid || (io.req.valid && !io.req.bits.write_enable), "read only scratchpad. turn off readonly if you need to write to the scratchpad")
     }
-    (access_group.length until mem.nPorts) foreach { port_idx =>
-      mem.addr(port_idx) := DontCare
-      mem.chip_select(port_idx) := false.B
-      mem.read_enable(port_idx) := DontCare
-      mem.write_enable(port_idx) := DontCare
-      mem.data_in(port_idx) := DontCare
+  }
+  memory.clock := clock.asBool
+  if (readOnly) {
+    IOs.zipWithIndex.foreach { case (io, idx) =>
+      val port = memory.getReadPortIdx(idx)
+      memory.addr(port) := io.req.bits.addr
+      memory.chip_select(port) := io.req.valid
+      memory.read_enable(port) := true.B
+      memory.write_enable(port) := false.B
+      memory.data_in(port) := DontCare
+      io.res.valid := ShiftReg(io.req.valid, latency)
+      io.res.bits := memory.data_out(port)
+    }
+  } else {
+    IOs.zipWithIndex.foreach { case(io, idx) =>
+      val port = memory.getReadWritePortIdx(idx + 1)
+      memory.addr(port) := io.req.bits.addr
+      memory.chip_select(port) := io.req.valid
+      memory.read_enable(port) := !io.req.bits.write_enable
+      memory.write_enable(port) := io.req.bits.write_enable
+      memory.data_in(port) := io.req.bits.data
+      io.res.valid := ShiftReg(io.req.valid && !io.req.bits.write_enable, latency)
+      io.res.bits := memory.data_out(port)
     }
   }
 
-  if (nPorts > mostPortsSupported) {
-    IOs foreach { acc =>
-      when(acc.req.fire) {
-        assert(!acc.req.bits.write_enable, "currently don't support writeback into >2 ported memories")
-      }
-    }
-  }
   in.d <> responseQ.map { source => edge.AccessAck(source, log2Up(in.params.dataBits / 8).U) }
+
+  val port = memory.getReadWritePortIdx(0)
+  memory.addr(port) := DontCare
+  memory.chip_select(port) := false.B
+  memory.read_enable(port) := false.B
+  memory.write_enable(port) := false.B
+  memory.data_in(port) := DontCare
 
   when(in.a.valid) {
     IOs.foreach {
@@ -102,15 +110,11 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
     }
     val off = log2Up(dataWidthBits / 8)
     val bot_addr = in.a.bits.address(log2Up(nDatas) - 1 + off, off)
-    val mem_idx = mostPortsSupported - 1
-    memory foreach { mem =>
-      mem.write_enable(mem_idx) := true.B
-      mem.read_enable(mem_idx) := false.B
-      mem.chip_select(mem_idx) := true.B
-      // trim off the bottom bits that need to be removed due to alignment.
-      mem.addr(mem_idx) := bot_addr
-      mem.data_in(mem_idx) := in.a.bits.data
-    }
+    memory.addr(port) := bot_addr
+    memory.chip_select(port) := true.B
+    memory.read_enable(port) := false.B
+    memory.write_enable(port) := true.B
+    memory.data_in(port) := in.a.bits.data
   }
 }
 

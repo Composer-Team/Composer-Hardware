@@ -91,7 +91,7 @@ class CReader(dataBytes: Int,
     case PlatformType.FPGA => 3
     case PlatformType.ASIC => (prefetchRows.toFloat / 256).ceil.toInt
   }
-  val prefetch_buffers_mod = Module(new SyncReadMemMem(2, prefetchRows, storedDataWidth, prefetch_blatency))
+  val prefetch_buffers_mod = Module(new SyncReadMemMem(0, 0, 2, prefetchRows, storedDataWidth, prefetch_blatency))
   val prefetch_buffers = prefetch_buffers_mod.mio
 
   prefetch_buffers.clock := clock.asBool

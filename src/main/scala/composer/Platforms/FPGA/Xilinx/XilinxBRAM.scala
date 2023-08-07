@@ -204,12 +204,10 @@ private[composer] class XilinxBRAMTDP(latency: Int,
      |always @ (posedge CE)
      |begin
      |  if(CSB1) begin
-     |    if (OEB1) begin
-     |    memreg1 <= mem[A1];
+     |    if (WEB1) begin
+     |      mem[A1] <= I1;
      |    end else begin
-     |      if (WEB1) begin
-     |        mem[A1] <= I1;
-     |      end
+     |      memreg1 <= mem[A1];
      |    end
      |  end
      |end
@@ -217,12 +215,10 @@ private[composer] class XilinxBRAMTDP(latency: Int,
      |always @ (posedge CE)
      |begin
      |  if(CSB2) begin
-     |    if (OEB2) begin
-     |      memreg2 <= mem[A2];
+     |    if (WEB2) begin
+     |      mem[A2] <= I2;
      |    end else begin
-     |      if (WEB2) begin
-     |        mem[A2] <= I2;
-     |      end
+     |      memreg2 <= mem[A2];
      |    end
      |  end
      |end

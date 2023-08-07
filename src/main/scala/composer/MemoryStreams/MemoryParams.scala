@@ -124,6 +124,7 @@ case class CIntraCoreMemoryPortIn(name: String,
                                   nChannels: Int,
                                   dataWidthBits: Number,
                                   nDatas: Number,
+                                  readOnly: Boolean = false,
                                   latency: Number = 2) extends CChannelParams {
   require(isPow2(dataWidthBits.intValue()) && dataWidthBits.intValue() >= 8, "the width of CIntraCoreMemory ports is" +
     "currently restricted to power-of-2 sizes. If you need this changed, please contact developer.")

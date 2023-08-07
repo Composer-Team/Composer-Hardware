@@ -106,7 +106,19 @@ class CScratchpadImp(csp: CScratchpadParams,
   private val scReqBits = log2Up(nDatas)
   val IOs = Seq.fill(nPorts)(IO(new CScratchpadAccessPort(scReqBits, dataWidthBits)))
   val req = IO(new CScratchpadInitReqIO(if (outer.mem_master_node.isDefined) Some(outer.mem_master_node.get.out(0)._1) else None, nDatas, memoryLengthBits))
-  private val memory = Seq.fill(datasPerCacheLine)(CMemory(latency, dataWidth = dataWidthBits, nRows = realNRows, debugName = Some(outer.name), nPorts = nPorts))
+  private val memory = Seq.fill(datasPerCacheLine)(CMemory(latency,
+    dataWidth = dataWidthBits,
+    nRows = realNRows,
+    debugName = Some(outer.name),
+    nReadPorts = if (csp.features.readOnly) nPorts - 1 else 0,
+    nWritePorts = 0,
+    nReadWritePorts = if (csp.features.readOnly) 1 else nPorts))
+  if (csp.features.readOnly) {
+    IOs.foreach { io =>
+      assert(!io.req.valid || !io.req.bits.write_enable,
+        "Read-only scratchpad cannot write from user side. If you require this behavior, do not enable readOnly in scratchpad configuration")
+    }
+  }
   memory.foreach { mem =>
     mem.clock := clock.asBool
     mem.chip_select.foreach(_ := false.B)
@@ -139,10 +151,6 @@ class CScratchpadImp(csp: CScratchpadParams,
     val datsOut = VecInit(memory.map(_.data_out(portIdx)))
     io.res.bits := datsOut(memIdxDelay)
     io.res.valid := ShiftReg(io.req.valid && !io.req.bits.write_enable, latency)
-    dontTouch(io.res.bits)
-    dontTouch(datsOut)
-    dontTouch(memIdxDelay)
-    memory.foreach(dontTouch(_))
   }
 
   require(isPow2(datasPerCacheLine))
@@ -165,11 +173,12 @@ class CScratchpadImp(csp: CScratchpadParams,
     when (loader.io.sp_write_out.valid) {
       val dataSplit = splitIntoChunks(loader.io.sp_write_out.bits.dat, dataWidthBits)
       memory.zip(dataSplit) foreach { case(mem, dat) =>
-        mem.addr(0) := loader.io.sp_write_out.bits.idx
-        mem.data_in(0) := dat
-        mem.chip_select(0) := true.B
-        mem.read_enable(0) := false.B
-        mem.write_enable(0) := true.B
+        val rwp = mem.getReadWritePortIdx(0)
+        mem.addr(rwp) := loader.io.sp_write_out.bits.idx
+        mem.chip_select(rwp) := true.B
+        mem.read_enable(rwp) := false.B
+        mem.write_enable(rwp) := true.B
+        mem.data_in(rwp) := dat
       }
     }
 
