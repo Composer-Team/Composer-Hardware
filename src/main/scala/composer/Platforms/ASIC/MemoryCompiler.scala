@@ -187,7 +187,7 @@ object MemoryCompiler {
       (bank_idx, banks_o, cascade.map(_.name))
     }
 
-    unregisteredMemoryArrays = unregisteredMemoryArrays :+ (s"mem_${nRows}x${dataWidth}x${nPorts}_l${latency}", memoryStructure.bankWidths.length, latency, banks.flatMap(_._3))
+//    unregisteredMemoryArrays = unregisteredMemoryArrays :+ (s"mem_${nRows}x${dataWidth}x${nPorts}_l${latency}", memoryStructure.bankWidths.length, latency, banks.flatMap(_._3))
     withClock(io.clock.asClock) {
       (0 until nPorts) foreach { port_idx =>
         val bank_o = banks.map(p => (p._1, p._2(port_idx)))
