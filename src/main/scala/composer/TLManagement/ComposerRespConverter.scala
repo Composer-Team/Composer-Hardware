@@ -3,14 +3,14 @@ package composer.TLManagement
 import chisel3._
 import chisel3.util._
 import composer.common.{
-  ComposerRoccResponse,
-  ComposerUserResponse,
+  AccelRoccResponse,
+  AccelResponse,
   hasAccessibleUserSubRegions,
   hasDataField
 }
 
 class ComposerRespConverter[
-    outT <: ComposerUserResponse,
+    outT <: AccelResponse,
     inT <: Bundle with hasDataField
 ](genOut: outT, genIn: inT)
     extends Module {

@@ -38,5 +38,5 @@ private[composer] class AWS_sole(simulation: Boolean)
   })
 
 
-class WithAWSPlatform(nMemoryChannels: Int, simulation: Boolean = true)
+class WithAWSPlatform(nMemoryChannels: Int = 1, simulation: Boolean = true)
   extends Config(new U200Base(nMemoryChannels) ++ new AWS_sole(simulation))

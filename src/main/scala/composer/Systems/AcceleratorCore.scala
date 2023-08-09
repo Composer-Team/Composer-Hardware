@@ -29,7 +29,7 @@ class CustomIOWithRouting[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T
   val resp: DecoupledIO[T2] = Flipped(DecoupledIO(bundleOut))
 }
 
-class ComposerCoreIO(implicit p: Parameters) extends CustomIO[ComposerRoccCommand, ComposerRoccUserResponse](new ComposerRoccCommand, new ComposerRoccUserResponse)
+class ComposerCoreIO(implicit p: Parameters) extends CustomIO[ComposerRoccCommand, AccelRoccUserResponse](new ComposerRoccCommand, new AccelRoccUserResponse)
 
 class DataChannelIO(dataBytes: Int, vlen: Int = 1) extends Bundle {
   val data = Decoupled(Vec(vlen, UInt((dataBytes * 8).W)))
@@ -37,8 +37,8 @@ class DataChannelIO(dataBytes: Int, vlen: Int = 1) extends Bundle {
 }
 
 
-class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val core_id: Int, val system_id: Int, val systemRef: ComposerSystem)(implicit p: Parameters) extends LazyModule {
-  lazy val module = composerSystemParams.buildCore(ComposerConstructor(composerSystemParams.coreParams, this), p)
+class AccelCoreWrapper(val composerSystemParams: AcceleratorSystemConfig, val core_id: Int, val system_id: Int, val systemRef: ComposerSystem)(implicit p: Parameters) extends LazyModule {
+  lazy val module = composerSystemParams.buildCore(CoreConstructor(composerSystemParams.coreParams, this), p)
   val coreParams = composerSystemParams.coreParams.copy(core_id = core_id, system_id = system_id)
   val blockBytes = p(CacheBlockBytes)
   val unCachedReaders = coreParams.memoryChannelParams.filter(_.isInstanceOf[CReadChannelParams]).map { para =>
@@ -115,7 +115,7 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
     r =>
       val mp = r.asInstanceOf[CIntraCoreMemoryPortOut]
       val (otherSystemParams, otherSPParams) = try {
-        val otherS = p(ComposerSystemsKey).filter(_.name == mp.toSystem)(0)
+        val otherS = p(AcceleratorSystems).filter(_.name == mp.toSystem)(0)
         val otherSP = otherS.coreParams.memoryChannelParams.filter(_.name == mp.toMemoryPort)(0)
         (otherS, otherSP.asInstanceOf[CIntraCoreMemoryPortIn])
       } catch {
@@ -133,11 +133,11 @@ class ComposerCoreWrapper(val composerSystemParams: ComposerSystemParams, val co
   }
 }
 
-class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Parameters) extends LazyModuleImp(composerConstructor.composerCoreWrapper) {
+class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Parameters) extends LazyModuleImp(composerConstructor.composerCoreWrapper) {
   private val outer = composerConstructor.composerCoreWrapper
   val composer_response_ios_ = Map.from(outer.composerSystemParams.canIssueCoreCommandsTo.map { target =>
     (target, {
-      val io = IO(Flipped(Decoupled(new ComposerRoccResponse())))
+      val io = IO(Flipped(Decoupled(new AccelRoccResponse())))
       io.suggestName(s"ComposerIntraCoreResponsePort_$target")
       io
     })
@@ -225,12 +225,14 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     ic_scratchpad._4(idx).module.IOs(0)
   }
 
+  case class ReaderModuleChannel(requestChannel: DecoupledIO[ChannelTransactionBundle], dataChannel: DataChannelIO)
+
   def getReaderModule(name: String,
-                      dataBytes: Int,
-                      vlen: Int,
-                      idx: Int): (DecoupledIO[ChannelTransactionBundle], DataChannelIO) = {
-    val a = getReaderModules(name, dataBytes, vlen, Some(idx))
-    (a._1(0), a._2(0))
+                      dataWidthBytes: Int,
+                      vlen: Int = 1,
+                      idx: Int = 0): ReaderModuleChannel = {
+    val a = getReaderModules(name, dataWidthBytes, vlen, Some(idx))
+    ReaderModuleChannel(a._1(0), a._2(0))
   }
 
   /**
@@ -319,24 +321,24 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
     ret
   }
 
-  def ComposerIntraCoreIO[Tcmd <: ComposerCommand, Tresp <: ComposerUserResponse](endpoint: String,
-                                                                                  genCmd: Tcmd = new ComposerRoccCommand,
-                                                                                  genResp: Tresp = new ComposerRoccUserResponse): CustomIOWithRouting[Tcmd, Tresp] = {
+  def ComposerIntraCoreIO[Tcmd <: AccelCommand, Tresp <: AccelResponse](endpoint: String,
+                                                                        genCmd: Tcmd = new ComposerRoccCommand,
+                                                                        genResp: Tresp = new AccelRoccUserResponse): CustomIOWithRouting[Tcmd, Tresp] = {
     val converter = Module(new ComposerIntraCoreIOModule(endpoint, genCmd, genResp))
     converter.respIO <> composer_response_ios_(endpoint)
     converter.cmdIO <> composer_command_ios_(endpoint)
     converter.out
   }
 
-  def ComposerIO[T1 <: ComposerCommand](bundleIn: T1): CustomIO[T1, ComposerRoccUserResponse] = {
-    ComposerIO[T1, ComposerRoccUserResponse](bundleIn, new ComposerRoccUserResponse)
+  def ComposerIO[T1 <: AccelCommand](bundleIn: T1): CustomIO[T1, AccelRoccUserResponse] = {
+    ComposerIO[T1, AccelRoccUserResponse](bundleIn, new AccelRoccUserResponse)
   }
 
   def getSystemID(name: String): UInt = p(SystemName2IdMapKey)(name).U
 
   def addrBits: Int = log2Up(p(ExtMem).get.master.size)
 
-  def ComposerIO[T1 <: ComposerCommand, T2 <: ComposerUserResponse](bundleIn: T1, bundleOut: T2): CustomIO[T1, T2] = {
+  def ComposerIO[T1 <: AccelCommand, T2 <: AccelResponse](bundleIn: T1, bundleOut: T2): CustomIO[T1, T2] = {
     if (using_custom == CustomCommandUsage.default) {
       throw new Exception("Cannot use custom io after using the default io")
     }
@@ -385,5 +387,5 @@ class ComposerCore(val composerConstructor: ComposerConstructor)(implicit p: Par
 
 class ComposerSystemIO(implicit p: Parameters) extends Bundle {
   val cmd = Flipped(Decoupled(new ComposerRoccCommand))
-  val resp = Decoupled(new ComposerRoccResponse())
+  val resp = Decoupled(new AccelRoccResponse())
 }

@@ -7,8 +7,8 @@ import composer.RoccHelpers.ComposerOpcode.ACCEL
 import composer.Systems.{CustomIO, CustomIOWithRouting}
 import composer.common._
 
-class MultiBeatCommandEmitter[T <: ComposerCommand](gen: T)(implicit
-    p: Parameters
+class MultiBeatCommandEmitter[T <: AccelCommand](gen: T)(implicit
+                                                         p: Parameters
 ) extends Module {
   val in: DecoupledIOWithCRouting[T] = IO(Flipped(DecoupledIOWithCRouting(gen)))
   val out = IO(Decoupled(new ComposerRoccCommand))
@@ -58,23 +58,23 @@ class MultiBeatCommandEmitter[T <: ComposerCommand](gen: T)(implicit
 }
 
 class ComposerIntraCoreIOModule[
-    Tcmd <: ComposerCommand,
-    Tresp <: ComposerUserResponse
+    Tcmd <: AccelCommand,
+    Tresp <: AccelResponse
 ](target: String, genCmd: Tcmd, genResp: Tresp)(implicit p: Parameters)
     extends Module {
   override val desiredName = s"Composer${target}CmdRespHandler"
   private val cmdModule = Module(new MultiBeatCommandEmitter(genCmd))
   private val respModule = Module(
-    new ComposerRespConverter[Tresp, ComposerRoccResponse](
+    new ComposerRespConverter[Tresp, AccelRoccResponse](
       genResp,
-      new ComposerRoccResponse
+      new AccelRoccResponse
     )
   )
 
   val out = IO(Flipped(new CustomIOWithRouting[Tcmd, Tresp](genCmd, genResp)))
 
   val cmdIO = IO(Decoupled(new ComposerRoccCommand()))
-  val respIO = IO(Flipped(Decoupled(new ComposerRoccResponse)))
+  val respIO = IO(Flipped(Decoupled(new AccelRoccResponse)))
 
   cmdIO <> cmdModule.out
   respModule.in <> respIO

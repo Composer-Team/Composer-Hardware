@@ -87,7 +87,7 @@ private class C_ASIC_MemoryCascade(rows: Int,
   val totalAddr = log2Up(rows) + cascadeBits
   val io = IO(new CMemoryIOBundle(0, 0, nPorts, totalAddr, dataBits) with withMemoryIOForwarding)
   withClockAndReset(io.clock.asClock, false.B.asAsyncReset) {
-    val mem = p(ASICMemoryCompilerKey).generateMemoryFactory(nPorts, rows, dataBits)(p)()
+    val mem = Module(p(ASICMemoryCompilerKey).generateMemoryFactory(nPorts, rows, dataBits)(p)())
     mem.clocks.foreach(_ := io.clock)
     (0 until nPorts) foreach { port_idx =>
       val cascade_select = if (cascadeBits == 0) true.B else idx.U === io.addr(port_idx).head(cascadeBits)
@@ -115,13 +115,6 @@ private class C_ASIC_MemoryCascade(rows: Int,
 
 object MemoryCompiler {
   case class MemoryArrayDescriptor(name: String, rows: Int, cols: Int, modPath: String, cells: Seq[String])
-  /**
-   * List of registered memory arrays. This is a list of tuples of the form (name, rows, cols, list of cells)
-   * Use this to build memory arrays during PnR
-   */
-  var unregisteredMemoryArrays: Seq[MemoryArrayDescriptor] = List()
-  var registeredMemoryArrays: Seq[MemoryArrayDescriptor] = List()
-
   /**
    * Build a large SRAM structure from the provided SRAM cells in the library. This function is expected to be
    * called from a module that will implement the required size and width of the memory with a given latency.

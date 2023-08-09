@@ -3,7 +3,7 @@ package composer.RoccHelpers
 import chipsalliance.rocketchip.config._
 import chisel3.util._
 import chisel3._
-import composer.common.{ComposerRoccResponse, hasRoccResponseFields}
+import composer.common.{AccelRoccResponse, hasRoccResponseFields}
 import composer.Platforms.FrontBusBeatBytes
 import freechips.rocketchip.tile.RoCCResponse
 
@@ -13,7 +13,7 @@ class RoccToAXIL(implicit val p: Parameters) extends Module {
 
   val io = IO(new Bundle {
     val out = Decoupled(UInt(bus_bits.W))
-    val rocc = Flipped(Decoupled(new ComposerRoccResponse))
+    val rocc = Flipped(Decoupled(new AccelRoccResponse))
   })
 
   val nBeats = 3 // (io.rocc.bits.getWidth.toFloat / bus_bits).ceil.toInt
@@ -24,7 +24,7 @@ class RoccToAXIL(implicit val p: Parameters) extends Module {
     else Cat(0.U((l - a.getWidth).W), a)
   }
 
-  val buffer = Reg(new ComposerRoccResponse())
+  val buffer = Reg(new AccelRoccResponse())
 
   val rd = Reg(UInt(5.W))
   val wholePayload = padTo(buffer.packRocc(), bus_bits * nBeats)

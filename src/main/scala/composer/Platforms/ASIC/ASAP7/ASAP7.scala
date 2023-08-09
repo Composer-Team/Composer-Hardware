@@ -169,9 +169,9 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
     }
 
     // create macro arrays
-    val macroArrays = MemoryCompiler.registeredMemoryArrays.map { ar =>
-      s"create_macro_array -fill_pattern by_row -horizontal_channel_height 10 -vertical_channel_height 10 -num_rows ${ar.rows} -num_cols ${ar.cols} -create_group true -name_edit_group ${ar.name} ${ar. reduce (_ + " " + _)}"
-    }
+//    val macroArrays = MemoryCompiler.registeredMemoryArrays.map { ar =>
+//      s"create_macro_array -fill_pattern by_row -horizontal_channel_height 10 -vertical_channel_height 10 -num_rows ${ar.rows} -num_cols ${ar.cols} -create_group true -name_edit_group ${ar.name} ${ar.cells reduce (_ + " " + _)}"
+//    }
     os.write(synwd / "pnr.tcl",
       f"""set top_module ComposerTop
          |# set design_verilog "src/composer.v"
@@ -232,8 +232,6 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
          |set_app_options -name plan.macro.style -value freeform
          |set_app_options -name plan.macro.integrated -value true
          |set_host_options -max_cores 48 # change this to whatever
-         |
-         |${macroArrays mkString "\n"}
          |
          |# Place output pins
          |# set_app_options -name plan.pins.incremental -value false -block [current_block]

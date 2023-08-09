@@ -7,7 +7,7 @@ import chisel3.util._
 import composer.Generation.CppGeneration
 import composer.common._
 
-class ComposerCommandBundler[T1 <: ComposerCommand, T2 <: ComposerUserResponse](bundleIn: T1, bundleOut: T2, composerCoreWrapper: ComposerCoreWrapper, nSources: Int)(implicit p: Parameters) extends Module {
+class ComposerCommandBundler[T1 <: AccelCommand, T2 <: AccelResponse](bundleIn: T1, bundleOut: T2, composerCoreWrapper: AccelCoreWrapper, nSources: Int)(implicit p: Parameters) extends Module {
   if (composerCoreWrapper.composerSystemParams.canReceiveSoftwareCommands)
     CppGeneration.addUserCppFunctionDefinition(composerCoreWrapper.composerSystemParams.name, bundleIn, bundleOut)
 

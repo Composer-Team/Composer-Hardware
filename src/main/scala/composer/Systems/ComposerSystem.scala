@@ -13,16 +13,16 @@ import freechips.rocketchip.tilelink._
 
 
 
-class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int, val canBeIntaCoreCommandEndpoint: Boolean, val acc: ComposerAcc)(implicit p: Parameters) extends LazyModuleWithSLRs {
+class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: Int, val canBeIntaCoreCommandEndpoint: Boolean, val acc: ComposerAcc)(implicit p: Parameters) extends LazyModuleWithSLRs {
   val nCores = systemParams.nCores
   val coreParams = systemParams.coreParams
   val distributeCores = ConstraintGeneration.canDistributeOverSLRs()
   implicit val baseName = systemParams.name
   val cores = List.tabulate(nCores) { core_idx: Int =>
     p(PlatformTypeKey) match {
-      case PlatformType.ASIC => (core_idx, LazyModule(new ComposerCoreWrapper(systemParams, core_idx, system_id, this)))
+      case PlatformType.ASIC => (core_idx, LazyModule(new AccelCoreWrapper(systemParams, core_idx, system_id, this)))
       case PlatformType.FPGA =>
-        (core_idx % p(PlatformNumSLRs), LazyModuleWithSLR(new ComposerCoreWrapper(systemParams, core_idx, system_id, this), slr_id = core_idx % p(PlatformNumSLRs)))
+        (core_idx % p(PlatformNumSLRs), LazyModuleWithSLR(new AccelCoreWrapper(systemParams, core_idx, system_id, this), slr_id = core_idx % p(PlatformNumSLRs)))
       case _ => throw new Exception()
     }
   }
@@ -98,8 +98,8 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int,
       clients = Seq(TLMasterParameters.v1(
         name = s"InternalReponseNode_${systemParams.name}",
         sourceId = IdRange(0, 1),
-        supportsProbe = TransferSizes(1 << log2Up(ComposerRoccResponse.getWidthBytes)),
-        supportsPutFull = TransferSizes(1 << log2Up(ComposerRoccResponse.getWidthBytes))
+        supportsProbe = TransferSizes(1 << log2Up(AccelRoccResponse.getWidthBytes)),
+        supportsPutFull = TransferSizes(1 << log2Up(AccelRoccResponse.getWidthBytes))
       )))))
     val xbar = LazyModule(new TLXbar())
     xbar.node := client
@@ -130,8 +130,8 @@ class ComposerSystem(val systemParams: ComposerSystemParams, val system_id: Int,
       Seq(TLSlavePortParameters.v1(
         managers = Seq(TLSlaveParameters.v1(
           Seq(ComposerConsts.getInternalCmdRoutingAddressSet(system_id)),
-          supportsPutFull = TransferSizes(ComposerRoccResponse.getPow2Bytes)
-        )), beatBytes = ComposerRoccResponse.getPow2Bytes
+          supportsPutFull = TransferSizes(AccelRoccResponse.getPow2Bytes)
+        )), beatBytes = AccelRoccResponse.getPow2Bytes
       )))
     val xbar = LazyModule(new TLXbar())
     manager := xbar.node

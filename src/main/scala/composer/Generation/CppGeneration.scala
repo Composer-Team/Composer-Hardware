@@ -8,7 +8,7 @@ import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import composer.RoccHelpers.MCRFileMap
 import composer.Systems.{ComposerAcc, ComposerTop}
 import composer._
-import composer.common.{AbstractComposerCommand, ComposerUserResponse}
+import composer.common.{AbstractComposerCommand, AccelResponse}
 import composer.Platforms.{DefaultClockRateKey, FrontBusBaseAddress, FrontBusBeatBytes, HasDiscreteMemory, HasDMA}
 import freechips.rocketchip.subsystem.ExtMem
 import freechips.rocketchip.tile.XLen
@@ -23,7 +23,7 @@ object CppGeneration {
 
   private case class PreprocessorDefinition(ty: String, value: String)
 
-  private case class HookDef(sysName: String, cc: AbstractComposerCommand, resp: ComposerUserResponse) {
+  private case class HookDef(sysName: String, cc: AbstractComposerCommand, resp: AccelResponse) {
     cc.elements.foreach { p =>
       val data = p._2
       val paramName = p._1
@@ -47,7 +47,7 @@ object CppGeneration {
     if (existingDefs.isEmpty) user_defs = CppDefinition(ty_f, name_f, value.toString) :: user_defs
   }
 
-  private[composer] def addUserCppFunctionDefinition(systemName: String, cc: AbstractComposerCommand, resp: ComposerUserResponse): Unit = {
+  private[composer] def addUserCppFunctionDefinition(systemName: String, cc: AbstractComposerCommand, resp: AccelResponse): Unit = {
     val h = HookDef(systemName, cc, resp)
     if (!hook_defs.exists(_.sysName == systemName)) {
       hook_defs = h :: hook_defs
@@ -112,7 +112,7 @@ object CppGeneration {
 
   private[composer] def safe_join(s: Seq[String], sep: String = "\n"): String = if (s.isEmpty) "" else if (s.length == 1) s(0) else s.reduce(_ + sep + _)
 
-  def customCommandToCpp(sysName: String, cc: AbstractComposerCommand, resp: ComposerUserResponse)(implicit p: Parameters): (String, String) = {
+  def customCommandToCpp(sysName: String, cc: AbstractComposerCommand, resp: AccelResponse)(implicit p: Parameters): (String, String) = {
     val sub_signature = cc.realElements.sortBy(_._1).map { pa =>
       val isSigned = pa._2.isInstanceOf[SInt]
       getCType(pa._1, pa._2.getWidth, !isSigned) + " " + pa._1
@@ -176,7 +176,7 @@ object CppGeneration {
          |}
          |
          |$command_sig {
-         |  assert(core_id < ${p(ComposerSystemsKey).filter(_.name == sysName)(0).nCores});
+         |  assert(core_id < ${p(AcceleratorSystems).filter(_.name == sysName)(0).nCores});
          |  uint64_t payloads[${numCommands * 2}];
          |""".stripMargin + (if (assignments.length == 1) assignments(0) + "\n" else assignments.reduce(_ + "\n" + _)) +
         f"""

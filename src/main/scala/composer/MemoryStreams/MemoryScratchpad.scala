@@ -91,7 +91,7 @@ class MemoryScratchpad(csp: CScratchpadParams)(implicit p: Parameters) extends L
 class CScratchpadImp(csp: CScratchpadParams,
                      outer: MemoryScratchpad) extends LazyModuleImp(outer) {
   val nDatas = csp.nDatas.intValue()
-  val datasPerCacheLine = csp.features.datasPerCacheLine
+  val datasPerCacheLine = csp.features.nBanks
   val dataWidthBits = csp.dataWidthBits.intValue()
   val nPorts = csp.nPorts
   val latency = csp.latency.intValue()
@@ -183,7 +183,9 @@ class CScratchpadImp(csp: CScratchpadParams,
     }
 
     loader.io.cache_block_in.bits.len := maxTxLength.U
-    val reader = Module(new CReader(swWordSize * datasPerCacheLine / 8, 1, tlclient = outer.mem_master_node.get, debugName = Some(s"Scratchpad${csp.name}")))
+    val reader = Module(new CReader(swWordSize * datasPerCacheLine / 8, 1, tlclient = outer.mem_master_node.get, debugName = Some(s"Scratchpad${csp.name}"))(p.alterPartial {
+      case PrefetchSourceMultiplicity => 32
+    }))
     reader.tl_out <> outer.mem_master_node.get.out(0)._1
     val idxCounter = Reg(UInt(log2Up(realNRows).W))
     reader.io.req.valid := req.request.valid

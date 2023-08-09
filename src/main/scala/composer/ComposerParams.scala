@@ -3,7 +3,7 @@ package composer
 import chipsalliance.rocketchip.config._
 import composer.ComposerConstraintHint.ComposerConstraintHint
 import composer.MemoryStreams._
-import composer.Systems.{ComposerCore, ComposerCoreWrapper}
+import composer.Systems.{AcceleratorCore, AccelCoreWrapper}
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
@@ -12,7 +12,7 @@ import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
 
 // Composer-system parameters
-case object ComposerSystemsKey extends Field[List[ComposerSystemParams]]
+case object AcceleratorSystems extends Field[List[AcceleratorSystemConfig]]
 case object SystemName2IdMapKey extends Field[Map[String, Int]]
 case object DRAMBankBytes extends Field[Int]
 case object ComposerQuiet extends Field[Boolean]
@@ -36,22 +36,21 @@ case class ComposerCoreParams(
     system_id: Int = 0 // for internal use
 )
 
-case class ComposerConstructor(
+case class CoreConstructor(
     composerCoreParams: ComposerCoreParams,
-    composerCoreWrapper: ComposerCoreWrapper
+    composerCoreWrapper: AccelCoreWrapper
 )
 
-case class ComposerSystemParams(
-    nCores: Int,
-    name: String,
-    buildCore: (ComposerConstructor, Parameters) => ComposerCore,
-    /** In elements, per write channel, scaled by the number of bytes
+case class AcceleratorSystemConfig(
+                                    nCores: Int,
+                                    name: String,
+                                    buildCore: (CoreConstructor, Parameters) => AcceleratorCore,
+                                    /** In elements, per write channel, scaled by the number of bytes
       */
-    coreParams: ComposerCoreParams = ComposerCoreParams(),
-    channelQueueDepth: Int = 32,
-    canReceiveSoftwareCommands: Boolean = true,
-    canIssueCoreCommandsTo: Seq[String] = Seq.empty,
-    canSendDataTo: Seq[String] = Seq.empty
+                                    coreParams: ComposerCoreParams = ComposerCoreParams(),
+                                    canReceiveSoftwareCommands: Boolean = true,
+                                    canIssueCoreCommandsTo: Seq[String] = Seq.empty,
+                                    canSendDataTo: Seq[String] = Seq.empty
 )
 
 object ComposerConstraintHint extends Enumeration {
@@ -67,11 +66,11 @@ class WithComposer(
     useConfigAsOutputName: Boolean = false
 ) extends Config((site, _, _) => {
       case ComposerQuiet            => quiet
-      case ComposerSystemsKey       => Seq()
+      case AcceleratorSystems       => Seq()
       case TLInterconnectWidthBytes => 16
       case PgLevels             => 5
       case XLen                 => 64 // Applies to all cores
-      case PrefetchSourceMultiplicity => 16
+      case PrefetchSourceMultiplicity => 32
       case CmdRespBusWidthBytes => 4
       case UseConfigAsOutputNameKey => useConfigAsOutputName
       case MaxHartIdBits => 1

@@ -49,7 +49,7 @@ class WithSAED(corner: ProcessCorner = ProcessCorner.Typical,
       f"SRAM${nPorts}RW${nRows}x$nColumns"
     }
   }
-  case PostProcessorMacro => () => {
+  case PostProcessorMacro => (_: Parameters) => {
     val cwd = os.Path(ComposerBuild.composerGenDir)
     val timestamp = LocalDateTime.now()
     val synwd = cwd / ("asic_build_" + DateTimeFormatter.ofPattern("yy-MM-dd_HHMMSS").format(timestamp))

@@ -74,7 +74,7 @@ trait CChannelParams {
  * @param nChannels number of memory access channels of this type
  * @param maxInFlightTxs maximum number of AXI/TileLink memory transactions can be inflight per reader module at once
  */
-case class CReadChannelParams(name: String, nChannels: Int, maxInFlightTxs: Int = 2) extends CChannelParams {
+case class CReadChannelParams(name: String, nChannels: Int = 1, maxInFlightTxs: Int = 2) extends CChannelParams {
   require(maxInFlightTxs > 1, s"Max In Flight Transactions must be greater than 1. Got: $maxInFlightTxs")
 }
 
@@ -106,7 +106,7 @@ case class CScratchpadFeatures(readOnly: Boolean = false,
                                supportWriteback: Boolean = false,
                                supportMemRequest: Boolean = true,
                                specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked,
-                               datasPerCacheLine: Int = 1)
+                               nBanks: Int = 1)
 
 case class CScratchpadParams(name: String,
                              dataWidthBits: Number,

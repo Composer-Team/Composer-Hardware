@@ -74,14 +74,14 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   var gl_incrementer = 0
   val resp = {
     @tailrec
-    def collapseResp(degree: Int, to_size: Int, resps: Seq[DecoupledIO[ComposerRoccResponse]], slr_id: Int): Seq[DecoupledIO[ComposerRoccResponse]] = {
+    def collapseResp(degree: Int, to_size: Int, resps: Seq[DecoupledIO[AccelRoccResponse]], slr_id: Int): Seq[DecoupledIO[AccelRoccResponse]] = {
       if (resps.length <= to_size) {
         resps
       } else {
         val subgroups = resps.grouped(degree).toSeq
         val subGroupsArb = subgroups map { sg =>
-          val respArb = ModuleWithSLR(new RRArbiter(new ComposerRoccResponse(), sg.length), slr_id, requestedName = Some(f"respArb_${outer.system_id}_${slr_id}_${gl_incrementer}"))
-          val respQ = Module(new Queue(new ComposerRoccResponse(), entries = 2))
+          val respArb = ModuleWithSLR(new RRArbiter(new AccelRoccResponse(), sg.length), slr_id, requestedName = Some(f"respArb_${outer.system_id}_${slr_id}_${gl_incrementer}"))
+          val respQ = Module(new Queue(new AccelRoccResponse(), entries = 2))
           gl_incrementer = gl_incrementer + 1
           sg.zipWithIndex.foreach { case (core_resp, idx) =>
             respArb.io.in(idx) <> core_resp
@@ -100,7 +100,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
         when(c.io_declaration.req.fire) {
           lastRecievedRd := c.io_declaration.req.bits.inst.rd
         }
-        val resp_queue = ModuleWithSLR(new Queue[ComposerRoccResponse](new ComposerRoccResponse(), entries = 2), SLRHelper.getFrontBusSLR)
+        val resp_queue = ModuleWithSLR(new Queue[AccelRoccResponse](new AccelRoccResponse(), entries = 2), SLRHelper.getFrontBusSLR)
         resp_queue.io.enq.bits.system_id := outer.system_id.U
         resp_queue.io.enq.bits.core_id := c.composerConstructor.composerCoreWrapper.core_id.U
         resp_queue.io.enq.bits.rd := lastRecievedRd
@@ -114,7 +114,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
       val respsCollapsed = coreGroups.map { case (slr_id, core_list) =>
         (slr_id, collapseResp(SLRHelper.SLRRespRoutingFanout, SLRHelper.RespEndpointsPerSLR, core_list.map(_._2).map { c =>
           c.module.io_declaration.resp.map { ioresp =>
-            val composerRespWire = Wire(new ComposerRoccResponse())
+            val composerRespWire = Wire(new AccelRoccResponse())
             composerRespWire.getDataField := ioresp.getDataField
             composerRespWire.rd := ioresp.rd
             composerRespWire.system_id := outer.system_id.U
@@ -129,7 +129,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
           topLevelResp(0)
         case Some(path) =>
           collapseResp(SLRHelper.SLRRespRoutingFanout, 1,
-            path.foldRight(Seq[DecoupledIO[ComposerRoccResponse]]()) { case (slr_idx, acc) =>
+            path.foldRight(Seq[DecoupledIO[AccelRoccResponse]]()) { case (slr_idx, acc) =>
               println(s"Collapsing to $slr_idx")
             collapseResp(SLRHelper.SLRRespRoutingFanout, SLRHelper.RespEndpointsPerSLR,
               acc ++ respsCollapsed(slr_idx),
@@ -161,7 +161,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
       // arbiter is consuming input and we are expecting response, so mark as cmd destination
     }
 
-    val wire = Wire(new ComposerRoccResponse())
+    val wire = Wire(new AccelRoccResponse())
     wire.getDataField := respQ.bits.getDataField
     //    wire.rd := respQ.bits.rd
     wire.system_id := internalReturnDestinations(respQ.bits.core_id).sys
@@ -224,7 +224,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     val (mBundle, mEdge) = managerNode.in(0)
     val responseManager = Module(new TLManagerModule(mBundle, mEdge))
     responseManager.tl <> managerNode.in(0)._1
-    val response = hasRoccResponseFields[ComposerRoccResponse](new ComposerRoccResponse, responseManager.io.bits)
+    val response = hasRoccResponseFields[AccelRoccResponse](new AccelRoccResponse, responseManager.io.bits)
 
     cores.zipWithIndex.foreach { case (core, core_idx) =>
       core.composer_response_ios_(target).valid := responseManager.io.valid && response.core_id === core_idx.U

@@ -35,7 +35,7 @@ trait hasRDField {
   val rd: UInt
 }
 
-class ComposerUserResponse(implicit p: Parameters) extends Bundle with hasAccessibleUserSubRegions with hasDataField with hasRDField {
+class AccelResponse(implicit p: Parameters) extends Bundle with hasAccessibleUserSubRegions with hasDataField with hasRDField {
   override def sortedElements: Seq[(String, Data)] = elements.toSeq.sortBy(_._1)
   override val reservedNames: Seq[String] = Seq("rd")
   val rd = UInt(5.W)
@@ -63,20 +63,20 @@ trait hasRoccResponseFields extends hasAccessibleUserSubRegions with hasDataFiel
   }
 }
 
-class ComposerRoccUserResponse(implicit p: Parameters) extends ComposerUserResponse {
+class AccelRoccUserResponse(implicit p: Parameters) extends AccelResponse {
   override val reservedNames: Seq[String] = Seq("rd")
   val data = UInt(p(XLen).W)
 
   override def getDataField: UInt = data
 }
 
-class ComposerRoccResponse(implicit p: Parameters) extends ComposerRoccUserResponse with hasRoccResponseFields {
+class AccelRoccResponse(implicit p: Parameters) extends AccelRoccUserResponse with hasRoccResponseFields {
   override val reservedNames: Seq[String] = Seq("system_id", "core_id", "rd")
   val system_id = UInt(SystemIDLengthKey.W)
   val core_id = UInt(CoreIDLengthKey.W)
 }
 
-object ComposerRoccResponse {
+object AccelRoccResponse {
   def getWidthBits(implicit p: Parameters): Int = p(XLen) + 32
   def getWidthBytes(implicit p: Parameters): Int = getWidthBits / 8
   def getPow2Bytes(implicit p: Parameters): Int = 1 << log2Up(getWidthBytes)

@@ -40,7 +40,7 @@ sealed abstract class AbstractComposerCommand(implicit p: Parameters) extends Bu
   }
 }
 
-class ComposerCommand(implicit p: Parameters) extends AbstractComposerCommand {
+class AccelCommand(implicit p: Parameters) extends AbstractComposerCommand {
   override val reservedNames = Seq("__core_id", "__system_id")
   private[composer] val __core_id = UInt(CoreIDLengthKey.W)
   private[composer] val __system_id = UInt(SystemIDLengthKey.W)
@@ -58,8 +58,8 @@ class ComposerCommand(implicit p: Parameters) extends AbstractComposerCommand {
   }
 }
 
-object ComposerCommand {
-  def apply[T <: ComposerCommand](in: UInt, gen: T): T = {
+object AccelCommand {
+  def apply[T <: AccelCommand](in: UInt, gen: T): T = {
     val wire = Wire(gen)
     val fsrs = gen.fieldSubranges
     fsrs.foreach{fsr =>

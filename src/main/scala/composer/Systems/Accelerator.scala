@@ -14,7 +14,7 @@ import freechips.rocketchip.tilelink._
 import scala.language.postfixOps
 
 class ComposerAcc(implicit p: Parameters) extends LazyModule {
-  val configs = p(ComposerSystemsKey)
+  val configs = p(AcceleratorSystems)
   val name2Id = scala.collection.immutable.Map.from(configs.zipWithIndex.map(a => (a._1.name, a._2)))
   val requireInternalCmdRouting = configs.map(_.canIssueCoreCommandsTo).foldLeft(false)(_ || _.nonEmpty)
 
@@ -76,7 +76,7 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
 class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
     val cmd = Flipped(Decoupled(new RoCCCommand))
-    val resp = Decoupled(new ComposerRoccResponse)
+    val resp = Decoupled(new AccelRoccResponse)
   })
 
   val cmd = Queue(io.cmd)
@@ -131,7 +131,7 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
     io.resp.valid := false.B
     io.resp.bits := DontCare
   } else {
-    val respArbiter = Module(new RRArbiter[ComposerRoccResponse](new ComposerRoccResponse, systemSoftwareResps.size))
+    val respArbiter = Module(new RRArbiter[AccelRoccResponse](new AccelRoccResponse, systemSoftwareResps.size))
     respArbiter.io.in.zip(systemSoftwareResps).foreach { case (arbio, sysio) =>
       // these commands are being routed back to the sw so they need to be full Rocc
       arbio <> sysio
@@ -178,7 +178,7 @@ class ComposerAccSystemModule(outer: ComposerAccSystem)(implicit p: Parameters) 
   //noinspection ScalaUnusedSymbol
   val io = IO(new Bundle {
     val cmd = Flipped(Decoupled(new RoCCCommand()))
-    val resp = Decoupled(new ComposerRoccResponse())
+    val resp = Decoupled(new AccelRoccResponse())
   })
 
   outer.acc.module.io.cmd <> io.cmd
