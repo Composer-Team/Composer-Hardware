@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3.experimental.BaseModule
 import composer.MemoryStreams.{HasMemoryInterface, SD}
 import composer._
+import composer.Generation.ComposerBuild
 import composer.MemoryStreams.RAM.RegMem
 import composer.Platforms.ASIC._
 import composer.Platforms._

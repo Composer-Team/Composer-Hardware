@@ -18,7 +18,6 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
   val name2Id = scala.collection.immutable.Map.from(configs.zipWithIndex.map(a => (a._1.name, a._2)))
   val requireInternalCmdRouting = configs.map(_.canIssueCoreCommandsTo).foldLeft(false)(_ || _.nonEmpty)
 
-
   val system_tups = name2Id.keys.map { name =>
     val id = name2Id(name)
     val config = configs(id)

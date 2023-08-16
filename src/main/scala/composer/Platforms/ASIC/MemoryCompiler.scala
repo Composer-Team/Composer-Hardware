@@ -87,7 +87,7 @@ private class C_ASIC_MemoryCascade(rows: Int,
   val totalAddr = log2Up(rows) + cascadeBits
   val io = IO(new CMemoryIOBundle(0, 0, nPorts, totalAddr, dataBits) with withMemoryIOForwarding)
   withClockAndReset(io.clock.asClock, false.B.asAsyncReset) {
-    val mem = Module(p(ASICMemoryCompilerKey).generateMemoryFactory(nPorts, rows, dataBits)(p)())
+    val mem = p(ASICMemoryCompilerKey).generateMemoryFactory(nPorts, rows, dataBits)(p)()
     mem.clocks.foreach(_ := io.clock)
     (0 until nPorts) foreach { port_idx =>
       val cascade_select = if (cascadeBits == 0) true.B else idx.U === io.addr(port_idx).head(cascadeBits)

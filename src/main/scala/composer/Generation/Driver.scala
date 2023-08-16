@@ -1,23 +1,22 @@
-package composer
+package composer.Generation
 
 import chipsalliance.rocketchip.config._
 import chisel3.stage._
-import composer.ComposerBuild._
-import composer.Generation.{ConstraintGeneration, ExportCSymbolPhase}
-import composer.Platforms.PostProcessorMacro
+import composer.Generation
+import composer.Generation.ComposerBuild._
+import composer.Platforms.{BuildModeKey, PostProcessorMacro}
 import firrtl._
-import firrtl.options.PhaseManager.PhaseDependency
 import firrtl.options._
+import firrtl.options.PhaseManager.PhaseDependency
 import firrtl.stage.FirrtlCli
 import freechips.rocketchip.stage._
-
-import scala.util.matching.Regex
-import java.nio.file
 import os._
 
-import java.io.FileWriter
+import java.nio.file
+import java.time.LocalDateTime
 import java.util.regex._
 import scala.collection.SeqMap
+import scala.util.matching.Regex
 
 class ComposerChipStage extends Stage with Phase {
   override val shell = new Shell("composer-compile")
@@ -26,13 +25,13 @@ class ComposerChipStage extends Stage with Phase {
     with FirrtlCli
   val targets: Seq[PhaseDependency] = Seq(
     Dependency[freechips.rocketchip.stage.phases.Checks],
-    Dependency[freechips.rocketchip.stage.phases.TransformAnnotations],
-    Dependency[freechips.rocketchip.stage.phases.PreElaboration],
+    Dependency[composer.Generation.Stage.TransformAnnotations],
+    Dependency[composer.Generation.Stage.PreElaborationPass],
     Dependency[chisel3.stage.phases.Checks],
     Dependency[chisel3.stage.phases.MaybeAspectPhase],
     Dependency[chisel3.stage.phases.Emitter],
     Dependency[chisel3.stage.phases.Convert],
-    Dependency[ExportCSymbolPhase],
+    Dependency[composer.Generation.Stage.ExportCSymbolPhase],
     Dependency[firrtl.stage.phases.Compiler]
   )
 
@@ -96,24 +95,35 @@ object BuildArgs {
   private[composer] var args: Map[String, Int] = Map.empty
 }
 
-class ComposerBuild(config: Config) {
+abstract class BuildMode
+object BuildMode {
+  case object Synthesis extends BuildMode
 
+  case object Simulation extends BuildMode
+
+  case class Tuning(hwBuildDir: String,
+                    execCMAKEDir: String,
+                    execName: String,
+                    cmakeOpts: Seq[String] = Seq()) extends BuildMode
+
+}
+
+class ComposerBuild(config: Config, buildMode: BuildMode = BuildMode.Synthesis) {
   final def main(args: Array[String]): Unit = {
-    println("ARGS: ")
-    args.foreach(println(_))
-    println("END ARGS")
     BuildArgs.args = Map.from(
       args.filter(str => str.length >= 2 && str.substring(0, 2) == "-D").map {
         opt =>
           val pr = opt.substring(2).split("=")
+          println(pr(0) + " " + pr(1))
           (pr(0), pr(1).toInt)
       }
     )
-    val gsrc_dir = Path(ComposerBuild.composerGenDir)
+    val gsrc_dir = if (args.filter(_.length > 9).exists(_.substring(0, 9) == "--target=")){
+      val pth = args.filter(a => a.length > 9 && a.substring(0, 9) == "--target=")(0).substring(9)
+      Path(pth)
+    } else Path(ComposerBuild.composerGenDir)
     os.makeDir.all(gsrc_dir)
-    val full_name = config.getClass.getCanonicalName
-    val short_name = full_name.split('.').last
-    println("Elaborating config: " + short_name)
+    val short_name = LocalDateTime.now()
     val outputFile = gsrc_dir / s"$short_name.v"
     val targetDir = gsrc_dir / "composer.fir"
     new ComposerChipStage().transform(
@@ -123,28 +133,15 @@ class ComposerBuild(config: Config) {
           new TopModuleAnnotation(
             Class.forName("composer.Systems.ComposerTop")
           ),
-          new ConfigsAnnotation(Seq(full_name)),
+          Generation.Stage.ConfigsAnnotation(new Config(config.alterPartial {
+            case BuildModeKey => buildMode
+          })),
           new OutputAnnotationFileAnnotation(outputFile.toString()),
           CustomDefaultMemoryEmission(MemoryNoInit),
           CustomDefaultRegisterEmission(useInitAsPreset = false, disableRandomization = true)
         )
       )
     )
-
-    def appendSrcsTo(dir: Path, appendFile: Path): Unit = {
-      if (os.exists(dir)) {
-        os.walk(dir)
-          .filter { a =>
-            val fname = a.toString
-            val fend = fname.split('.').last
-            fend == "v"
-          }
-          .foreach { path =>
-            os.write.append(appendFile, os.read(path))
-          }
-      }
-    }
-
     sourceList.distinct foreach { src =>
       if (file.Files.isRegularFile(java.nio.file.Paths.get(src.toString()))) {
         os.write.append(targetDir / "ComposerTop.v", os.read(src))
@@ -165,12 +162,24 @@ class ComposerBuild(config: Config) {
       System.err.println("Done adding keep_hierarchy to SLR mappings.")
     }
 
-
     os.move(targetDir / "ComposerTop.v", outputFile, replaceExisting = true)
+    os.remove.all(targetDir)
     os.remove(gsrc_dir / "composer.v", checkExists = false)
     os.symlink(gsrc_dir / "composer.v", outputFile)
-
-
     config(PostProcessorMacro)(config) // do post-processing per backend
+    buildMode match {
+      case bm: BuildMode.Tuning if !args.contains("--notune") =>
+        val opts = if (bm.cmakeOpts.length == 1) bm.cmakeOpts(0) else {
+          bm.cmakeOpts.reduce(_ + "." + _)
+        }
+        os.proc(Seq("python3",
+          System.getenv("COMPOSER_ROOT") + "/Composer-Hardware/scripts/tune.py",
+          this.getClass.getCanonicalName,
+          bm.hwBuildDir,
+          bm.execCMAKEDir + "." + bm.execName + "." + opts)).call(
+          stdout=os.Inherit
+        )
+      case _ =>
+    }
   }
 }

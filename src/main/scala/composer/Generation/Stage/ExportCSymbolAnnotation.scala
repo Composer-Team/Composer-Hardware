@@ -1,5 +1,6 @@
-package composer.Generation
+package composer.Generation.Stage
 
+import composer.Generation.Tune.DesignObjective
 import firrtl.annotations.{ReferenceTarget, SingleTargetAnnotation}
 
 

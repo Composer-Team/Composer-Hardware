@@ -19,7 +19,7 @@ object CMemory {
       nReadWritePorts: Int,
       debugName: Option[String] = None
   )(implicit p: Parameters, valName: ValName): CMemoryIOBundle = {
-    println(s"Creating CMemory with $nReadPorts read ports, $nWritePorts write ports, $nReadWritePorts read/write ports: $debugName, $valName")
+//    println(s"Creating CMemory with $nReadPorts read ports, $nWritePorts write ports, $nReadWritePorts read/write ports: $debugName, $valName")
     val mostPortsSupported = p(PlatformTypeKey) match {
       case PlatformType.FPGA => 2
       case PlatformType.ASIC => p(ASICMemoryCompilerKey).mems.keys.max
@@ -39,7 +39,7 @@ object CMemory {
     } else if (nPorts > mostPortsSupported) {
       // duplicate the memory
       val nDuplicates = ((nPorts - 1).toFloat / (mostPortsSupported - 1)).ceil.toInt
-      println("Duplicate memory " + nDuplicates + " times for " + nPorts + " ports")
+//      println("Duplicate memory " + nDuplicates + " times for " + nPorts + " ports")
       val mems = Seq.tabulate(nDuplicates) { i =>
         CMemory(
           latency,

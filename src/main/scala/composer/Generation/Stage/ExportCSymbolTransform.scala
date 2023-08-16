@@ -1,6 +1,6 @@
-package composer.Generation
+package composer.Generation.Stage
 
-import composer.ComposerBuild
+import composer.Generation.ComposerBuild
 import firrtl._
 import firrtl.ir.DefInstance
 import os._

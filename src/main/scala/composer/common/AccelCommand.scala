@@ -94,7 +94,6 @@ class ComposerRoccCommand(implicit p: Parameters) extends AbstractComposerComman
 
 
   def pack(bufferToPow2: Boolean = true, withRoutingPayload: Option[UInt] = None): UInt = {
-    println(fieldSubranges)
     val s = Cat(inst.rd, inst.core_id, inst.xd, inst.xs1, inst.xs2, inst.opcode, inst.system_id, inst.funct,
       payload1, payload2)
     if (bufferToPow2) {

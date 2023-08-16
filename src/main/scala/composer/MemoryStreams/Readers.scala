@@ -6,14 +6,18 @@ import chisel3.util._
 import composer.PrefetchSourceMultiplicity
 import composer.Systems.DataChannelIO
 import composer.common.{CLog2Up, ShiftReg}
-import composer.MemoryStreams.RAM.SyncReadMemMem
-import composer.Platforms.{PlatformType, PlatformTypeKey}
-import freechips.rocketchip.diplomacy.ValName
+import composer.Generation.{BuildMode}
+import composer.Generation.Tune._
+import composer.Platforms.{ASICMemoryCompilerKey, BuildModeKey, PlatformType, PlatformTypeKey}
 import freechips.rocketchip.tilelink._
 
 class ReadChannelIO(dataBytes: Int, vlen: Int)(implicit p: Parameters) extends Bundle {
   val req = Flipped(Decoupled(new ChannelTransactionBundle))
   val channel = new DataChannelIO(dataBytes, vlen)
+}
+
+object CReader {
+  private var has_warned_dp: Boolean = false
 }
 
 class CReader(dataBytes: Int,
@@ -89,43 +93,65 @@ class CReader(dataBytes: Int,
 
   val prefetch_blatency = p(PlatformTypeKey) match {
     case PlatformType.FPGA => 3
-    case PlatformType.ASIC => (prefetchRows.toFloat / 256).ceil.toInt
+    case PlatformType.ASIC => (prefetchRows.toFloat / 256).ceil.toInt + 1
   }
-  val prefetch_buffers_mod = Module(new SyncReadMemMem(0, 0, 2, prefetchRows, storedDataWidth, prefetch_blatency))
-  val prefetch_buffers = prefetch_buffers_mod.mio
 
-  prefetch_buffers.clock := clock.asBool
-  prefetch_buffers.addr(0) := prefetch_readIdx
-  prefetch_buffers.data_in(0) := DontCare
-  prefetch_buffers.write_enable(0) := false.B
-  prefetch_buffers.read_enable(0) := true.B
-  prefetch_buffers.chip_select(0) := false.B
+  val hasDualPortMemory = p(PlatformTypeKey) match {
+    case PlatformType.FPGA => true
+    case PlatformType.ASIC => p(ASICMemoryCompilerKey).mems.exists(_._1 == 2)
+  }
 
-  prefetch_buffers.chip_select(1) := false.B
-  prefetch_buffers.read_enable(1) := false.B
-  prefetch_buffers.write_enable(1) := true.B
-  prefetch_buffers.data_in(1) := DontCare
-  prefetch_buffers.addr(1) := DontCare
-
+  if (!hasDualPortMemory && !CReader.has_warned_dp) {
+    CReader.has_warned_dp = true
+    System.err.println("Warning: CReader is using a single port memory. This may cause performance degradation.")
+  }
   val prefetch_buffers_valid = Reg(Vec(prefetchRows, Bool()))
+  println("prefetch rows; " + prefetchRows)
+  val sourceToIdx = Reg(Vec(nSources, UInt(log2Up(prefetchRows).W)))
+  val beatsRemaining = Reg(Vec(nSources, UInt(log2Up(largeTxNBeats).W)))
 
   when(reset.asBool) {
     prefetch_buffers_valid.foreach(_ := false.B)
   }
+  val prefetch_buffers = CMemory(prefetch_blatency, storedDataWidth, prefetchRows, 0, 0, if (hasDualPortMemory) 2 else 1)
 
-  dontTouch(tl_out.d.bits.data)
-  tl_out.d.ready := atLeastOneSourceActive
+  val (write_ready, read_ready, write_port_idx) = if (hasDualPortMemory) {
+    prefetch_buffers.clock := clock.asBool
+    prefetch_buffers.addr(0) := prefetch_readIdx
+    prefetch_buffers.data_in(0) := DontCare
+    prefetch_buffers.write_enable(0) := false.B
+    prefetch_buffers.read_enable(0) := true.B
+    prefetch_buffers.chip_select(0) := false.B
 
-  val sourceToIdx = Reg(Vec(nSources, UInt(log2Up(prefetchRows).W)))
-  val beatsRemaining = Reg(Vec(nSources, UInt(log2Up(largeTxNBeats).W)))
-  val slots_per_alloc =  if (beatBytes >= maxBytes) {
+    prefetch_buffers.chip_select(1) := false.B
+    prefetch_buffers.read_enable(1) := false.B
+    prefetch_buffers.write_enable(1) := true.B
+    prefetch_buffers.data_in(1) := DontCare
+    prefetch_buffers.addr(1) := DontCare
+    (true.B, true.B, 1)
+  } else {
+    prefetch_buffers.clock := clock.asBool
+    val fillLevel = Reg(UInt(log2Up(prefetchRows).W))
+    when (tl_out.d.fire) {
+      fillLevel := fillLevel + 1.U
+    }
+    prefetch_buffers.addr(0) := prefetch_readIdx
+    prefetch_buffers.data_in(0) := DontCare
+    prefetch_buffers.write_enable(0) := false.B
+    prefetch_buffers.read_enable(0) := true.B
+    prefetch_buffers.chip_select(0) := false.B
+    (true.B, !tl_out.d.valid, 0)
+  }
+
+  tl_out.d.ready := atLeastOneSourceActive && write_ready
+  val slots_per_alloc = if (beatBytes >= maxBytes) {
     when(tl_out.d.fire) {
       val dSource = tl_out.d.bits.source
       val prefetchIdx = sourceToIdx(dSource)
 
-      prefetch_buffers.data_in(1) := tl_out.d.bits.data
-      prefetch_buffers.addr(1) := prefetchIdx
-      prefetch_buffers.chip_select(1) := true.B
+      prefetch_buffers.data_in(write_port_idx) := tl_out.d.bits.data
+      prefetch_buffers.addr(write_port_idx) := prefetchIdx
+      prefetch_buffers.chip_select(write_port_idx) := true.B
 
       sourceToIdx(dSource) := sourceToIdx(dSource) + 1.U
       prefetch_buffers_valid(prefetchIdx) := true.B
@@ -150,7 +176,7 @@ class CReader(dataBytes: Int,
       val whole_buff = beatBufferPerSource(src)
       whole_buff(perSourceBeatProgress(src)) := tl_out.d.bits.data
       beatsRemaining(src) := beatsRemaining(src) - 1.U
-      when (beatsRemaining(src) === 0.U) {
+      when(beatsRemaining(src) === 0.U) {
         sourceIdleBits(src) := true.B
       }
 
@@ -161,9 +187,9 @@ class CReader(dataBytes: Int,
         prefetch_buffers_valid(sourceToIdx(src)) := true.B
         sourceToIdx(src) := sourceToIdx(src) + 1.U
 
-        prefetch_buffers.addr(1) := sourceToIdx(src)
-        prefetch_buffers.data_in(1) := Cat(tl_out.d.bits.data, Cat(beatBufferPerSource(src).reverse))
-        prefetch_buffers.chip_select(1) := true.B
+        prefetch_buffers.addr(write_port_idx) := sourceToIdx(src)
+        prefetch_buffers.data_in(write_port_idx) := Cat(tl_out.d.bits.data, Cat(beatBufferPerSource(src).reverse))
+        prefetch_buffers.chip_select(write_port_idx) := true.B
 
       }
     }
@@ -202,10 +228,10 @@ class CReader(dataBytes: Int,
         }
       }.otherwise {
         val haveRoomToAlloc = Wire(Bool())
+        val dist2Roof = (prefetchRows - 1).U - prefetch_writeIdx
         if (hasOneSource) {
           haveRoomToAlloc := prefetch_readIdx === prefetch_writeIdx
         } else {
-          val dist2Roof = (prefetchRows - 1).U - prefetch_writeIdx
           when(dist2Roof < slots_per_alloc.U) {
             haveRoomToAlloc := prefetch_readIdx > (slots_per_alloc.U - dist2Roof) && (prefetch_readIdx < prefetch_writeIdx)
           }.otherwise {
@@ -221,7 +247,7 @@ class CReader(dataBytes: Int,
         when(tl_reg.io.enq.fire) {
           addr := addr + largestRead.U
           len := len - largestRead.U
-          prefetch_writeIdx := prefetch_writeIdx + slots_per_alloc.U
+          prefetch_writeIdx := Mux(prefetch_writeIdx === (prefetchRows - slots_per_alloc).U, 0.U, prefetch_writeIdx + slots_per_alloc.U)
           beatsRemaining(chosenSource) := (largeTxNBeats - 1).U
         }
       }
@@ -258,15 +284,17 @@ class CReader(dataBytes: Int,
   })
 
 
-  val read_enable_pipeline = ShiftReg(prefetch_buffers.chip_select(0), prefetch_blatency)
+  val read_enable_pipeline = ShiftReg(prefetch_buffers.chip_select(0) && read_ready, prefetch_blatency)
   val reads_in_flight = RegInit(0.U(3.W))
   val queue_occupancy = RegInit(0.U(log2Up(channel_buffer_depth + 1).W))
 
-  dontTouch(prefetch_readIdx)
-  when(prefetch_buffers_valid(prefetch_readIdx) && reads_in_flight + queue_occupancy < channel_buffer_depth.U) {
+  when(prefetch_buffers_valid(prefetch_readIdx) && reads_in_flight + queue_occupancy < channel_buffer_depth.U && read_ready) {
     prefetch_buffers.chip_select(0) := true.B
     prefetch_buffers_valid(prefetch_readIdx) := false.B
     prefetch_readIdx := prefetch_readIdx + 1.U
+    when (prefetch_readIdx === (prefetchRows - 1).U) {
+      prefetch_readIdx := 0.U
+    }
   }
 
   // maintain reads in flight
@@ -295,4 +323,16 @@ class CReader(dataBytes: Int,
     }
   }
   io.req.ready := !(state =/= s_idle || reads_in_flight > 0.U || (prefetch_readIdx =/= prefetch_writeIdx) || queue_occupancy =/= 0.U)
+
+  if (p(BuildModeKey).isInstanceOf[BuildMode.Tuning]) {
+    val tx_cycles = PerfCounter(Reg(UInt(64.W)), designObjective = new MinimizeObjective)
+    val tx_counter = Reg(UInt(64.W))
+    tx_counter := tx_counter + 1.U
+    when (io.req.fire) {
+      tx_counter := 0.U
+    }
+    when (io.req.ready && !RegNext(io.req.ready)) {
+      tx_cycles := tx_counter
+    }
+  }
 }

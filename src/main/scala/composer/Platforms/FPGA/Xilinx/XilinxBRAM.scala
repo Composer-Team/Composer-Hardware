@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util.log2Up
 import composer._
+import composer.Generation.ComposerBuild
 import composer.MemoryStreams.HasMemoryInterface
 import composer.Platforms.{PlatformNBRAM, PlatformNURAM}
 
@@ -151,7 +152,7 @@ private[composer] class XilinxBRAMTDP(latency: Int,
   )
   private val addrWidth = log2Up(nRows)
 
-  val dname_prefix = s"CMemoryL${latency}DW${dataWidth}R$nRows"
+  val dname_prefix = s"CMemoryTDPL${latency}DW${dataWidth}R$nRows"
   val (memoryAnnotations, dname_suffix) = {
     if (
       p(ConstraintHintsKey).contains(ComposerConstraintHint.MemoryConstrained)
@@ -282,7 +283,7 @@ private[composer] class XilinxBRAMSDP(latency: Int,
   )
   private val addrWidth = log2Up(nRows)
 
-  val dname_prefix = s"CMemoryL${latency}DW${dataWidth}R$nRows"
+  val dname_prefix = s"CMemorySDPL${latency}DW${dataWidth}R$nRows"
   val (memoryAnnotations, dname_suffix) = {
     if (
       p(ConstraintHintsKey).contains(ComposerConstraintHint.MemoryConstrained)

@@ -1,11 +1,10 @@
 package composer.Platforms
 
 import chipsalliance.rocketchip.config._
-import composer.{ComposerBuild, CoreCommandLatency, CXbarMaxDegree, PlatformPhysicalMemoryBytes}
+import composer.Generation.{BuildMode, ComposerBuild}
 import composer.Platforms.ASIC.MemoryCompiler
 import composer.Platforms.FrontBusProtocol.FrontBusProtocol
 import composer.Platforms.PlatformType.PlatformType
-import freechips.rocketchip.subsystem._
 
 object PlatformType extends Enumeration {
   val FPGA, ASIC = Value
@@ -54,6 +53,8 @@ case object IsAWS extends Field[Boolean]
 case object PostProcessorMacro extends Field[Config => Unit]
 
 case object ASICMemoryCompilerKey extends Field[MemoryCompiler]
+
+case object BuildModeKey extends Field[BuildMode]
 
 
 

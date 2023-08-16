@@ -3,14 +3,14 @@ package composer.Platforms.ASAP7
 import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3._
 import chisel3.experimental.BaseModule
+import composer.Generation._
 import composer.MemoryStreams.{HasMemoryInterface, SD}
-import composer.Platforms.ASIC._
-import composer._
 import composer.MemoryStreams.RAM.RegMem
+import composer.Platforms.{ASICMemoryCompilerKey, BuildModeKey, PostProcessorMacro}
+import composer.Platforms.ASIC._
 import composer.Platforms.ASIC.ASAP7.ASAP7_SP_SRAM
 import composer.Platforms.ASIC.ProcessCorner.ProcessCorner
 import composer.Platforms.ASIC.ProcessVoltageThreshold.ProcessVoltageThreshold
-import composer.Platforms.{ASICMemoryCompilerKey, PostProcessorMacro}
 import os.Path
 
 import java.time.LocalDateTime
@@ -44,6 +44,7 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
           Module(new RegMem(nRows, nColumns, nPorts, 1))
         }
       }
+
       makeMemory
     }
 
@@ -52,39 +53,40 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
       f"srambank_${nRows / 4}x4x${nColumns}_6t122"
     }
   }
-  case PostProcessorMacro => if (skipScripts) {_: Config => ;} else {c: Config => {
-    val mName = c.getClass.getCanonicalName.split('.').last
-    val cwd = os.Path(ComposerBuild.composerGenDir)
-    val timestamp = LocalDateTime.now()
-    val synwd = cwd / ("asic_build_" + DateTimeFormatter.ofPattern("yy-MM-dd_HHMMSS").format(timestamp))
-    os.makeDir.all(synwd / "src")
-    os.makeDir.all(synwd / "out")
-    ComposerBuild.sourceList.foreach { src =>
-      if (!java.nio.file.Files.isRegularFile(java.nio.file.Paths.get(src.toString()))) {
-        os.copy.over(src, synwd / "src" / src.baseName, createFolders = true)
+  case PostProcessorMacro => c: Config => {
+    if (c(BuildModeKey) == BuildMode.Synthesis) {
+      val mName = c.getClass.getCanonicalName.split('.').last
+      val cwd = os.Path(ComposerBuild.composerGenDir)
+      val timestamp = LocalDateTime.now()
+      val synwd = cwd / ("asic_build_" + DateTimeFormatter.ofPattern("yy-MM-dd_HHMMSS").format(timestamp))
+      os.makeDir.all(synwd / "src")
+      os.makeDir.all(synwd / "out")
+      ComposerBuild.sourceList.foreach { src =>
+        if (!java.nio.file.Files.isRegularFile(java.nio.file.Paths.get(src.toString()))) {
+          os.copy.over(src, synwd / "src" / src.baseName, createFolders = true)
+        }
       }
-    }
-    os.copy.over(cwd / f"$mName.v", synwd / "src" / "composer.sv")
+      os.copy.over(cwd / f"$mName.v", synwd / "src" / "composer.sv")
 
-    def getFileWithNameApprox(dir: Path, contents: Seq[String]): Path = {
-      os.walk(dir).filter(d => contents.map(c => d.toString().contains(c)).reduce(_ && _))(0)
-    }
+      def getFileWithNameApprox(dir: Path, contents: Seq[String]): Path = {
+        os.walk(dir).filter(d => contents.map(c => d.toString().contains(c)).reduce(_ && _))(0)
+      }
 
-    val cornerString = corner match {
-      case ProcessCorner.Typical => "TT"
-      case ProcessCorner.Fast => "FF"
-      case ProcessCorner.Slow => "SS"
-    }
-    val stdcell_suffix = threshold match {
-      case ProcessVoltageThreshold.Regular => "RVT"
-      case ProcessVoltageThreshold.Low => "LVT"
-      case ProcessVoltageThreshold.SuperLow => "SLVT"
-      case ProcessVoltageThreshold.High => "HVT"
-    }
-    val tech_file = "/data/install/pdks/asap7/asap7_snps/icc/asap07_icc.tf"
-    val stdCellDBs = List("SIMPLE", "INVBUF", "AO", "SEQ").map { p =>
-      getFileWithNameApprox(os.Path("/data/install/pdks/asap7/asap7sc7p5t_28/LIB/NLDM/"),
-      Seq(f"asap7sc7p5t_${p}_${stdcell_suffix}_${cornerString}_", ".db")).toString()
+      val cornerString = corner match {
+        case ProcessCorner.Typical => "TT"
+        case ProcessCorner.Fast => "FF"
+        case ProcessCorner.Slow => "SS"
+      }
+      val stdcell_suffix = threshold match {
+        case ProcessVoltageThreshold.Regular => "RVT"
+        case ProcessVoltageThreshold.Low => "LVT"
+        case ProcessVoltageThreshold.SuperLow => "SLVT"
+        case ProcessVoltageThreshold.High => "HVT"
+      }
+      val tech_file = "/data/install/pdks/asap7/asap7_snps/icc/asap07_icc.tf"
+      val stdCellDBs = List("SIMPLE", "INVBUF", "AO", "SEQ").map { p =>
+        getFileWithNameApprox(os.Path("/data/install/pdks/asap7/asap7sc7p5t_28/LIB/NLDM/"),
+          Seq(f"asap7sc7p5t_${p}_${stdcell_suffix}_${cornerString}_", ".db")).toString()
     }.fold("")(_ + " " + _)
     val stdCellLEFBase = "/data/install/pdks/asap7/asap7sc7p5t_28/LEF"
     val stdCellLEFs = List(
@@ -147,9 +149,8 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
          |link
          |check_design
          |
-         |write_sdc composer.sdc
-         |write -hierarchy -format verilog -output out/composer.netlist.v""".stripMargin
-
+         |# Perform the following command if no violations
+         |# write -hierarchy -format verilog -output out/composer.netlist.v""".stripMargin
     )
 
     val starrcDir = "/data/install/pdks/asap7/asap7_snps/starrc"
@@ -204,9 +205,7 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
          |remove_sdc -scenarios [current_scenario]
          |
          |### Clock Settings
-         |#create_clock -period $periodGHz -name clock [get_ports clock]
-         |# set_clock_groups -name func_async -group [get_clocks clock]
-         |source composer.sdc
+         |create_clock -period $periodGHz -name clock [get_ports clock]
          |
          |### Voltage Settings
          |set_parasitic_parameters -early_spec maxTLU -late_spec maxTLU
@@ -231,7 +230,7 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
          |
          |set_app_options -name plan.macro.style -value freeform
          |set_app_options -name plan.macro.integrated -value true
-         |set_host_options -max_cores 48 # change this to whatever
+         |set_host_options -max_cores 48
          |
          |# Place output pins
          |# set_app_options -name plan.pins.incremental -value false -block [current_block]

@@ -1,12 +1,12 @@
 package composer.Platforms.FPGA.Xilinx
 
 import chipsalliance.rocketchip.config.Config
-import composer.ComposerBuild
+import composer.Generation._
 import composer.Platforms._
 import composer.Platforms.FPGA._
 
 
-private[composer] class AWS_sole(simulation: Boolean)
+private[composer] class AWS_sole()
   extends Config((_, _, _) => {
     // why did this ever become 128? It's 2X the bus width... That doesn't seem to make much sense...
     //  case CacheBlockBytes => 128
@@ -23,9 +23,8 @@ private[composer] class AWS_sole(simulation: Boolean)
     case DefaultClockRateKey => 125
     case IsAWS => true
     case PostProcessorMacro =>
-      _: Config =>
-        if (!simulation) {
-          require(false, "Fix this to call new top name")
+      p: Config =>
+        if (p(BuildModeKey) == BuildMode.Synthesis) {
           val cwd = ComposerBuild.composerVsimDir
           val cdir = ComposerBuild.composerBin
           val callable = os.proc(f"$cdir/aws-gen-build")
@@ -38,5 +37,5 @@ private[composer] class AWS_sole(simulation: Boolean)
   })
 
 
-class WithAWSPlatform(nMemoryChannels: Int = 1, simulation: Boolean = true)
-  extends Config(new U200Base(nMemoryChannels) ++ new AWS_sole(simulation))
+class WithAWSPlatform(nMemoryChannels: Int = 1)
+  extends Config(new U200Base(nMemoryChannels) ++ new AWS_sole)

@@ -6,6 +6,7 @@ import chisel3.util._
 import composer.Generation._
 import composer.Platforms.{ASICMemoryCompilerKey, PlatformType, PlatformTypeKey}
 import composer.common.ShiftReg
+import composer.Generation.Tune.Tunable
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
@@ -43,7 +44,7 @@ class IntraCoreScratchpad(asMemorySlave: TLSlavePortParameters,
   val mem_slave_node = TLManagerNode(Seq(asMemorySlave))
 
   dataWidthBits match {
-    case a: BaseTunable if !a.isIdentity =>
+    case a: Tunable if !a.isIdentity =>
       println(s"dataWidthBits is base tunable. Range is ${a.range._1}, ${a.range._2}")
     case _ => ;
   }
@@ -56,12 +57,12 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
                              readOnly: Boolean,
                              outer: IntraCoreScratchpad) extends LazyModuleImp(outer) {
   private val scReqBits = log2Up(nDatas)
-  val IOs = Seq.fill(nPorts)(IO(new CScratchpadAccessPort(scReqBits, dataWidthBits)))
+  val IOs = Seq.fill(nPorts)(IO(new ScratchpadDataPort(scReqBits, dataWidthBits)))
   val (in, edge) = outer.mem_slave_node.in(0)
   val responseQ = Queue(in.a.map(_.source), entries = 4)
   private val realNRows = nDatas
   private val memory = CMemory(latency, dataWidth = dataWidthBits, nRows = realNRows, debugName = Some(outer.name),
-    nReadPorts = if (readOnly) nPorts else 0,
+    nReadPorts = if (readOnly) nPorts - 1 else 0,
     nWritePorts = 0,
     nReadWritePorts = if (readOnly) 1 else nPorts + 1)
 
@@ -70,10 +71,14 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
       assert(!io.req.valid || (io.req.valid && !io.req.bits.write_enable), "read only scratchpad. turn off readonly if you need to write to the scratchpad")
     }
   }
+
+
+  val write_port = memory.getReadWritePortIdx(0)
+
   memory.clock := clock.asBool
   if (readOnly) {
     IOs.zipWithIndex.foreach { case (io, idx) =>
-      val port = memory.getReadPortIdx(idx)
+      val port = idx
       memory.addr(port) := io.req.bits.addr
       memory.chip_select(port) := io.req.valid
       memory.read_enable(port) := true.B
@@ -83,6 +88,12 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
       io.res.bits := memory.data_out(port)
     }
   } else {
+    memory.addr(write_port) := DontCare
+    memory.chip_select(write_port) := false.B
+    memory.read_enable(write_port) := false.B
+    memory.write_enable(write_port) := false.B
+    memory.data_in(write_port) := DontCare
+
     IOs.zipWithIndex.foreach { case(io, idx) =>
       val port = memory.getReadWritePortIdx(idx + 1)
       memory.addr(port) := io.req.bits.addr
@@ -97,24 +108,17 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
 
   in.d <> responseQ.map { source => edge.AccessAck(source, log2Up(in.params.dataBits / 8).U) }
 
-  val port = memory.getReadWritePortIdx(0)
-  memory.addr(port) := DontCare
-  memory.chip_select(port) := false.B
-  memory.read_enable(port) := false.B
-  memory.write_enable(port) := false.B
-  memory.data_in(port) := DontCare
-
   when(in.a.valid) {
     IOs.foreach {
       _.req.ready := false.B
     }
     val off = log2Up(dataWidthBits / 8)
     val bot_addr = in.a.bits.address(log2Up(nDatas) - 1 + off, off)
-    memory.addr(port) := bot_addr
-    memory.chip_select(port) := true.B
-    memory.read_enable(port) := false.B
-    memory.write_enable(port) := true.B
-    memory.data_in(port) := in.a.bits.data
+    memory.addr(write_port) := bot_addr
+    memory.chip_select(write_port) := true.B
+    memory.read_enable(write_port) := false.B
+    memory.write_enable(write_port) := true.B
+    memory.data_in(write_port) := in.a.bits.data
   }
 }
 

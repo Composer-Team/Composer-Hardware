@@ -9,6 +9,7 @@ import composer.MemoryStreams._
 import composer.RoccHelpers._
 import composer.TLManagement.{ComposerIntraCoreIOModule, TLClientModule}
 import composer.common._
+import composer.Generation.Tune.Tunable
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
@@ -206,7 +207,7 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
     }
   }
 
-  def getIntraCoreMemIns(name: String)(implicit valName: ValName): Seq[CScratchpadAccessPort] = {
+  def getIntraCoreMemIns(name: String)(implicit valName: ValName): Seq[ScratchpadDataPort] = {
     val params = try {
       outer.intraCoreMemSlaveNodes.filter(_._1 == name)(0)
     } catch {
@@ -218,7 +219,7 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
     VecInit((0 until params._3.nChannels) map (getIntraCoreMemIn(name, _)))
   }
 
-  def getIntraCoreMemIn(name: String, idx: Int): CScratchpadAccessPort = {
+  def getIntraCoreMemIn(name: String, idx: Int): ScratchpadDataPort = {
     val params = outer.intraCoreMemSlaveNodes.filter(_._1 == name)
     if (params.isEmpty) throw new Exception(s"Attempting to access intraCoreMem \"$name\" which we can't find in the config.")
     val ic_scratchpad = params(0)
@@ -282,7 +283,7 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
     (a._1(0), a._2(0))
   }
 
-  def getScratchpad(name: String): (CScratchpadInitReqIO, Seq[CScratchpadAccessPort]) = {
+  def getScratchpad(name: String): (ScratchpadMemReqPort, Seq[ScratchpadDataPort]) = {
     val outer = composerConstructor.composerCoreWrapper
     val lm = outer.scratch_mod.filter(_._1 == name)(0)._2
     lm.suggestName(name)

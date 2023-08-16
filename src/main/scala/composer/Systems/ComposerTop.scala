@@ -8,7 +8,8 @@ import composer.Generation._
 import composer.RoccHelpers.{AXI4Compat, FrontBusHub}
 import composer.Systems.ComposerTop._
 import composer.common.CLog2Up
-import composer.Platforms.{FrontBusProtocol, FrontBusProtocolKey, HasDMA}
+import composer.Generation.Tune.Tunable
+import composer.Platforms.{BuildModeKey, FrontBusProtocol, FrontBusProtocolKey, HasDMA}
 import freechips.rocketchip.amba.ahb._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
@@ -222,5 +223,7 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   // try to make this the last thing we do
   CppGeneration.genCPPHeader(outer.cmd_resp_axilhub.widget.module.crRegistry, acc.acc)
   ConstraintGeneration.writeConstraints()
-  Tunable.exportNames()
+  if (p(BuildModeKey).isInstanceOf[BuildMode.Tuning]) {
+    Tunable.exportNames()
+  }
 }

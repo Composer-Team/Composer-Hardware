@@ -1,4 +1,4 @@
-package composer.Generation
+package composer.Generation.Stage
 
 import firrtl.AnnotationSeq
 import firrtl.options.Phase

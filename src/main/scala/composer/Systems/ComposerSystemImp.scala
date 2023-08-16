@@ -3,11 +3,11 @@ package composer.Systems
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import composer._
 import composer.ComposerParams._
 import composer.Generation.LazyModuleImpWithSLRs
 import composer.RoccHelpers._
 import composer.TLManagement._
-import composer._
 import composer.common._
 import composer.Platforms.FPGA._
 
@@ -130,7 +130,6 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
         case Some(path) =>
           collapseResp(SLRHelper.SLRRespRoutingFanout, 1,
             path.foldRight(Seq[DecoupledIO[AccelRoccResponse]]()) { case (slr_idx, acc) =>
-              println(s"Collapsing to $slr_idx")
             collapseResp(SLRHelper.SLRRespRoutingFanout, SLRHelper.RespEndpointsPerSLR,
               acc ++ respsCollapsed(slr_idx),
               slr_idx)
