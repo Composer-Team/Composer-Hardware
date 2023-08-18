@@ -8,7 +8,7 @@ import composer.Platforms.{BuildModeKey, PostProcessorMacro}
 import firrtl._
 import firrtl.options._
 import firrtl.options.PhaseManager.PhaseDependency
-import firrtl.stage.FirrtlCli
+import firrtl.stage.{CompilerAnnotation, FirrtlCli, RunFirrtlTransformAnnotation}
 import freechips.rocketchip.stage._
 import os._
 
@@ -20,17 +20,13 @@ import scala.util.matching.Regex
 
 class ComposerChipStage extends Stage with Phase {
   override val shell = new Shell("composer-compile")
-    with RocketChipCli
-    with ChiselCli
-    with FirrtlCli
   val targets: Seq[PhaseDependency] = Seq(
     Dependency[freechips.rocketchip.stage.phases.Checks],
-    Dependency[composer.Generation.Stage.TransformAnnotations],
+//    Dependency[composer.Generation.Stage.TransformAnnotations],
     Dependency[composer.Generation.Stage.PreElaborationPass],
     Dependency[chisel3.stage.phases.Checks],
     Dependency[chisel3.stage.phases.MaybeAspectPhase],
-    Dependency[chisel3.stage.phases.Emitter],
-    Dependency[chisel3.stage.phases.Convert],
+    Dependency[chisel3.stage.phases.Convert],   // convert chirrtl to firrtl
     Dependency[composer.Generation.Stage.ExportCSymbolPhase],
     Dependency[firrtl.stage.phases.Compiler]
   )
@@ -75,13 +71,6 @@ object ComposerBuild {
   private[composer] var symbolicMemoryResources: Seq[Path] = Seq.empty
   private[composer] var sourceList: Seq[Path] = Seq.empty
 
-  private[composer] case class MemoryGeneratorDef(
-      gen: String => String,
-      utilizations: SeqMap[String, (Int, Float)]
-  )
-  // allow the Driver to provide drivers after the fact
-  private[composer] val memoryGenerators: Seq[MemoryGeneratorDef] = Seq.empty
-
   def addSource(p: Path): Unit = {
     sourceList = sourceList :+ p
   }
@@ -123,22 +112,23 @@ class ComposerBuild(config: Config, buildMode: BuildMode = BuildMode.Synthesis) 
       Path(pth)
     } else Path(ComposerBuild.composerGenDir)
     os.makeDir.all(gsrc_dir)
-    val short_name = LocalDateTime.now()
-    val outputFile = gsrc_dir / s"$short_name.v"
-    val targetDir = gsrc_dir / "composer.fir"
+    val targetDir = gsrc_dir / "composer.build"
     new ComposerChipStage().transform(
       AnnotationSeq(
         Seq(
-          new TargetDirAnnotation(targetDir.toString()),
-          new TopModuleAnnotation(
-            Class.forName("composer.Systems.ComposerTop")
-          ),
+          new firrtl.options.TargetDirAnnotation(targetDir.toString()),
+          // if you want to get annotation output for debugging, uncomment the following line
+//          new OutputAnnotationFileAnnotation(outputFile.toString()),
+          new TopModuleAnnotation(Class.forName("composer.Systems.ComposerTop")),
           Generation.Stage.ConfigsAnnotation(new Config(config.alterPartial {
             case BuildModeKey => buildMode
           })),
-          new OutputAnnotationFileAnnotation(outputFile.toString()),
           CustomDefaultMemoryEmission(MemoryNoInit),
-          CustomDefaultRegisterEmission(useInitAsPreset = false, disableRandomization = true)
+          CustomDefaultRegisterEmission(useInitAsPreset = false, disableRandomization = true),
+
+          RunFirrtlTransformAnnotation(firrtl.LowFirrtlOptimizedEmitter),
+          RunFirrtlTransformAnnotation(new SystemVerilogEmitter),
+          RunFirrtlTransformAnnotation(new VerilogEmitter)
         )
       )
     )
@@ -161,12 +151,18 @@ class ComposerBuild(config: Config, buildMode: BuildMode = BuildMode.Synthesis) 
       })
       System.err.println("Done adding keep_hierarchy to SLR mappings.")
     }
+    os.walk(targetDir).foreach { file =>
+      val extension = file.ext
+      os.move(file, gsrc_dir / ("composer." + extension), replaceExisting = true)
+    }
+//    os.move(targetDir / "ComposerTop.v", outputFile, replaceExisting = true)
+//    os.move(targetDir / "ComposerTop.opt.lo.fir", gsrc_dir / "composer.lo.fir", replaceExisting = true)
+//    os.remove.all(targetDir)
+    // delete FIRRTL files
+//    os.remove.all(targetDir)
 
-    os.move(targetDir / "ComposerTop.v", outputFile, replaceExisting = true)
-    os.remove.all(targetDir)
-    os.remove(gsrc_dir / "composer.v", checkExists = false)
-    os.symlink(gsrc_dir / "composer.v", outputFile)
     config(PostProcessorMacro)(config) // do post-processing per backend
+
     buildMode match {
       case bm: BuildMode.Tuning if !args.contains("--notune") =>
         val opts = if (bm.cmakeOpts.length == 1) bm.cmakeOpts(0) else {
