@@ -113,7 +113,7 @@ class CReader(dataBytes: Int,
   when(reset.asBool) {
     prefetch_buffers_valid.foreach(_ := false.B)
   }
-  val prefetch_buffers = CMemory(prefetch_blatency, storedDataWidth, prefetchRows, 0, 0, if (hasDualPortMemory) 2 else 1)
+  val prefetch_buffers = Memory(prefetch_blatency, storedDataWidth, prefetchRows, 0, 0, if (hasDualPortMemory) 2 else 1)
 
   val (write_ready, read_ready, write_port_idx) = if (hasDualPortMemory) {
     prefetch_buffers.clock := clock.asBool

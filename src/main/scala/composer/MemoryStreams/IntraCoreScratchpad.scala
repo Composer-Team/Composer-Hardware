@@ -61,7 +61,7 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
   val (in, edge) = outer.mem_slave_node.in(0)
   val responseQ = Queue(in.a.map(_.source), entries = 4)
   private val realNRows = nDatas
-  private val memory = CMemory(latency, dataWidth = dataWidthBits, nRows = realNRows, debugName = Some(outer.name),
+  private val memory = Memory(latency, dataWidth = dataWidthBits, nRows = realNRows, debugName = Some(outer.name),
     nReadPorts = if (readOnly) nPorts - 1 else 0,
     nWritePorts = 0,
     nReadWritePorts = if (readOnly) 1 else nPorts + 1)

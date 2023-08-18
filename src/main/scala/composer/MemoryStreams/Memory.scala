@@ -9,7 +9,16 @@ import composer.Platforms.FPGA.Xilinx.{XilinxBRAMSDP, XilinxBRAMTDP}
 import composer.Platforms.{ASICMemoryCompilerKey, PlatformType, PlatformTypeKey}
 import freechips.rocketchip.diplomacy.ValName
 
-object CMemory {
+object Memory {
+
+  def get_name(latency: Int,
+               dataWidth: Int,
+               nRows: Int,
+               nReadPorts: Int,
+               nWritePorts: Int,
+               nReadWritePorts: Int): String =
+    s"Memory_L${latency}_DW${dataWidth}_D${nRows}_R${nReadPorts}_W${nWritePorts}_RW${nReadWritePorts}"
+
   def apply(
       latency: Int,
       dataWidth: Int,
@@ -41,7 +50,7 @@ object CMemory {
       val nDuplicates = ((nPorts - 1).toFloat / (mostPortsSupported - 1)).ceil.toInt
 //      println("Duplicate memory " + nDuplicates + " times for " + nPorts + " ports")
       val mems = Seq.tabulate(nDuplicates) { i =>
-        CMemory(
+        Memory(
           latency,
           dataWidth,
           nRows,
@@ -273,7 +282,7 @@ class CASICMemory(latency: Int, dataWidth: Int, nRowsSuggested: Int, nPorts: Int
   extends RawModule
     with HasCMemoryIO {
   private val nRows = Math.max(nRowsSuggested, 4 * latency)
-  override val desiredName = f"CMemoryASIC_l${latency}dw${dataWidth}r$nRows"
+  override val desiredName = Memory.get_name(latency, dataWidth, nRows, 0, 0, nPorts)
   implicit val io = IO(new CMemoryIOBundle(0, 0, nPorts, log2Up(nRows), dataWidth))
   MemoryCompiler.buildSRAM(latency, dataWidth, nRows, nPorts)
 }

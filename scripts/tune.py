@@ -45,6 +45,7 @@ all_perf_paths = ["TOP." + p.replace('/', '.') for p in all_perf_paths]
 
 subprocess.Popen(["rm", "-rf", "lock"]).wait()
 
+
 def objective(trial: opt.Trial):
     settings = [(k, trial.suggest_int(k, params[k]['range'][0], params[k]['range'][1])) for k in params.keys()]
     # build the hardware
@@ -72,10 +73,10 @@ def objective(trial: opt.Trial):
     subprocess.Popen(["cmake", os.environ['COMPOSER_ROOT'] + "/Composer-Runtime/", "-DTARGET=sim",
                       "-DCMAKE_BUILD_TYPE=Debug", "-DUSE_DRAMSIM=1", "-DUSE_VCD=1"], cwd=trial_runtime_dir).wait()
     FileLock("lock").release()
-    subprocess.Popen(["make", "-j", "8"], cwd=trial_runtime_dir).wait()
+    subprocess.Popen(["make", "-j4"], cwd=trial_runtime_dir).wait()
     # build the executable
     subprocess.Popen(["cmake", ex_dir] + ex_opts, cwd=trial_exec_dir).wait()
-    subprocess.Popen(["make", "-j8", ex_name], cwd=trial_exec_dir).wait()
+    subprocess.Popen(["make", "-j4", ex_name], cwd=trial_exec_dir).wait()
     # run runtime
     runtime = subprocess.Popen(["./ComposerRuntime"] + [f"--dump={d}" for d in all_perf_paths], cwd=trial_runtime_dir)
     time.sleep(1)

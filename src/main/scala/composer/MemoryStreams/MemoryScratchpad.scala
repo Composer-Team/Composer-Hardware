@@ -108,7 +108,7 @@ class ScratchpadImpl(csp: CScratchpadParams,
   private val scReqBits = log2Up(nDatas)
   val IOs = Seq.fill(nPorts)(IO(new ScratchpadDataPort(scReqBits, dataWidthBits)))
   val req = IO(new ScratchpadMemReqPort(if (outer.mem_master_node.isDefined) Some(outer.mem_master_node.get.out(0)._1) else None, nDatas, memoryLengthBits))
-  private val memory = Seq.fill(datasPerCacheLine)(CMemory(latency,
+  private val memory = Seq.fill(datasPerCacheLine)(Memory(latency,
     dataWidth = dataWidthBits,
     nRows = realNRows,
     debugName = Some(outer.name),

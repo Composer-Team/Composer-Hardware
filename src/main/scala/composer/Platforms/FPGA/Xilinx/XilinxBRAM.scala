@@ -70,9 +70,9 @@ object XilinxBRAMTDP {
     val bram_consumption = get_n_brams(dwidth, nRows)
     val have_enough_uram = uram_used + uram_consumption <= p(PlatformNURAM)
     val have_enough_bram = bram_used + bram_consumption <= p(PlatformNBRAM)
-    val usage = if (useURAM && have_enough_uram) FPGAMemoryPrimitiveConsumer(0, uram_consumption, "(* ram_style = \"ultra\" *)", "URAM")
-    else if (have_enough_bram) FPGAMemoryPrimitiveConsumer(bram_consumption, 0, "(* ram_style = \"block\" *)", "BRAM")
-    else if (have_enough_uram) FPGAMemoryPrimitiveConsumer(0, uram_consumption, "(* ram_style = \"ultra\" *)", "URAM")
+    val usage = if (useURAM && have_enough_uram) FPGAMemoryPrimitiveConsumer(0, uram_consumption, "(* ram_style = \"ultra\" *)", "_URAM")
+    else if (have_enough_bram) FPGAMemoryPrimitiveConsumer(bram_consumption, 0, "(* ram_style = \"block\" *)", "_BRAM")
+    else if (have_enough_uram) FPGAMemoryPrimitiveConsumer(0, uram_consumption, "(* ram_style = \"ultra\" *)", "_URAM")
     else {
       System.err.println(
         s"Memory module $debugName requires $bram_consumption BRAMs and $uram_consumption URAMs,\n" +
@@ -152,7 +152,7 @@ private[composer] class XilinxBRAMTDP(latency: Int,
   )
   private val addrWidth = log2Up(nRows)
 
-  val dname_prefix = s"CMemoryTDPL${latency}DW${dataWidth}R$nRows"
+  val dname_prefix = composer.MemoryStreams.Memory.get_name(latency, dataWidth, nRows, 0, 0, 2)
   val (memoryAnnotations, dname_suffix) = {
     if (
       p(ConstraintHintsKey).contains(ComposerConstraintHint.MemoryConstrained)
@@ -283,7 +283,7 @@ private[composer] class XilinxBRAMSDP(latency: Int,
   )
   private val addrWidth = log2Up(nRows)
 
-  val dname_prefix = s"CMemorySDPL${latency}DW${dataWidth}R$nRows"
+  val dname_prefix = composer.MemoryStreams.Memory.get_name(latency, dataWidth, nRows, 1, 1, 0)
   val (memoryAnnotations, dname_suffix) = {
     if (
       p(ConstraintHintsKey).contains(ComposerConstraintHint.MemoryConstrained)
