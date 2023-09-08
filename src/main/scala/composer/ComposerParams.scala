@@ -2,8 +2,10 @@ package composer
 
 import chipsalliance.rocketchip.config._
 import composer.ComposerConstraintHint.ComposerConstraintHint
+import composer.Generation.BuildMode
 import composer.MemoryStreams._
-import composer.Systems.{AcceleratorCore, AccelCoreWrapper}
+import composer.Platforms.BuildModeKey
+import composer.Systems.{AccelCoreWrapper, AcceleratorCore}
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
@@ -63,8 +65,10 @@ case object ConstraintHintsKey extends Field[List[ComposerConstraintHint.type]]
 class WithComposer(
     constraintHints: List[ComposerConstraintHint] = List.empty,
     quiet: Boolean = false,
-    useConfigAsOutputName: Boolean = false
+    useConfigAsOutputName: Boolean = false,
+    buildMode: BuildMode = BuildMode.Simulation
 ) extends Config((site, _, _) => {
+      case BuildModeKey => buildMode
       case ComposerQuiet            => quiet
       case AcceleratorSystems       => Seq()
       case TLInterconnectWidthBytes => 16

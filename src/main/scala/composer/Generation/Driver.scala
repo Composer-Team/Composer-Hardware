@@ -47,6 +47,10 @@ object ComposerBuild {
     crossBoundaryDisableList = crossBoundaryDisableList :+ moduleName
   }
 
+  private def filterFIRRTL(path: Path): Unit = {
+    os.proc(Seq("sed", "-i.backup", "-e", "1d", "-e", "/printf/d", "-e", "/assert/d", path.toString())).call()
+  }
+
   private[composer] def addSource(): Unit = {}
 
   def composerRoot(): String = {
@@ -97,8 +101,10 @@ object BuildMode {
 
 }
 
-class ComposerBuild(config: Config, buildMode: BuildMode = BuildMode.Synthesis) {
+class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesis) {
   final def main(args: Array[String]): Unit = {
+    println("main args are : ")
+    args.foreach(println(_))
     BuildArgs.args = Map.from(
       args.filter(str => str.length >= 2 && str.substring(0, 2) == "-D").map {
         opt =>
@@ -125,7 +131,6 @@ class ComposerBuild(config: Config, buildMode: BuildMode = BuildMode.Synthesis) 
           })),
           CustomDefaultMemoryEmission(MemoryNoInit),
           CustomDefaultRegisterEmission(useInitAsPreset = false, disableRandomization = true),
-
           RunFirrtlTransformAnnotation(firrtl.LowFirrtlOptimizedEmitter),
           RunFirrtlTransformAnnotation(new SystemVerilogEmitter),
           RunFirrtlTransformAnnotation(new VerilogEmitter)
@@ -155,11 +160,7 @@ class ComposerBuild(config: Config, buildMode: BuildMode = BuildMode.Synthesis) 
       val extension = file.ext
       os.move(file, gsrc_dir / ("composer." + extension), replaceExisting = true)
     }
-//    os.move(targetDir / "ComposerTop.v", outputFile, replaceExisting = true)
-//    os.move(targetDir / "ComposerTop.opt.lo.fir", gsrc_dir / "composer.lo.fir", replaceExisting = true)
-//    os.remove.all(targetDir)
-    // delete FIRRTL files
-//    os.remove.all(targetDir)
+    filterFIRRTL(gsrc_dir / "composer.fir")
 
     config(PostProcessorMacro)(config) // do post-processing per backend
 
