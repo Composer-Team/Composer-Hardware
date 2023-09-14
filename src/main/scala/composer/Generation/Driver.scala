@@ -121,7 +121,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
     os.makeDir.all(gsrc_dir)
     val targetDir = gsrc_dir / "composer.build"
     val srcDir = gsrc_dir / "external_sources"
-    os.makeDir(srcDir)
+    os.makeDir.all(srcDir)
     new ComposerChipStage().transform(
       AnnotationSeq(
         Seq(
