@@ -7,6 +7,8 @@ import firrtl.options.{Dependency, Phase, PreservesAll, StageOptions}
 import firrtl.options.Viewer.view
 import firrtl.AnnotationSeq
 import firrtl.annotations.NoTargetAnnotation
+import firrtl.stage.RunFirrtlTransformAnnotation
+import firrtl.transforms.Flatten
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.stage.RocketChipOptions
 import freechips.rocketchip.stage.phases.{Checks, TargetDirKey}
@@ -37,7 +39,7 @@ class PreElaborationPass extends Phase with PreservesAll[Phase] with HasRocketCh
         case a: LazyModule => LazyModule(a).module
       }
 
-    ChiselGeneratorAnnotation(gen) +: annotations
+    ChiselGeneratorAnnotation(gen) +: annotations :+ RunFirrtlTransformAnnotation(new Flatten)
   }
 
 }

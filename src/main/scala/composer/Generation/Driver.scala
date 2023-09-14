@@ -6,9 +6,11 @@ import composer.Generation
 import composer.Generation.ComposerBuild._
 import composer.Platforms.{BuildModeKey, PostProcessorMacro}
 import firrtl._
+import firrtl.annotations.{CircuitName, ModuleName}
 import firrtl.options._
 import firrtl.options.PhaseManager.PhaseDependency
 import firrtl.stage.{CompilerAnnotation, FirrtlCli, RunFirrtlTransformAnnotation}
+import firrtl.transforms.{Flatten, FlattenAnnotation}
 import freechips.rocketchip.stage._
 import os._
 
@@ -22,7 +24,6 @@ class ComposerChipStage extends Stage with Phase {
   override val shell = new Shell("composer-compile")
   val targets: Seq[PhaseDependency] = Seq(
     Dependency[freechips.rocketchip.stage.phases.Checks],
-//    Dependency[composer.Generation.Stage.TransformAnnotations],
     Dependency[composer.Generation.Stage.PreElaborationPass],
     Dependency[chisel3.stage.phases.Checks],
     Dependency[chisel3.stage.phases.MaybeAspectPhase],
@@ -119,12 +120,14 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
     } else Path(ComposerBuild.composerGenDir)
     os.makeDir.all(gsrc_dir)
     val targetDir = gsrc_dir / "composer.build"
+    val srcDir = gsrc_dir / "external_sources"
+    os.makeDir(srcDir)
     new ComposerChipStage().transform(
       AnnotationSeq(
         Seq(
           new firrtl.options.TargetDirAnnotation(targetDir.toString()),
           // if you want to get annotation output for debugging, uncomment the following line
-//          new OutputAnnotationFileAnnotation(outputFile.toString()),
+//          new OutputAnnotationFileAnnotation(targetDir.toString()),
           new TopModuleAnnotation(Class.forName("composer.Systems.ComposerTop")),
           Generation.Stage.ConfigsAnnotation(new Config(config.alterPartial {
             case BuildModeKey => buildMode
@@ -137,13 +140,21 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
         )
       )
     )
+
+    // For the ComposerTop.v, we copy in the sources directly for easing direct simulation
+    // we also copy the source files to the composer.build directly should that be more
+    // cromulent to the user
     sourceList.distinct foreach { src =>
       if (file.Files.isRegularFile(java.nio.file.Paths.get(src.toString()))) {
         os.write.append(targetDir / "ComposerTop.v", os.read(src))
+        val fname = src.toString().split("/").last
+        os.copy.over(src, srcDir / fname)
       } else {
         os.copy.over(src, gsrc_dir / src.baseName)
+        os.copy.over(src, srcDir / src.baseName)
       }
     }
+
     ConstraintGeneration.slrMappings.foreach{ slrMapping =>
       crossBoundaryDisableList = crossBoundaryDisableList :+ slrMapping._1
     }
@@ -158,7 +169,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
     }
     os.walk(targetDir).foreach { file =>
       val extension = file.ext
-      os.move(file, gsrc_dir / ("composer." + extension), replaceExisting = true)
+      os.copy(file, gsrc_dir / ("composer." + extension), replaceExisting = true)
     }
     filterFIRRTL(gsrc_dir / "composer.fir")
 

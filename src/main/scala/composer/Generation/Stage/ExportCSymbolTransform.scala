@@ -7,11 +7,7 @@ import os._
 
 import java.io.FileWriter
 
-class ExportCSymbolTransform extends Transform {
-  override def inputForm: CircuitForm = ChirrtlForm
-
-  override def outputForm: CircuitForm = ChirrtlForm
-
+class ExportCSymbolTransform extends Transform with DependencyAPIMigration {
   final def getModulePath(modName: String, circuit: firrtl.ir.Circuit, path: Seq[String]): Seq[String] = {
     if (modName == circuit.main) return path :+ circuit.main
     else {
