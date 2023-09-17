@@ -107,16 +107,23 @@ object BuildMode {
 class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesis) {
 
   private def get_os(): String = {
-    os.proc("uname").call().out.toString
+    os.proc("uname").call().out.trim
+  }
+
+  private def get_sed_inline_opt(): Seq[String] = {
+    get_os() match {
+      case "Darwin" => Seq("-I", "")
+      case "Linux" => Seq("-i\"\"k")
+      case _ => throw new Exception("Couldn't figure out OS for " + get_os())
+    }
   }
 
   def addKeepHierarchyAnnotationsForCores(fname: Path): Unit = {
-    val inline = get_os() match {
-      case "Darwin" => "-I \"\""
-      case "Linux" => "-i\"\""
-      case _ => throw new Exception("Couldn't figure out OS for " + get_os())
-    }
-    os.proc(Seq("sed", inline, "-E",
+    val sedcmd = Seq("sed") ++ get_sed_inline_opt() ++ Seq("-E",
+      "s/(module AccelCoreWrapper)/(* keep_hierarchy = \"yes\" *)\\n\\1/",
+      fname.toString())
+    println(sedcmd)
+    os.proc(Seq("sed") ++ get_sed_inline_opt() ++ Seq("-E",
       "s/(module AccelCoreWrapper)/(* keep_hierarchy = \"yes\" *)\\n\\1/",
       fname.toString())).call()
   }
@@ -159,14 +166,45 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
       )
     )
 
+    addKeepHierarchyAnnotationsForCores(targetDir / "ComposerTop.v")
+
     // For the ComposerTop.v, we copy in the sources directly for easing direct simulation
     // we also copy the source files to the composer.build directly should that be more
     // cromulent to the user
+
+    // first, get module names in targetDir / "ComposerTop.v"
+    val pattern = Pattern.compile("module (.*)\\(")
+    val matcher = pattern.matcher(os.read(targetDir / "ComposerTop.v"))
+    println("matcher group count is " + matcher.groupCount())
+    var modules = Seq.empty[String]
+    while (matcher.find()) {
+      modules = modules :+ matcher.group(1).strip()
+    }
+    println("modules are " + modules)
+
+    // then, for each source in the source list, copy in all modules that aren't already defined
     sourceList.distinct foreach { src =>
       if (file.Files.isRegularFile(java.nio.file.Paths.get(src.toString()))) {
-        os.write.append(targetDir / "ComposerTop.v", os.read(src))
-        val fname = src.toString().split("/").last
-        os.copy.over(src, srcDir / fname)
+        val matcher = pattern.matcher(os.read(src))
+        var srcModules = Seq.empty[String]
+        while (matcher.find()) {
+          srcModules = srcModules :+ matcher.group(1).strip()
+        }
+        // get a list of repeated modules
+        val repeats = srcModules.filter(modules.contains(_)).distinct
+        // for each create a sed command to remove the module
+        println("repeats are " + repeats)
+        if (repeats.nonEmpty) {
+          val sedCmds = repeats.map { mod: String => s"/module $mod/,/endmodule/d" }
+          // then, remove the repeated modules from the source
+          // join sedCMds with ;
+          val sedCmd = Seq("sed", "-E", sedCmds.mkString(";"), src.toString)
+          println("sedCmd is " + sedCmd)
+
+          os.proc(sedCmd).call(stdout = os.pwd / "tmp.v")
+          os.write.append(targetDir / "ComposerTop.v", os.read(os.pwd / "tmp.v"))
+        }
+        modules = modules ++ srcModules
       } else {
         os.copy.over(src, gsrc_dir / src.baseName)
         os.copy.over(src, srcDir / src.baseName)
@@ -189,7 +227,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
       val extension = file.ext
       os.copy(file, gsrc_dir / ("composer." + extension), replaceExisting = true)
     }
-    filterFIRRTL(gsrc_dir / "composer.fir")
+    //    filterFIRRTL(gsrc_dir / "composer.fir")
 
     config(PostProcessorMacro)(config) // do post-processing per backend
 
