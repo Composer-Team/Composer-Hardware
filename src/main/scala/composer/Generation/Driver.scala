@@ -27,7 +27,7 @@ class ComposerChipStage extends Stage with Phase {
     Dependency[composer.Generation.Stage.PreElaborationPass],
     Dependency[chisel3.stage.phases.Checks],
     Dependency[chisel3.stage.phases.MaybeAspectPhase],
-    Dependency[chisel3.stage.phases.Convert],   // convert chirrtl to firrtl
+    Dependency[chisel3.stage.phases.Convert], // convert chirrtl to firrtl
     Dependency[composer.Generation.Stage.ExportCSymbolPhase],
     Dependency[firrtl.stage.phases.Compiler]
   )
@@ -44,6 +44,7 @@ object ComposerBuild {
       " Please define or configure IDE to see this enviornment variable\n"
 
   private var crossBoundaryDisableList: Seq[String] = Seq.empty
+
   def disableCrossBoundaryOptimizationForModule(moduleName: String): Unit = {
     crossBoundaryDisableList = crossBoundaryDisableList :+ moduleName
   }
@@ -90,6 +91,7 @@ object BuildArgs {
 }
 
 abstract class BuildMode
+
 object BuildMode {
   case object Synthesis extends BuildMode
 
@@ -103,6 +105,22 @@ object BuildMode {
 }
 
 class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesis) {
+
+  private def get_os(): String = {
+    os.proc("uname").call().out.toString
+  }
+
+  def addKeepHierarchyAnnotationsForCores(fname: Path): Unit = {
+    val inline = get_os() match {
+      case "Darwin" => "-I \"\""
+      case "Linux" => "-i\"\""
+      case _ => throw new Exception("Couldn't figure out OS for " + inline)
+    }
+    os.proc(Seq("sed", inline, "-E",
+      "s/(module AccelCoreWrapper)/(* keep_hierarchy = \"yes\" *)\\n\\1/",
+      fname.toString())).call()
+  }
+
   final def main(args: Array[String]): Unit = {
     println("main args are : ")
     args.foreach(println(_))
@@ -114,7 +132,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
           (pr(0), pr(1).toInt)
       }
     )
-    val gsrc_dir = if (args.filter(_.length > 9).exists(_.substring(0, 9) == "--target=")){
+    val gsrc_dir = if (args.filter(_.length > 9).exists(_.substring(0, 9) == "--target=")) {
       val pth = args.filter(a => a.length > 9 && a.substring(0, 9) == "--target=")(0).substring(9)
       Path(pth)
     } else Path(ComposerBuild.composerGenDir)
@@ -127,16 +145,16 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
         Seq(
           new firrtl.options.TargetDirAnnotation(targetDir.toString()),
           // if you want to get annotation output for debugging, uncomment the following line
-//          new OutputAnnotationFileAnnotation(targetDir.toString()),
+          new OutputAnnotationFileAnnotation(targetDir.toString()),
           new TopModuleAnnotation(Class.forName("composer.Systems.ComposerTop")),
           Generation.Stage.ConfigsAnnotation(new Config(config.alterPartial {
             case BuildModeKey => buildMode
           })),
           CustomDefaultMemoryEmission(MemoryNoInit),
           CustomDefaultRegisterEmission(useInitAsPreset = false, disableRandomization = true),
-          RunFirrtlTransformAnnotation(firrtl.LowFirrtlOptimizedEmitter),
-          RunFirrtlTransformAnnotation(new SystemVerilogEmitter),
-          RunFirrtlTransformAnnotation(new VerilogEmitter)
+          //          RunFirrtlTransformAnnotation(firrtl.LowFirrtlOptimizedEmitter),
+          //          RunFirrtlTransformAnnotation(new SystemVerilogEmitter),
+          RunFirrtlTransformAnnotation(new VerilogEmitter),
         )
       )
     )
@@ -155,14 +173,14 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
       }
     }
 
-    ConstraintGeneration.slrMappings.foreach{ slrMapping =>
+    ConstraintGeneration.slrMappings.foreach { slrMapping =>
       crossBoundaryDisableList = crossBoundaryDisableList :+ slrMapping._1
     }
     if (crossBoundaryDisableList.nonEmpty) {
       System.err.println("Adding keep_hierarchy to SLR mappings for design with SLR distribution hint. This may take some time...")
       os.write.over(targetDir / "ComposerTop.v", crossBoundaryDisableList.distinct.fold(os.read(targetDir / "ComposerTop.v")) { case (f, name) =>
         val pattern = s"(\\w+ \\w*$name) ".r
-        val replacement = {r: Regex.Match => " (* keep_hierarchy = \"yes\" *) " + r.group(1) + " "}
+        val replacement = { r: Regex.Match => " (* keep_hierarchy = \"yes\" *) " + r.group(1) + " " }
         pattern.replaceAllIn(f, replacement)
       })
       System.err.println("Done adding keep_hierarchy to SLR mappings.")
@@ -185,7 +203,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
           this.getClass.getCanonicalName,
           bm.hwBuildDir,
           bm.execCMAKEDir + "." + bm.execName + "." + opts)).call(
-          stdout=os.Inherit
+          stdout = os.Inherit
         )
       case _ =>
     }
