@@ -114,7 +114,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
     val inline = get_os() match {
       case "Darwin" => "-I \"\""
       case "Linux" => "-i\"\""
-      case _ => throw new Exception("Couldn't figure out OS for " + inline)
+      case _ => throw new Exception("Couldn't figure out OS for " + get_os())
     }
     os.proc(Seq("sed", inline, "-E",
       "s/(module AccelCoreWrapper)/(* keep_hierarchy = \"yes\" *)\\n\\1/",
