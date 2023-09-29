@@ -65,10 +65,7 @@ case object ConstraintHintsKey extends Field[List[ComposerConstraintHint.type]]
 class WithComposer(
     constraintHints: List[ComposerConstraintHint] = List.empty,
     quiet: Boolean = false,
-    useConfigAsOutputName: Boolean = false,
-    buildMode: BuildMode = BuildMode.Simulation
-) extends Config((site, _, _) => {
-      case BuildModeKey => buildMode
+    useConfigAsOutputName: Boolean = false) extends Config((site, _, _) => {
       case ComposerQuiet            => quiet
       case AcceleratorSystems       => Seq()
       case TLInterconnectWidthBytes => 16

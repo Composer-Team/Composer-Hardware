@@ -1,12 +1,13 @@
 package composer.Platforms.FPGA.Xilinx
 
 import chipsalliance.rocketchip.config.Config
-import composer.{CoreCommandLatency, CXbarMaxDegree, PlatformPhysicalMemoryBytes}
-import composer.Platforms.{DefaultClockRateKey, FrontBusAddressMask, FrontBusBaseAddress, FrontBusBeatBytes, FrontBusProtocol, FrontBusProtocolKey, HasDiscreteMemory, HasDisjointMemoryControllers, HasDMA, IsAWS, PlatformNBRAM, PlatformNumSLRs, PlatformNURAM, PlatformType, PlatformTypeKey, PostProcessorMacro}
+import composer.Generation.{BuildMode, ComposerBuild}
+import composer.{CXbarMaxDegree, CoreCommandLatency, PlatformPhysicalMemoryBytes}
+import composer.Platforms.{BuildModeKey, DefaultClockRateKey, FrontBusAddressMask, FrontBusBaseAddress, FrontBusBeatBytes, FrontBusProtocol, FrontBusProtocolKey, HasDMA, HasDiscreteMemory, HasDisjointMemoryControllers, IsAWS, PlatformNBRAM, PlatformNURAM, PlatformNumSLRs, PlatformType, PlatformTypeKey, PostProcessorMacro}
 import composer.Platforms.FPGA.PlatformSLRs
 import freechips.rocketchip.subsystem.{ExtMem, MasterPortParams, MemoryPortParams}
 
-class WithKriaPlatform(nMemoryChannels: Int = 1)
+class WithKriaPlatform(nMemoryChannels: Int = 1, clockRate_MHz: Int = 100)
   extends Config((_, _, _) => {
     case ExtMem =>
       Some(
@@ -40,6 +41,17 @@ class WithKriaPlatform(nMemoryChannels: Int = 1)
     case PlatformSLRs => None
 
     case IsAWS => false
-    case PostProcessorMacro => _: Config => ;
+    case PostProcessorMacro => c: Config => {
+      if (c(BuildModeKey) == BuildMode.Synthesis) {
+        os.write(os.Path(ComposerBuild.composerGenDir) / "synth.tcl",
+          composer.Platforms.FPGA.Xilinx.SynthScript(
+            "composer",
+            "output",
+            "xck26-sfvc784-2LV-c",
+            "xilinx.com:kv260_som:part0:1.4",
+             clockRate_MHz.toString
+          ))
+      }
+    }
     case HasDisjointMemoryControllers => false
   })

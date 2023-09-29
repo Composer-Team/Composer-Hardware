@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import composer._
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
-import composer.MemoryStreams._
+import composer.MemoryStreams.{ScratchpadDataPort, ScratchpadMemReqPort, _}
 import composer.RoccHelpers._
 import composer.TLManagement.{ComposerIntraCoreIOModule, TLClientModule}
 import composer.common._
@@ -13,6 +13,8 @@ import composer.Generation.Tune.Tunable
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
+
+import scala.collection.immutable.Seq
 
 class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2) extends Bundle {
   val req: DecoupledIO[T1] = DecoupledIO(bundleIn)
@@ -227,6 +229,9 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
   }
 
   case class ReaderModuleChannel(requestChannel: DecoupledIO[ChannelTransactionBundle], dataChannel: DataChannelIO)
+  case class WriterModuleChannel(requestChannel: DecoupledIO[ChannelTransactionBundle], dataChannel: WriterDataChannelIO)
+
+  case class ScratchpadModuleChannel(requestChannel: ScratchpadMemReqPort, dataChannels: Seq[ScratchpadDataPort])
 
   def getReaderModule(name: String,
                       dataWidthBytes: Int,
@@ -278,18 +283,18 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
 
   def getWriterModule(name: String,
                       dataBytes: Int,
-                      idx: Int): (DecoupledIO[ChannelTransactionBundle], WriterDataChannelIO) = {
+                      idx: Int = 0): WriterModuleChannel = {
     val a = getWriterModules(name, dataBytes, Some(idx))
-    (a._1(0), a._2(0))
+    WriterModuleChannel(a._1(0), a._2(0))
   }
 
-  def getScratchpad(name: String): (ScratchpadMemReqPort, Seq[ScratchpadDataPort]) = {
+  def getScratchpad(name: String): ScratchpadModuleChannel = {
     val outer = composerConstructor.composerCoreWrapper
     val lm = outer.scratch_mod.filter(_._1 == name)(0)._2
     lm.suggestName(name)
     val mod = lm.module
 
-    (mod.req, mod.IOs)
+    ScratchpadModuleChannel(mod.req, mod.IOs)
   }
 
   def getWriterModules(name: String,
@@ -322,9 +327,9 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
     ret
   }
 
-  def ComposerIntraCoreIO[Tcmd <: AccelCommand, Tresp <: AccelResponse](endpoint: String,
-                                                                        genCmd: Tcmd = new ComposerRoccCommand,
-                                                                        genResp: Tresp = new AccelRoccUserResponse): CustomIOWithRouting[Tcmd, Tresp] = {
+  def getComposerIntraCoreIO[Tcmd <: AccelCommand, Tresp <: AccelResponse](endpoint: String,
+                                                                           genCmd: Tcmd = new ComposerRoccCommand,
+                                                                           genResp: Tresp = new AccelRoccUserResponse): CustomIOWithRouting[Tcmd, Tresp] = {
     val converter = Module(new ComposerIntraCoreIOModule(endpoint, genCmd, genResp))
     converter.respIO <> composer_response_ios_(endpoint)
     converter.cmdIO <> composer_command_ios_(endpoint)

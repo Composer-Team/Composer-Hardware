@@ -161,10 +161,30 @@ object CppGeneration {
     val template_sig = f"template<> $structName composer::response_handle<$structName>::get()"
     val command_sig = f"composer::response_handle<$structName> ${sysName}Command(uint16_t core_id, $signature)"
     val template_def = resp.fieldSubranges.map { ele =>
+      if (ele._1.endsWith("_FP")) {
+        (ele._1, f"__${ele._1}")
+      } else {
+        //noinspection DuplicatedCode
+        val shiftAmt = 1 + ele._2._1 - ele._2._2
+        val mask = if (shiftAmt < 64) (1L << shiftAmt) - 1 else -1L
+        (ele._1, f"(resp & 0x${mask.toHexString}L) >> ${ele._2._2}")
+      }
+    }.sortBy(_._1).map(_._2).reduce(_ + ", " + _)
+    val template_decs = resp.fieldSubranges.filter(_._1.endsWith("_FP")).map { ele =>
+      //noinspection DuplicatedCode
       val shiftAmt = 1 + ele._2._1 - ele._2._2
       val mask = if (shiftAmt < 64) (1L << shiftAmt) - 1 else -1L
-      (ele._1, f"(resp & 0x${mask.toHexString}L) >> ${ele._2._2}")
-    }.sortBy(_._1).map(_._2).reduce(_ + ", " + _)
+      val (ty_name, ty_name_int) = if (shiftAmt == 32) {
+        ("float", "uint32_t")
+      } else {
+        ("double", "uint64_t")
+      }
+      f"  $ty_name_int __${ele._1}_asInt = (resp & 0x${mask.toHexString}L) >> ${ele._2._2};\n" +
+        f"  $ty_name __${ele._1} = reinterpret_cast<$ty_name&>(__${ele._1}_asInt);\n"
+    } match {
+      case a: Seq[String] if a.isEmpty => ""
+      case a: Seq[String] => a.reduce(_ + " " + _)
+    }
 
     val definition =
       f"""
@@ -172,6 +192,9 @@ object CppGeneration {
          |$template_sig {
          |  auto r = rg.get();
          |  auto resp = r.data;
+         |
+         |$template_decs
+         |
          |  return $structName($template_def);
          |}
          |

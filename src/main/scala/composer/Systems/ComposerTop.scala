@@ -107,7 +107,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       beatBytes = externalMemParams.master.beatBytes
     )))
   }) else None
-  println("Beat bytes is " + externalMemParams.master.beatBytes)
 
   val dma_port = if (p(HasDMA).isDefined) {
     val dma_node = AXI4MasterNode(Seq(AXI4MasterPortParameters(

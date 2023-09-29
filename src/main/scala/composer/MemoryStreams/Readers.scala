@@ -106,7 +106,6 @@ class CReader(dataBytes: Int,
     System.err.println("Warning: CReader is using a single port memory. This may cause performance degradation.")
   }
   val prefetch_buffers_valid = Reg(Vec(prefetchRows, Bool()))
-  println("prefetch rows; " + prefetchRows)
   val sourceToIdx = Reg(Vec(nSources, UInt(log2Up(prefetchRows).W)))
   val beatsRemaining = Reg(Vec(nSources, UInt(log2Up(largeTxNBeats).W)))
 

@@ -118,7 +118,7 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
     }.map(_.toString()).fold("")(_ + " " + _)
 
 
-    os.write(synwd / "synth.tcl",
+    os.write(synwd / "synth.ssp",
       f"""set project_path $synwd
          |set save_path ./out
          |### tech files

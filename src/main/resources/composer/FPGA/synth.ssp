@@ -1,0 +1,69 @@
+# Chris Kjellqvist
+# 6 September 2023
+# Vivado script for performing synthesis. The setup should be managed by another file and everything here should
+# be pretty device-agnostic
+
+# Use of directives may require a whole new fine-tune data set
+# Some directives that may be interesting:
+#   - AreaOptimizied_high
+#   - LogicCompaction - Configures LUTs and Carry chains for multipliers in a way that makes it easier for the placer.
+#                       Maybe this would be make routability easier...
+#   - AlternateRoutability - Use algs. to improve routability with reduced use of MUXFs and CARRYs
+#   - PerformanceOptimized
+# Parameters:
+# - output_dir
+
+# SSP stuff
+<%@ val output_dir: String %>
+
+set synth_fail [catch {synth_design -flatten_hierarchy none -mode out_of_context -retiming \\
+  -directive PerformanceOptimized } ]
+
+write_checkpoint -force ${output_dir}/synth.dcp -quiet
+if {$synth_fail} {
+  puts "Synth Failed"
+  exit 1
+}
+
+set opt_design_fail [catch {opt_design -directive Explore}]
+write_checkpoint -force ${output_dir}/opt.dcp -quiet
+if {$opt_design_fail} {
+  puts "Opt Design Failed"
+  exit 1
+}
+
+set timing_pass [[get_property SLACK [get_timing_paths]]>=0]
+
+# If timing is not met, bail
+if { $timing_pass==0 } {
+    puts "Timing not met"
+    exit 1
+}
+
+# If timing is met, place design. Check that placement succeeds
+set place_fail [catch { place_design -directive Explore  > ${output_dir}/place_log.txt }]
+set place_timing_pass [[get_property SLACK [get_timing_paths]]>=0]
+if {$place_fail} {
+  puts "place fail"
+  exit 1
+}
+
+# If failure, then bail
+if { $place_timing_pass==0 } {
+    puts "Placement failed"
+    exit 1
+}
+# Write out the placed design
+write_checkpoint -force ${output_dir}/place.dcp -quiet
+
+# If success, route design. Check that routing succeeds
+set route_fail [catch {route_design -directive Explore > ${output_dir}/route_log.txt}]
+if {$route_fail} {
+  puts "Failed route"
+  exit 1
+}
+set route_timing_pass [[get_property SLACK [get_timing_paths]]>=0]
+# Write out the routed design
+write_checkpoint -force ${output_dir}/route.dcp
+
+exit 0

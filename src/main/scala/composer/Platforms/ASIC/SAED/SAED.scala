@@ -108,7 +108,7 @@ class WithSAED(corner: ProcessCorner = ProcessCorner.Typical,
       f"$baseMemories/ndm/saed14_sram_${mem}_frame_only.ndm"
     }.fold("")(_ + " " + _)
 
-    os.write(synwd / "synth.tcl",
+    os.write(synwd / "synth.ssp",
       f"""set project_path $synwd
          |set save_path ./out
          |### tech files

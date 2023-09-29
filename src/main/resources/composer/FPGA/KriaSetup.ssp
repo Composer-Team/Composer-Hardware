@@ -1,0 +1,81 @@
+# Chris Kjellqvist
+# 6 September 2023
+# Script for compiling top-level modules to the Kria KV260 board
+# It is meant to be filled in with Python f"" format strings, which is why there are extra curly braces
+# Parameters:
+#   - project_name
+#   - output_dir - this should be an absolute path
+#   - part_name
+#   - board_part
+#   - verilog_file - this should have a top_level 'clock', 'reset' (active high), a 128b AXI4 master and slave with
+#                       the prefixes 'M00_AXI_' and 'S00_AXI_', respectively
+#   - top_module - the name of the top module
+
+# SSP stuff
+<%@ val project_name: String %>
+<%@ val output_dir: String %>
+<%@ val part_name: String %>
+<%@ val board_part: String %>
+<%@ val verilog_file: String %>
+<%@ val top_module: String %>
+<%@ val clock_rate: String %>
+
+
+create_project ${project_name} ${output_dir} -part ${part_name} -force
+set_property board_part ${board_part} [current_project]
+
+create_bd_design "design_1"
+
+# Add Zynq MPSoC
+startgroup
+create_bd_cell -type ip -vlnv xilinx.com:ip:zynq_ultra_ps_e:3.4 soc
+endgroup
+apply_bd_automation -rule xilinx.com:bd_rule:zynq_ultra_ps_e -config {apply_board_preset "1" } [get_bd_cells soc]
+set_property -dict [list \\
+    CONFIG.PSU__USE__M_AXI_GP1 {0} \\
+    CONFIG.PSU__USE__S_AXI_GP2 {1} \\
+    CONFIG.PSU__SAXIGP2__DATA_WIDTH {32} \\
+    CONFIG.PSU__CRL_APB__PL0_REF_CTRL__FREQMHZ {${clock_rate}} \\
+] [get_bd_cells soc]
+add_files -norecurse ${verilog_file}
+update_compile_order -fileset sources_1
+create_bd_cell -type module -reference ${top_module} top
+
+set my_bd [exec find ${output_dir} -name "design_1.bd"]
+# Chisel designs have active high reset, but Zynq uses active low, so we need to switch it around
+startgroup
+create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 notReset
+endgroup
+set_property -dict [list \\
+    CONFIG.C_OPERATION {not} \\
+    CONFIG.C_SIZE {1} \\
+] [get_bd_cells notReset]
+connect_bd_net [get_bd_pins top/reset] [get_bd_pins notReset/Res]
+connect_bd_net [get_bd_pins notReset/Op1] [get_bd_pins soc/pl_resetn0]
+
+# Connect together AXI4
+startgroup
+apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { Clk_master {Auto} Clk_slave {Auto} \\
+  Clk_xbar {Auto} Master {/soc/M_AXI_HPM0_FPD} Slave {/top/S00_AXI} ddr_seg {Auto}             \\
+  intc_ip {New AXI SmartConnect} master_apm {0}} [get_bd_intf_pins top/S00_AXI]
+
+apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { Clk_master {Auto} Clk_slave {Auto} \\
+  Clk_xbar {Auto} Master {/top/M00_AXI} Slave {/soc/S_AXI_HP0_FPD} ddr_seg {Auto}              \\
+  intc_ip {New AXI SmartConnect} master_apm {0}} [get_bd_intf_pins soc/S_AXI_HP0_FPD]
+
+# Make wrapper and setup build environment
+make_wrapper -files [get_files [exec find ${output_dir} -name "design_1.bd" ] ] -top
+add_files -norecurse [exec find ${output_dir} -name "design_1_wrapper.v" ]
+set_property top design_1_wrapper [current_fileset]
+update_compile_order -fileset sources_1
+
+# Make it so that we can just run synth_design and not have to deal with out-of-context IPs
+reset_target all [get_files $my_bd]
+export_ip_user_files -of_objects [get_files $my_bd] -sync -no_script -force -quiet
+set_property synth_checkpoint_mode None [get_files $my_bd]
+generate_target all [get_files $my_bd]
+export_ip_user_files -of_objects [get_files $my_bd] -no_script -sync -force -quiet
+
+# Print out retiming output. 4096 _should_ be enough
+set_msg_config -id "Synth 8-5816" -limit 4096
+# Now we should be ready to just run synth_design

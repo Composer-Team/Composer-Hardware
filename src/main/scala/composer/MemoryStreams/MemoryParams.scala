@@ -85,7 +85,7 @@ case class CReadChannelParams(name: String, nChannels: Int = 1, maxInFlightTxs: 
  * @param nChannels      number of memory access channels of this type
  * @param maxInFlightTxs maximum number of AXI/TileLink memory transactions can be inflight per writer module at once
  */
-case class CWriteChannelParams(name: String, nChannels: Int, maxInFlightTxs: Int = 2) extends CChannelParams {
+case class CWriteChannelParams(name: String, nChannels: Int = 1, maxInFlightTxs: Int = 2) extends CChannelParams {
 }
 
 /**

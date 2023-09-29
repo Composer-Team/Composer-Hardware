@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import composer.MemoryStreams.RAM.SyncReadMemMem
 import composer.Platforms.ASIC.MemoryCompiler
-import composer.Platforms.FPGA.Xilinx.{XilinxBRAMSDP, XilinxBRAMTDP}
+import composer.Platforms.FPGA.Xilinx.Templates.{BRAMSDP, BRAMTDP}
 import composer.Platforms.{ASICMemoryCompilerKey, PlatformType, PlatformTypeKey}
 import freechips.rocketchip.diplomacy.ValName
 
@@ -105,8 +105,8 @@ object Memory {
               }
               val low_idx = bank_idx * memoryWidth
 
-              val cmem = if (nPorts == 1) {
-                val cmem = Module(new XilinxBRAMSDP(
+              val mem = if (nPorts == 1) {
+                val cmem = Module(new BRAMSDP(
                   latency - 2,
                   high_idx - low_idx + 1,
                   rowRoundPow2,
@@ -123,7 +123,7 @@ object Memory {
                 mio.data_out(0) := cmem.io.O
                 cmem
               } else {
-                val cmem = Module(new XilinxBRAMTDP(
+                val cmem = Module(new BRAMTDP(
                   latency - 2,
                   high_idx - low_idx + 1,
                   rowRoundPow2,
@@ -144,7 +144,7 @@ object Memory {
                 mio.data_out(1) := cmem.io.O2
                 cmem
               }
-              (cmem, bank_idx)
+              (mem, bank_idx)
             }
 
             mio.data_out(0) := Cat(mems.map(_._1.data_out(0)).reverse)
@@ -154,9 +154,9 @@ object Memory {
           } else {
             val cmem = Module(new SyncReadMemMem(nReadPorts, nWritePorts, nReadWritePorts, nRows, dataWidth, latency))
             mio <> cmem.mio
-            val allocInfo = XilinxBRAMTDP.getMemoryResources(nRows, dataWidth, debugName.getOrElse("anonymous"), nPorts == 1)
-            XilinxBRAMTDP.allocateURAM(allocInfo.urams)
-            XilinxBRAMTDP.allocateBRAM(allocInfo.brams)
+            val allocInfo = BRAMTDP.getMemoryResources(nRows, dataWidth, debugName.getOrElse("anonymous"), nPorts == 1)
+            BRAMTDP.allocateURAM(allocInfo.urams)
+            BRAMTDP.allocateBRAM(allocInfo.brams)
             // latency == 1 or 2. Recognizing URAM/BRAM is now in god's hands
           }
           mio
@@ -218,7 +218,7 @@ class CMemoryIOBundle(val nReadPorts: Int,
                       val nReadWritePorts: Int,
                       val addrBits: Int,
                       val dataWidth: Int) extends Bundle {
-  val nPorts = nReadPorts + nWritePorts + nReadWritePorts
+  def nPorts: Int = nReadPorts + nWritePorts + nReadWritePorts
   val addr = Input(Vec(nPorts, UInt(addrBits.W)))
 
   val data_in = Input(Vec(nPorts, UInt(dataWidth.W)))
@@ -243,6 +243,12 @@ class CMemoryIOBundle(val nReadPorts: Int,
     require(idx < nReadWritePorts)
     idx + nReadPorts + nWritePorts
   }
+
+  def initLow(clock: Clock): Unit = {
+    Seq(data_in, addr) foreach (_ := DontCare)
+    Seq(chip_select, write_enable, read_enable) foreach (_.foreach(_ := 0.U))
+    this.clock := clock.asBool
+  }
 }
 
 
@@ -252,7 +258,7 @@ trait HasCMemoryIO {
 
 trait withMemoryIOForwarding {
   val addrBits: Int
-  val nPorts: Int
+  def nPorts: Int
   val addr_FW = Output(Vec(nPorts, UInt(addrBits.W)))
   val chip_select_FW = Output(Vec(nPorts, Bool()))
   val read_enable_FW = Output(Vec(nPorts, Bool()))
