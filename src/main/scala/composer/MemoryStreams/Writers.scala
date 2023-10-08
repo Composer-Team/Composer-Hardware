@@ -48,7 +48,7 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
   private val haveAvailableTxSlot = txStates.map(_ === tx_inactive).reduce(_ || _)
 
   //  val isReallyIdle = state === s_idle && !haveTransactionToDo
-  io.channel.channelIdle := !haveTransactionToDo
+  io.channel.channelIdle := !haveTransactionToDo && state === s_idle
 
   require(nBytes >= 1)
   require(nBytes <= beatBytes)

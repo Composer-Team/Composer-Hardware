@@ -8,10 +8,7 @@ import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.tilelink.TLIdentityNode
 
 class FrontBusWidget(implicit p: Parameters) extends Widget()(p) {
-//  override val crFile = LazyModule(new MCRFileAXI(8)(p))
-//  crFile.node := AXI4IdIndexer(1) := node
   override val crFile = LazyModule(new MCRFileTL(8))
-  val throughId = TLIdentityNode()
   crFile.node := node
   override lazy val module = new AXILWidgetModule(this)
 }

@@ -71,6 +71,8 @@ class WithComposer(
       case TLInterconnectWidthBytes => 16
       case PgLevels             => 5
       case XLen                 => 64 // Applies to all cores
+      // PrefetchSourceMultiplicity must comply with the maximum number of beats
+      // allowed by the underlying protocl. For AXI4, this is 256
       case PrefetchSourceMultiplicity => 32
       case CmdRespBusWidthBytes => 4
       case UseConfigAsOutputNameKey => useConfigAsOutputName

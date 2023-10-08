@@ -10,6 +10,7 @@ import composer.Systems.ComposerTop._
 import composer.common.CLog2Up
 import composer.Generation.Tune.Tunable
 import composer.Platforms.{BuildModeKey, FrontBusProtocol, FrontBusProtocolKey, HasDMA}
+import composer.TLManagement.TLSourceShrinkerDynamic
 import freechips.rocketchip.amba.ahb._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
@@ -100,8 +101,8 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
         address = Seq(getAddressSet(channel_idx)),
         resources = device.reg,
         regionType = RegionType.UNCACHED,
-        supportsRead = TransferSizes(externalMemParams.master.beatBytes * 16),
-        supportsWrite = TransferSizes(externalMemParams.master.beatBytes * 16),
+        supportsRead = TransferSizes(externalMemParams.master.beatBytes * p(PrefetchSourceMultiplicity)),
+        supportsWrite = TransferSizes(externalMemParams.master.beatBytes * p(PrefetchSourceMultiplicity)),
         interleavedId = Some(1)
       )),
       beatBytes = externalMemParams.master.beatBytes
@@ -133,7 +134,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       := AXI4Buffer()
       := TLToAXI4()
       := TLBuffer()
-      := TLSourceShrinker2(availableComposerSources)
+      := TLSourceShrinkerDynamic(availableComposerSources)
       := TLBuffer()
       := m)
     composer_mem
