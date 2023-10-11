@@ -5,11 +5,12 @@ import chisel3._
 import chisel3.util._
 import composer._
 import composer.Generation._
-import composer.RoccHelpers.{AXI4Compat, FrontBusHub}
+import composer.RoccHelpers.FrontBusHub
 import composer.Systems.ComposerTop._
 import composer.common.CLog2Up
 import composer.Generation.Tune.Tunable
 import composer.Platforms.{BuildModeKey, FrontBusProtocol, FrontBusProtocolKey, HasDMA}
+import composer.Protocol.AXI4Compat
 import composer.TLManagement.TLSourceShrinkerDynamic
 import freechips.rocketchip.amba.ahb._
 import freechips.rocketchip.amba.axi4._
@@ -80,15 +81,10 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
           masters = Seq(AHBMasterParameters(
             "S00_AHB"
           ))
-        ))
-      )
+        )))
       cmd_resp_axilhub.node.asInstanceOf[AHBSlaveIdentityNode] := ahb_master
       ahb_master
   }
-
-  // connect axil hub to external axil port
-//  cmd_resp_axilhub.node := AXI4Buffer() := COMM_IN
-  // connect axil hub to accelerator
 
   val dummyTL = p.alterPartial({ case TileVisibilityNodeKey => cmd_resp_axilhub.widget.node })
 
@@ -199,11 +195,6 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
     val ins = dram_ports.map(_.in(0))
     //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
     (M00_AXI zip ins) foreach { case (i, (o, _)) => AXI4Compat.connectCompatMaster(i, o) }
-
-//    val read_success = EventPerformanceCounter(M00_AXI.map(axi => axi.rvalid && axi.rready), new NoObjective)
-    //    val read_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.rready && axi.rvalid), new NoObjective)
-    //    val write_request_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.awready && axi.awvalid), new NoObjective)
-    //    val read_request_conflict = EventPerformanceCounter(M00_AXI.map(axi => !axi.arready && axi.arvalid), new NoObjective)
 
     // make incoming dma port and connect it
     if (p(HasDMA).isDefined) {
