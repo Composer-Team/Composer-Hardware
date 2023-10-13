@@ -6,6 +6,7 @@ import composer.Generation.BuildMode
 import composer.MemoryStreams._
 import composer.Platforms.BuildModeKey
 import composer.Systems.{AccelCoreWrapper, AcceleratorCore}
+import freechips.rocketchip.amba.axi4.{AXI4MasterParameters, AXI4MasterPortParameters}
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
@@ -29,6 +30,10 @@ case object CXbarMaxDegree extends Field[Int]
 case object CmdRespBusWidthBytes extends Field[Int]
 case object PlatformPhysicalMemoryBytes extends Field[Long]
 case object MaxInFlightMemTxsPerSource extends Field[Int]
+
+// Platforms that require full bi-directional IO coherence must set this to true
+case class CoherenceConfiguration(memParams: MasterPortParams, maxMemorySegments: Int)
+case object HasCoherence extends Field[Option[CoherenceConfiguration]]
 case object CoreCommandLatency
     extends Field[Int] // this might need to be high to expand beyond one slr
 
@@ -73,7 +78,6 @@ class WithComposer(
       case XLen                 => 64 // Applies to all cores
       // PrefetchSourceMultiplicity must comply with the maximum number of beats
       // allowed by the underlying protocl. For AXI4, this is 256
-      case PrefetchSourceMultiplicity => 32
       case CmdRespBusWidthBytes => 4
       case UseConfigAsOutputNameKey => useConfigAsOutputName
       case MaxHartIdBits => 1

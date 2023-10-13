@@ -10,7 +10,7 @@ import composer.Systems.ComposerTop._
 import composer.common.CLog2Up
 import composer.Generation.Tune.Tunable
 import composer.Platforms.{BuildModeKey, FrontBusProtocol, FrontBusProtocolKey, HasDMA}
-import composer.Protocol.AXI4Compat
+import composer.Protocol.{ACE, AXI4Compat}
 import composer.TLManagement.TLSourceShrinkerDynamic
 import freechips.rocketchip.amba.ahb._
 import freechips.rocketchip.amba.axi4._
@@ -85,13 +85,13 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       cmd_resp_axilhub.node.asInstanceOf[AHBSlaveIdentityNode] := ahb_master
       ahb_master
   }
-
   val dummyTL = p.alterPartial({ case TileVisibilityNodeKey => cmd_resp_axilhub.widget.node })
 
+  // Generate accelerator SoC
+  val accelerator_system = LazyModule(new ComposerAccSystem()(dummyTL))
 
-  val acc = LazyModule(new ComposerAccSystem()(dummyTL))
-
-  val AXI_MEM = if (acc.mem.nonEmpty) Some(Seq.tabulate(nMemChannels) { channel_idx =>
+  // Rocketchip AXI Nodes
+  val AXI_MEM = if (accelerator_system.mem.nonEmpty) Some(Seq.tabulate(nMemChannels) { channel_idx =>
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
         address = Seq(getAddressSet(channel_idx)),
@@ -119,10 +119,8 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     None
   }
 
-  // We have to share shell DDR ports with DMA bus (which is AXI4). Use RocketChip utils to do that instead of the
-  // whole shebang with instantiating strange encrypted Xilinx IPs'
-
-  val composer_mems = acc.mem map { m =>
+  // Connect accelerators to memory
+  val composer_mems = accelerator_system.mem map { m =>
     val composer_mem = AXI4IdentityNode()
     val DMASourceBits = if (p(HasDMA).isDefined) CLog2Up(p(HasDMA).get) else 0
     val availableComposerSources = 1 << (p(ExtMem).get.master.idBits - DMASourceBits)
@@ -147,7 +145,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   } else {
     composer_mems
   }
-
   AXI_MEM match {
     case Some(mems) =>
       mem_tops zip mems foreach { case (mt, endpoint) =>
@@ -159,13 +156,11 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     case None => ;
   }
 
-
-
   lazy val module = new TopImpl(this)
 }
 
 class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
-  val acc = outer.acc
+  val acc = outer.accelerator_system
   val axil_hub = outer.cmd_resp_axilhub
   val ocl_port = outer.COMM_IN
   acc.module.io.cmd <> axil_hub.module.io.rocc_in
@@ -174,7 +169,7 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   val S00_AXI = p(FrontBusProtocolKey) match {
     case FrontBusProtocol.AXI4 | FrontBusProtocol.AXIL =>
       val port_cast = ocl_port.asInstanceOf[AXI4MasterNode]
-      val S00_AXI = IO(Flipped(new AXI4Compat(port_cast.out(0)._1.params)))
+      val S00_AXI = IO(Flipped(AXI4Compat(port_cast.out(0)._1.params)))
       AXI4Compat.connectCompatSlave(S00_AXI, port_cast.out(0)._1)
       S00_AXI
     case FrontBusProtocol.AHB =>
@@ -185,10 +180,17 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
       S00_AHB
   }
 
+  val _ = p(HasCoherence) match {
+    case None => None;
+    case Some(cc: CoherenceConfiguration) =>
+      val M_AXI4_ACE = IO(new ACE(cc.memParams))
+      outer.cmd_resp_axilhub.module.io.ace_bus.get <> M_AXI4_ACE
+  }
+
   if (outer.AXI_MEM.isDefined) {
     val dram_ports = outer.AXI_MEM.get
     val M00_AXI = dram_ports.zipWithIndex.map{case (a, idx) =>
-      val io = IO(new AXI4Compat(a.in(0)._1.params))
+      val io = IO(AXI4Compat(a.in(0)._1.params))
       io.suggestName(s"M0${idx}_AXI")
       io
     }
@@ -198,7 +200,7 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
 
     // make incoming dma port and connect it
     if (p(HasDMA).isDefined) {
-      val dma = IO(Flipped(new AXI4Compat(outer.AXI_MEM.get(0).in(0)._1.params)))
+      val dma = IO(Flipped(AXI4Compat(outer.AXI_MEM.get(0).in(0)._1.params)))
       AXI4Compat.connectCompatSlave(dma, outer.dma_port.get.out(0)._1)
     }
 
@@ -212,7 +214,8 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
     }
   }
 
-  // try to make this the last thing we do
+  // Generate C++ headers once all of the cores have been generated so that they have
+  //   the opportunity to dictate which symbols they want exported
   CppGeneration.genCPPHeader(outer.cmd_resp_axilhub.widget.module.crRegistry, acc.acc)
   ConstraintGeneration.writeConstraints()
   if (p(BuildModeKey).isInstanceOf[BuildMode.Tuning]) {

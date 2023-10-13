@@ -2,25 +2,34 @@ package composer.Protocol
 
 import freechips.rocketchip.amba.axi4.AXI4BundleParameters
 import chisel3._
+import composer.Protocol.ACE._
+import freechips.rocketchip.subsystem.MasterPortParams
+
+object ACE {
+  val snoopWidth = 4
+  val domainWidth = 2
+  val barWidth = 2
+  val respWidth = 4
+}
 
 //noinspection ScalaUnusedSymbol
-class ACE(param: AXI4BundleParameters) extends AXI4Compat(param) {
-  val arsnoop = Output(UInt(4.W))
-  val ardomain = Output(UInt(2.W))
-  val arbar = Output(UInt(2.W))
+class ACE(param: MasterPortParams) extends AXI4Compat(param) {
+  val arsnoop = Output(UInt(snoopWidth.W))
+  val ardomain = Output(UInt(domainWidth.W))
+  val arbar = Output(UInt(barWidth.W))
 
-  val awsnoop = Output(UInt(3.W))
-  val awdomain = Output(UInt(2.W))
-  val awbar = Output(UInt(2.W))
+  val awsnoop = Output(UInt(snoopWidth.W))
+  val awdomain = Output(UInt(domainWidth.W))
+  val awbar = Output(UInt(barWidth.W))
   val awunique = Output(Bool())
 
   override val rresp = Output(UInt(4.W))
 
   val acvalid = Input(Bool())
   val acready = Output(Bool())
-  val acaddr = Input(UInt(param.addrBits.W))
-  val acsnoop = Input(UInt(4.W))
-  val acprot = Input(UInt(3.W))
+  val acaddr = Input(UInt(addrBits.W))
+  val acsnoop = Input(UInt(snoopWidth.W))
+  val acprot = Input(UInt(AXI4Compat.protWidth.W))
 
   val crvalid = Output(Bool())
   val crready = Input(Bool())
@@ -28,7 +37,7 @@ class ACE(param: AXI4BundleParameters) extends AXI4Compat(param) {
 
   val cdvalid = Output(Bool())
   val cdready = Input(Bool())
-  val cddata = Output(UInt(param.dataBits.W))
+  val cddata = Output(UInt(dataBits.W))
   val cdlast = Output(Bool())
 
   /**

@@ -1,57 +1,72 @@
 package composer.Protocol
 
 import chisel3._
+import chisel3.util.log2Up
+import composer.Protocol.AXI4Compat._
 import freechips.rocketchip.amba.axi4.{AXI4Bundle, AXI4BundleParameters}
+import freechips.rocketchip.subsystem.MasterPortParams
 
-class AXI4Compat(param: AXI4BundleParameters) extends Bundle {
+class AXI4Compat(param: MasterPortParams) extends Bundle {
+  val addrBits = log2Up(param.size)
+  val dataBits = param.beatBytes * 8
+
   val awid = Output(UInt(param.idBits.W))
-  val awaddr = Output(UInt(param.addrBits.W))
-  val awlen = Output(UInt(param.lenBits.W))
-  val awsize = Output(UInt(param.sizeBits.W))
-  val awburst = Output(UInt(param.burstBits.W))
+  val awaddr = Output(UInt(addrBits.W))
+  val awlen = Output(UInt(lenWidth.W))
+  val awsize = Output(UInt(sizeWidth.W))
+  val awburst = Output(UInt(burstWidth.W))
   val awlock = Output(Bool())
-  val awcache = Output(UInt(param.cacheBits.W))
-  val awprot = Output(UInt(param.protBits.W))
-  val awregion = Output(UInt(4.W))
-  val awqos = Output(UInt(4.W))
+  val awcache = Output(UInt(cacheWidth.W))
+  val awprot = Output(UInt(protWidth.W))
+  val awregion = Output(UInt(regionWidth.W))
+  val awqos = Output(UInt(qosWidth.W))
   //  val awuser = Output(UInt(param.))
   val awvalid = Output(Bool())
   val awready = Input(Bool())
 
-  val wdata = Output(UInt(param.dataBits.W))
-  val wstrb = Output(UInt((param.dataBits / 8).W))
+  val wdata = Output(UInt(dataBits.W))
+  val wstrb = Output(UInt((dataBits / 8).W))
   val wlast = Output(Bool())
   val wvalid = Output(Bool())
   val wready = Input(Bool())
 
   val bid = Input(UInt(param.idBits.W))
-  val bresp = Input(UInt(param.respBits.W))
+  val bresp = Input(UInt(respWidth.W))
   val bvalid = Input(Bool())
   val bready = Output(Bool())
 
   val arid = Output(UInt(param.idBits.W))
-  val araddr = Output(UInt(param.addrBits.W))
-  val arlen = Output(UInt(param.lenBits.W))
-  val arsize = Output(UInt(param.sizeBits.W))
-  val arburst = Output(UInt(param.burstBits.W))
+  val araddr = Output(UInt(addrBits.W))
+  val arlen = Output(UInt(lenWidth.W))
+  val arsize = Output(UInt(sizeWidth.W))
+  val arburst = Output(UInt(burstWidth.W))
   val arlock = Output(Bool())
-  val arcache = Output(UInt(param.cacheBits.W))
-  val arprot = Output(UInt(param.protBits.W))
-  val arregion = Output(UInt(4.W))
-  val arqos = Output(UInt(4.W))
+  val arcache = Output(UInt(cacheWidth.W))
+  val arprot = Output(UInt(protWidth.W))
+  val arregion = Output(UInt(regionWidth.W))
+  val arqos = Output(UInt(qosWidth.W))
   //  val awuser = Output(UInt(param.))
   val arvalid = Output(Bool())
   val arready = Input(Bool())
 
   val rid = Input(UInt(param.idBits.W))
-  val rdata = Input(UInt(param.dataBits.W))
-  val rresp = Input(UInt(param.respBits.W))
+  val rdata = Input(UInt(dataBits.W))
+  val rresp = Input(UInt(respWidth.W))
   val rlast = Input(Bool())
   val rvalid = Input(Bool())
   val rready = Output(Bool())
 }
 
 object AXI4Compat {
+  val cacheWidth = 4
+  val protWidth = 3
+  val qosWidth = 4
+  val regionWidth = 4
+  val burstWidth = 2
+  val sizeWidth = 3
+  val lenWidth = 8
+  val respWidth = 2
+
   def connectCompatMaster(compat: AXI4Compat, axi4: AXI4Bundle): Unit = {
     axi4.r.bits.id := compat.rid
     axi4.r.bits.data := compat.rdata
@@ -142,4 +157,7 @@ object AXI4Compat {
     compat.wready := axi4.w.ready
   }
 
+  def apply(bundleParameters: AXI4BundleParameters): AXI4Compat =
+    new AXI4Compat(MasterPortParams(0, 1 << bundleParameters.addrBits, bundleParameters.dataBits / 8,
+      bundleParameters.idBits))
 }

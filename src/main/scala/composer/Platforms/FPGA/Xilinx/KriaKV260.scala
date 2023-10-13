@@ -1,11 +1,12 @@
 package composer.Platforms.FPGA.Xilinx
 
 import chipsalliance.rocketchip.config.Config
-import composer.Generation.{BuildMode, ComposerBuild}
-import composer.{CXbarMaxDegree, CoreCommandLatency, PlatformPhysicalMemoryBytes}
-import composer.Platforms.{BuildModeKey, DefaultClockRateKey, FrontBusAddressMask, FrontBusBaseAddress, FrontBusBeatBytes, FrontBusProtocol, FrontBusProtocolKey, HasDMA, HasDiscreteMemory, HasDisjointMemoryControllers, IsAWS, PlatformNBRAM, PlatformNURAM, PlatformNumSLRs, PlatformType, PlatformTypeKey, PostProcessorMacro}
+import composer.Generation._
+import composer._
+import composer.Platforms._
 import composer.Platforms.FPGA.PlatformSLRs
-import freechips.rocketchip.subsystem.{ExtMem, MasterPortParams, MemoryPortParams}
+import freechips.rocketchip.amba.axi4.{AXI4MasterParameters, AXI4MasterPortParameters}
+import freechips.rocketchip.subsystem._
 
 class WithKriaPlatform(nMemoryChannels: Int = 1, clockRate_MHz: Int = 100)
   extends Config((_, _, _) => {
@@ -31,6 +32,7 @@ class WithKriaPlatform(nMemoryChannels: Int = 1, clockRate_MHz: Int = 100)
     case HasDiscreteMemory => false
     case FrontBusBeatBytes => 4
     case CoreCommandLatency => 0
+    case PrefetchSourceMultiplicity => 32
 
     case PlatformTypeKey => PlatformType.FPGA
     case FrontBusProtocolKey => FrontBusProtocol.AXI4
@@ -39,6 +41,12 @@ class WithKriaPlatform(nMemoryChannels: Int = 1, clockRate_MHz: Int = 100)
     case DefaultClockRateKey => 100
     case PlatformNumSLRs => 1
     case PlatformSLRs => None
+    case HasCoherence => Some(CoherenceConfiguration(MasterPortParams(
+      base = 0,
+      size = 1L << 40,
+      beatBytes = 16,
+      idBits=6), 64))
+
 
     case IsAWS => false
     case PostProcessorMacro => c: Config => {

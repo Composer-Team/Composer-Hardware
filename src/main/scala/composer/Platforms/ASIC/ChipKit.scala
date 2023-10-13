@@ -1,9 +1,9 @@
 package composer.Platforms.ASIC
 
 import chipsalliance.rocketchip.config.Config
-import composer.{CoreCommandLatency, CXbarMaxDegree, PlatformPhysicalMemoryBytes}
-import composer.Platforms.{DefaultClockRateKey, FrontBusAddressMask, FrontBusBaseAddress, FrontBusBeatBytes, FrontBusProtocol, FrontBusProtocolKey, HasDiscreteMemory, HasDisjointMemoryControllers, HasDMA, IsAWS, PlatformType, PlatformTypeKey}
-import freechips.rocketchip.subsystem.{ExtMem, MasterPortParams, MemoryPortParams}
+import composer._
+import composer.Platforms._
+import freechips.rocketchip.subsystem._
 
 
 class WithChipKitPlatform(synthesis: Boolean = false)
@@ -34,6 +34,7 @@ class WithChipKitPlatform(synthesis: Boolean = false)
     case PlatformTypeKey => PlatformType.ASIC
     case FrontBusProtocolKey => FrontBusProtocol.AHB
     case DefaultClockRateKey => 100
+    case HasCoherence => false
 
     case IsAWS => false
     case HasDisjointMemoryControllers => false

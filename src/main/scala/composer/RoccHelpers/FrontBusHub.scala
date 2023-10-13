@@ -7,6 +7,7 @@ import chipsalliance.rocketchip.config._
 import composer._
 import composer.common.AccelRoccResponse
 import composer.Platforms.{FrontBusProtocol, FrontBusProtocolKey}
+import composer.Protocol.ACE
 import freechips.rocketchip.amba.ahb.{AHBMasterIdentityNode, AHBSlaveIdentityNode, AHBToTL}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tile.{RoCCCommand, RoCCResponse, TileVisibilityNodeKey}
@@ -43,6 +44,10 @@ class AXILHubModule(outer: FrontBusHub)(implicit p: Parameters) extends LazyModu
   val io = IO(new Bundle {
     val rocc_in = Decoupled(new RoCCCommand)
     val rocc_out = Flipped(Decoupled(new AccelRoccResponse))
+    val ace_bus = p(HasCoherence) match {
+      case Some(cc) => Some(new ACE(cc.memParams))
+      case _ => None
+    }
   })
   val axil_widget = outer.widget.module
 
@@ -53,5 +58,6 @@ class AXILHubModule(outer: FrontBusHub)(implicit p: Parameters) extends LazyModu
   rocc_to_axil.io.rocc <> io.rocc_out
   axil_to_rocc.io.in <> axil_widget.io.cmds
   io.rocc_in <> axil_to_rocc.io.rocc
+  if (p(HasCoherence).isDefined) axil_widget.io.ace_bus.get <> io.ace_bus.get
 
 }

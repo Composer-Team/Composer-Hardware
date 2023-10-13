@@ -56,12 +56,15 @@ object CppGeneration {
 
   private def getCType(name: String, width: Int, unsigned: Boolean): String = {
     val isFloatingPoint = name.contains("FP")
+    val isFpgaAddress = name.endsWith("_ADDR")
     if (isFloatingPoint) {
       width match {
         case 32 => "float"
         case 64 => "double"
         case _ => throw new Exception(s"Trying to export a float type but has width $width. Expecting either 32 or 64")
       }
+    } else if (isFpgaAddress) {
+      "remote_ptr"
     } else {
       val prefix = if (unsigned) "u" else ""
       width match {
@@ -133,13 +136,14 @@ object CppGeneration {
       val payloadId = low / 64
       val payloadLocalOffset = low % 64
       val bitsLeftInPayload = 64 - payloadLocalOffset
+      val access = if (name.endsWith("_ADDR")) f"$name.getFpgaAddr()" else name
       if (bitsLeftInPayload < width) {
         // we're going to roll over!
-        Seq((payloadId, f"((uint64_t)($name & ${intToHexFlag((1L << bitsLeftInPayload) - 1)}L) << $payloadLocalOffset)"),
-          (payloadId + 1, f"(((uint64_t)$name >> $bitsLeftInPayload) & ${intToHexFlag((1L << (width - bitsLeftInPayload)) - 1)}L)")
+        Seq((payloadId, f"((uint64_t)($access & ${intToHexFlag((1L << bitsLeftInPayload) - 1)}L) << $payloadLocalOffset)"),
+          (payloadId + 1, f"(((uint64_t)$access >> $bitsLeftInPayload) & ${intToHexFlag((1L << (width - bitsLeftInPayload)) - 1)}L)")
         )
       } else {
-        Seq((payloadId, f"((uint64_t)$name << $payloadLocalOffset)"))
+        Seq((payloadId, f"((uint64_t)$access << $payloadLocalOffset)"))
       }
     }
     val assignments = (0 until (numCommands * 2)) map { payloadIdx =>
@@ -159,7 +163,8 @@ object CppGeneration {
       s"$structName(${safe_join(structMembersWithType, ", ")}) : ${safe_join(resp.realElements.map(a => f"${a._1}(${a._1})"))} {}\n}"
 
     val template_sig = f"template<> $structName composer::response_handle<$structName>::get()"
-    val command_sig = f"composer::response_handle<$structName> ${sysName}Command(uint16_t core_id, $signature)"
+    val command_sig = f"composer::response_handle<$structName> ${sysName}Command(uint16_t core_id, $signature," +
+      f" const std::vector<remote_ptr>& memory_operands = {})"
     val template_def = resp.fieldSubranges.map { ele =>
       if (ele._1.endsWith("_FP")) {
         (ele._1, f"__${ele._1}")
@@ -206,7 +211,7 @@ object CppGeneration {
            |  for (int i = 0; i < ${numCommands - 1}; ++i) {
            |    composer::rocc_cmd::start_cmd(${sysName}_ID, false, 0, false, false, core_id, payloads[i*2+1], payloads[i*2]).send();
            |  }
-           |  return composer::rocc_cmd::start_cmd(${sysName}_ID, true, 0, false, false, core_id, payloads[${(numCommands - 1) *2 + 1}], payloads[${(numCommands - 1)*2}]).send().to<$structName>();
+           |  return composer::rocc_cmd::start_cmd(${sysName}_ID, true, 0, false, false, core_id, payloads[${(numCommands - 1) *2 + 1}], payloads[${(numCommands - 1)*2}], memory_operands).send().to<$structName>();
            |}
            |""".stripMargin
     val declaration =
@@ -230,7 +235,7 @@ object CppGeneration {
          |#ifdef SIM
          |#define NUM_DDR_CHANNELS ${mem.nMemoryChannels}
          |#endif
-         |using composer_allocator=composer::device_allocator<0x${p(PlatformPhysicalMemoryBytes).toHexString}>;
+         |#define ALLOCATOR_SIZE_BYTES (0x${p(PlatformPhysicalMemoryBytes).toHexString}L)
          |${if (!p(HasDiscreteMemory)) "#ifdef SIM" else ""}
          |""".stripMargin + "#define COMPOSER_USE_CUSTOM_ALLOC\n" +
         (if (!p(HasDiscreteMemory)) "#endif" else "")
@@ -253,7 +258,7 @@ object CppGeneration {
          |static const uint8_t system_id_bits = $SystemIDLengthKey;
          |static const uint8_t core_id_bits = $CoreIDLengthKey;
          |static const composer::composer_pack_info pack_cfg(system_id_bits, core_id_bits);
-         |static const uint64_t addrMask = ${addrSet.mask};
+         |static const uint64_t addrMask = 0x${addrSet.mask.toLong.toHexString};
          |""".stripMargin
 
     // this next stuff is just for simulation
@@ -289,7 +294,7 @@ object CppGeneration {
       case None =>
         "// No memory detected, not defining Address Sim Dtype"
     }
-    val mmio_addr = "const uint64_t ComposerMMIOOffset = " + p(FrontBusBaseAddress) + "L;"
+    val mmio_addr = "const uint64_t ComposerMMIOOffset = 0x" + p(FrontBusBaseAddress).toHexString + "L;"
 
     val header = new FileWriter((path / "composer_allocator_declaration.h").toString())
     header.write(

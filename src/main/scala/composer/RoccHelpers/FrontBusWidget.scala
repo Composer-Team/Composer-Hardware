@@ -3,12 +3,15 @@ package composer.RoccHelpers
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
+import composer.Generation._
+import composer.HasCoherence
+import composer.Platforms.BuildModeKey
+import composer.Protocol.{ACE, ACEZynqRegionManager}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy.LazyModule
-import freechips.rocketchip.tilelink.TLIdentityNode
 
 class FrontBusWidget(implicit p: Parameters) extends Widget()(p) {
-  override val crFile = LazyModule(new MCRFileTL(8))
+  override val crFile = LazyModule(new MCRFileTL(16))
   crFile.node := node
   override lazy val module = new AXILWidgetModule(this)
 }
@@ -18,6 +21,11 @@ class AXILWidgetModule(outer: FrontBusWidget) extends WidgetModule(outer) {
   val io = IO(new Bundle {
     val cmds = Decoupled(UInt(nastiXDataBits.W))
     val resp = Flipped(Decoupled(UInt(nastiXDataBits.W)))
+
+    val ace_bus = p(HasCoherence) match {
+      case None => None
+      case Some(cc) => Some(new ACE(cc.memParams))
+    }
   })
 
   val roccCmdFifo = Module(new Queue(UInt(nastiXDataBits.W), 16))
@@ -29,13 +37,28 @@ class AXILWidgetModule(outer: FrontBusWidget) extends WidgetModule(outer) {
 
   genWOReg(roccCmdFifo.io.enq.bits, "cmd_bits")
   Pulsify(genWORegInit(roccCmdFifo.io.enq.valid, "cmd_valid", false.B), pulseLength = 1)
-  genROReg(roccCmdFifo.io.enq.ready, "cmd_ready")
 
   genROReg(WireInit(0xDEADCAFEL.U(32.W)), "AXIL_DEBUG")
 
+  // ACE Coherence should only built if enabled and if not running a simulation. Our simulator doesn't instrument
+  //   coherence
+  if (p(HasCoherence).isDefined && p(BuildModeKey) == BuildMode.Synthesis) {
+    val mpp = p(HasCoherence).get
+    val nSegments = mpp.maxMemorySegments
+    val coherenceManager = Module(new ACEZynqRegionManager(mpp.memParams, nSegments))
+    genWOReg(coherenceManager.in_cmd.bits, "coherence_bits")
+    Pulsify(genWORegInit(coherenceManager.in_cmd.valid, "coherence_valid", false.B), pulseLength = 1)
+    genROReg(coherenceManager.in_cmd.ready, "coherence_ready")
+    genROReg(roccCmdFifo.io.enq.ready && !coherenceManager.barrier, "cmd_ready")
+    coherenceManager.out <> io.ace_bus.get
+  } else {
+    genROReg(roccCmdFifo.io.enq.ready, "cmd_ready")
+  }
   genCRFile()
 
   io.cmds <> roccCmdFifo.io.deq
   roccRespFifo.io.enq <> io.resp
+
+
 }
 

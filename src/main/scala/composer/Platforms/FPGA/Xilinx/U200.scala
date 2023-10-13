@@ -1,7 +1,7 @@
 package composer.Platforms.FPGA.Xilinx
 
 import chipsalliance.rocketchip.config.Config
-import composer.{CoreCommandLatency, CXbarMaxDegree, PlatformPhysicalMemoryBytes}
+import composer.{CXbarMaxDegree, CoreCommandLatency, HasCoherence, PlatformPhysicalMemoryBytes, PrefetchSourceMultiplicity}
 import composer.Platforms._
 import composer.Platforms.FPGA._
 import freechips.rocketchip.subsystem.{ExtMem, MasterPortParams, MemoryPortParams}
@@ -37,6 +37,8 @@ private[composer] class U200Base(nMemoryChannels: Int)
     case FrontBusBeatBytes => 4
     case PlatformNURAM => 960
     case PlatformNBRAM => 2160
+    case HasCoherence => None
+    case PrefetchSourceMultiplicity => 32
 
     case CoreCommandLatency => 4
     case HasDisjointMemoryControllers => true
