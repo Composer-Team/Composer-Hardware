@@ -5,13 +5,14 @@ import chisel3._
 import chisel3.util._
 import composer.Generation._
 import composer.HasCoherence
+import composer.MemoryStreams.Memory
 import composer.Platforms.BuildModeKey
 import composer.Protocol.{ACE, ACEZynqRegionManager}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy.LazyModule
 
 class FrontBusWidget(implicit p: Parameters) extends Widget()(p) {
-  override val crFile = LazyModule(new MCRFileTL(16))
+  override val crFile = LazyModule(new  MCRFileTL(16))
   crFile.node := node
   override lazy val module = new AXILWidgetModule(this)
 }
@@ -45,7 +46,8 @@ class AXILWidgetModule(outer: FrontBusWidget) extends WidgetModule(outer) {
   if (p(HasCoherence).isDefined && p(BuildModeKey) == BuildMode.Synthesis) {
     val mpp = p(HasCoherence).get
     val nSegments = mpp.maxMemorySegments
-    val coherenceManager = Module(new ACEZynqRegionManager(mpp.memParams, nSegments))
+    val coherenceManager = Module(new ACEZynqRegionManager(mpp.memParams, nSegments,
+      (l, r, c) => Memory(l, c, r, 1, 0, 0)))
     genWOReg(coherenceManager.in_cmd.bits, "coherence_bits")
     Pulsify(genWORegInit(coherenceManager.in_cmd.valid, "coherence_valid", false.B), pulseLength = 1)
     genROReg(coherenceManager.in_cmd.ready, "coherence_ready")

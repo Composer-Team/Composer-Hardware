@@ -11,6 +11,7 @@ private class SRMMHelper(nReadPorts: Int,
                          nRows: Int, dataWidth: Int, latency: Int) extends Module {
   val mio = IO(new CMemoryIOBundle(nReadPorts, nWritePorts, nReadWritePorts, log2Up(nRows), dataWidth))
   val cmem = SyncReadMem(nRows, UInt(dataWidth.W))
+  dontTouch(mio)
   (0 until nReadWritePorts) foreach { port_idx =>
     val pidx = mio.getReadWritePortIdx(port_idx)
     val readDat = cmem.read(mio.addr(pidx), mio.chip_select(pidx) && mio.read_enable(pidx))

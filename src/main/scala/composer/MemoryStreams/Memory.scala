@@ -245,8 +245,7 @@ class CMemoryIOBundle(val nReadPorts: Int,
   }
 
   def initLow(clock: Clock): Unit = {
-    Seq(data_in, addr) foreach (_ := DontCare)
-    Seq(chip_select, write_enable, read_enable) foreach (_.foreach(_ := 0.U))
+    Seq(chip_select, write_enable, read_enable, addr, data_in) foreach (_.foreach(_ := 0.U))
     this.clock := clock.asBool
   }
 }

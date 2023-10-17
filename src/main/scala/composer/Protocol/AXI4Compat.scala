@@ -9,7 +9,6 @@ import freechips.rocketchip.subsystem.MasterPortParams
 class AXI4Compat(param: MasterPortParams) extends Bundle {
   val addrBits = log2Up(param.size)
   val dataBits = param.beatBytes * 8
-
   val awid = Output(UInt(param.idBits.W))
   val awaddr = Output(UInt(addrBits.W))
   val awlen = Output(UInt(lenWidth.W))
@@ -55,6 +54,12 @@ class AXI4Compat(param: MasterPortParams) extends Bundle {
   val rlast = Input(Bool())
   val rvalid = Input(Bool())
   val rready = Output(Bool())
+
+  def initLow(): Unit = {
+    Seq(awid, awaddr, awlen, awsize, awburst, awlock, awcache, awprot, awregion, awqos, awvalid, wdata, wstrb,
+      wlast, wvalid, bready, arid, araddr, arlen, arsize, arburst, arlock, arcache, arprot, arregion, arqos,
+      arvalid, rready) foreach (_ := 0.U)
+  }
 }
 
 object AXI4Compat {
@@ -67,7 +72,7 @@ object AXI4Compat {
   val lenWidth = 8
   val respWidth = 2
 
-  def connectCompatMaster(compat: AXI4Compat, axi4: AXI4Bundle): Unit = {
+  def connectCompatMaster(compat: AXI4Compat, axi4: AXI4Bundle, makeCoherent: Boolean): Unit = {
     axi4.r.bits.id := compat.rid
     axi4.r.bits.data := compat.rdata
     axi4.r.bits.resp := compat.rresp
@@ -82,7 +87,12 @@ object AXI4Compat {
     compat.arprot := axi4.ar.bits.prot
     compat.araddr := axi4.ar.bits.addr
     compat.arburst := axi4.ar.bits.burst
-    compat.arcache := axi4.ar.bits.cache
+    if (makeCoherent) {
+      compat.arcache := 1.U
+    } else {
+      compat.arcache := 0.U
+    }
+    //    compat.arcache := axi4.ar.bits.cache
     compat.arregion := 0.U
     compat.arsize := axi4.ar.bits.size
     axi4.ar.ready := compat.arready
@@ -100,6 +110,12 @@ object AXI4Compat {
     compat.awprot := axi4.aw.bits.prot
     compat.awaddr := axi4.aw.bits.addr
     compat.awburst := axi4.aw.bits.burst
+    if (makeCoherent) {
+      compat.awcache := 1.U
+    } else {
+      compat.awcache := 0.U
+    }
+
     compat.awcache := axi4.aw.bits.cache
     compat.awsize := axi4.aw.bits.size
     compat.awregion := 0.U
@@ -157,7 +173,11 @@ object AXI4Compat {
     compat.wready := axi4.w.ready
   }
 
-  def apply(bundleParameters: AXI4BundleParameters): AXI4Compat =
-    new AXI4Compat(MasterPortParams(0, 1 << bundleParameters.addrBits, bundleParameters.dataBits / 8,
-      bundleParameters.idBits))
+  def apply(bundleParameters: AXI4BundleParameters): AXI4Compat = {
+    println(bundleParameters.addrBits)
+    new AXI4Compat(
+      MasterPortParams(0, 1L << bundleParameters.addrBits, bundleParameters.dataBits / 8,
+        bundleParameters.idBits))
+  }
+
 }

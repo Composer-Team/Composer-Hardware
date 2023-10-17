@@ -21,9 +21,10 @@ class ACE(param: MasterPortParams) extends AXI4Compat(param) {
   val awsnoop = Output(UInt(snoopWidth.W))
   val awdomain = Output(UInt(domainWidth.W))
   val awbar = Output(UInt(barWidth.W))
-  val awunique = Output(Bool())
+  // This seems to only crop up in certain implementations?
+//  val awunique = Output(Bool())
 
-  override val rresp = Output(UInt(4.W))
+  override val rresp = Input(UInt(4.W))
 
   val acvalid = Input(Bool())
   val acready = Output(Bool())
@@ -46,4 +47,10 @@ class ACE(param: MasterPortParams) extends AXI4Compat(param) {
    */
   val rack = Output(Bool())
   val wack = Output(Bool())
+
+  override def initLow(): Unit = {
+    super.initLow()
+    Seq(arsnoop, ardomain, arbar, awsnoop, awdomain, awbar, acready, crvalid, crresp, cdvalid, cddata, cdlast,
+      rack, wack) foreach (_ := 0.U)
+  }
 }

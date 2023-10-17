@@ -64,7 +64,7 @@ object CppGeneration {
         case _ => throw new Exception(s"Trying to export a float type but has width $width. Expecting either 32 or 64")
       }
     } else if (isFpgaAddress) {
-      "remote_ptr"
+      "composer::remote_ptr"
     } else {
       val prefix = if (unsigned) "u" else ""
       width match {
@@ -163,8 +163,8 @@ object CppGeneration {
       s"$structName(${safe_join(structMembersWithType, ", ")}) : ${safe_join(resp.realElements.map(a => f"${a._1}(${a._1})"))} {}\n}"
 
     val template_sig = f"template<> $structName composer::response_handle<$structName>::get()"
-    val command_sig = f"composer::response_handle<$structName> ${sysName}Command(uint16_t core_id, $signature," +
-      f" const std::vector<remote_ptr>& memory_operands = {})"
+    def command_sig(is_dec: Boolean) = f"composer::response_handle<$structName> ${sysName}Command(uint16_t core_id, $signature," +
+      f" const std::vector<composer::remote_ptr>& memory_operands${if (is_dec) " = {}" else ""})"
     val template_def = resp.fieldSubranges.map { ele =>
       if (ele._1.endsWith("_FP")) {
         (ele._1, f"__${ele._1}")
@@ -203,7 +203,7 @@ object CppGeneration {
          |  return $structName($template_def);
          |}
          |
-         |$command_sig {
+         |${command_sig(false)} {
          |  assert(core_id < ${p(AcceleratorSystems).filter(_.name == sysName)(0).nCores});
          |  uint64_t payloads[${numCommands * 2}];
          |""".stripMargin + (if (assignments.length == 1) assignments(0) + "\n" else assignments.reduce(_ + "\n" + _)) +
@@ -211,14 +211,14 @@ object CppGeneration {
            |  for (int i = 0; i < ${numCommands - 1}; ++i) {
            |    composer::rocc_cmd::start_cmd(${sysName}_ID, false, 0, false, false, core_id, payloads[i*2+1], payloads[i*2]).send();
            |  }
-           |  return composer::rocc_cmd::start_cmd(${sysName}_ID, true, 0, false, false, core_id, payloads[${(numCommands - 1) *2 + 1}], payloads[${(numCommands - 1)*2}], memory_operands).send().to<$structName>();
+           |  return composer::rocc_cmd::start_cmd(${sysName}_ID, true, 0, false, false, core_id, payloads[${(numCommands - 1) *2 + 1}], payloads[${(numCommands - 1)*2}]).send(memory_operands).to<$structName>();
            |}
            |""".stripMargin
     val declaration =
       f"""
          |$response_struct;
          |$template_sig;
-         |$command_sig;
+         |${command_sig(true)};
          |""".stripMargin
     (declaration, definition)
   }

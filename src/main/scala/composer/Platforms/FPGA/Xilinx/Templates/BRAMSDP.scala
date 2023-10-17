@@ -69,6 +69,11 @@ private[composer] class BRAMSDP(latency: Int,
 
   ComposerBuild.addSource(component)
 
+  val mvR = if (latency > 1) f"""for (i = 0; i < $latency-1; i = i+1) begin
+              |    mem_pipe_reg[i+1] <= mem_pipe_reg[i];
+              |  end
+              |""".stripMargin else ""
+
   // We need keep hirarchy because in some rare circumstances, cross boundary optimization
   // prevents the memory from being inferred, and further, the memory is completely unrecongized,
   // mapped to a black box, and causes unrecoverable errors during logic synthesis... (Vivado 2022.1)
@@ -112,9 +117,7 @@ private[composer] class BRAMSDP(latency: Int,
      |always @ (posedge CE)
      |begin
      |  mem_pipe_reg[0] <= memreg;
-     |  for (i = 0; i < $latency-1; i = i+1) begin
-     |    mem_pipe_reg[i+1] <= mem_pipe_reg[i];
-     |  end
+     |  $mvR
      |  O <= mem_pipe_reg[$latency-1];
      |
      |end

@@ -26,6 +26,7 @@ class WithKriaPlatform(nMemoryChannels: Int = 1, clockRate_MHz: Int = 100)
     case PlatformPhysicalMemoryBytes => 4L << 30
     case FrontBusBaseAddress => 0x2000000000L
     case FrontBusAddressMask => 0xffffL
+    case FrontBusAddressBits => 40
     case HasDMA => None
     // TODO this can be tuned
     case CXbarMaxDegree => 8
@@ -43,11 +44,10 @@ class WithKriaPlatform(nMemoryChannels: Int = 1, clockRate_MHz: Int = 100)
     case PlatformSLRs => None
     case HasCoherence => Some(CoherenceConfiguration(MasterPortParams(
       base = 0,
-      size = 1L << 40,
+      size = 1L << 44,
       beatBytes = 16,
-      idBits=6), 64))
-
-
+      idBits = 6),
+      64))
     case IsAWS => false
     case PostProcessorMacro => c: Config => {
       if (c(BuildModeKey) == BuildMode.Synthesis) {
@@ -57,7 +57,7 @@ class WithKriaPlatform(nMemoryChannels: Int = 1, clockRate_MHz: Int = 100)
             "output",
             "xck26-sfvc784-2LV-c",
             "xilinx.com:kv260_som:part0:1.4",
-             clockRate_MHz.toString
+            clockRate_MHz.toString
           ))
       }
     }

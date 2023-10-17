@@ -24,6 +24,7 @@ class WithChipKitPlatform(synthesis: Boolean = false)
     case PlatformPhysicalMemoryBytes => 1L << 34
     case FrontBusBaseAddress => 0x2000000000L
     case FrontBusAddressMask => 0xffffL
+    case FrontBusAddressBits => 16
     case HasDMA => None
     case CXbarMaxDegree => 8
     case HasDiscreteMemory => false

@@ -2,23 +2,20 @@ package composer.Generation
 
 import chipsalliance.rocketchip.config._
 import chisel3.stage._
-import composer.Generation
+import composer.Generation.Annotators.AnnotateXilinxInterface.XilinxInterface
+import composer.{Generation, HasCoherence}
+import composer.Generation.Annotators.{CrossBoundaryDisable, KeepHierarchy}
 import composer.Generation.ComposerBuild._
-import composer.Platforms.{BuildModeKey, PostProcessorMacro}
+import composer.Platforms.{BuildModeKey, FrontBusProtocol, FrontBusProtocolKey, PlatformType, PlatformTypeKey, PostProcessorMacro}
 import firrtl._
-import firrtl.annotations.{CircuitName, ModuleName}
 import firrtl.options._
 import firrtl.options.PhaseManager.PhaseDependency
-import firrtl.stage.{CompilerAnnotation, FirrtlCli, RunFirrtlTransformAnnotation}
-import firrtl.transforms.{Flatten, FlattenAnnotation}
+import firrtl.stage.RunFirrtlTransformAnnotation
 import freechips.rocketchip.stage._
+import freechips.rocketchip.subsystem.ExtMem
 import os._
 
-import java.nio.file
-import java.time.LocalDateTime
 import java.util.regex._
-import scala.collection.SeqMap
-import scala.util.matching.Regex
 
 class ComposerChipStage extends Stage with Phase {
   override val shell = new Shell("composer-compile")
@@ -107,26 +104,7 @@ object BuildMode {
 
 class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesis) {
 
-  private def get_os(): String = {
-    os.proc("uname").call().out.trim
-  }
 
-  private def get_sed_inline_opt(): Seq[String] = {
-    get_os() match {
-      case "Darwin" => Seq("-I", "")
-      case "Linux" => Seq("-i")
-      case _ => throw new Exception("Couldn't figure out OS for " + get_os())
-    }
-  }
-
-  def addKeepHierarchyAnnotationsForCores(fname: Path): Unit = {
-    val sedcmd = Seq("sed") ++ get_sed_inline_opt() ++ Seq("-E",
-      "s/(module AccelCoreWrapper)/(* keep_hierarchy = \"yes\" *)\\n\\1/",
-      fname.toString())
-    os.proc(Seq("sed") ++ get_sed_inline_opt() ++ Seq("-E",
-      "s/(module AccelCoreWrapper)/(* keep_hierarchy = \"yes\" *)\\n\\1/",
-      fname.toString())).call()
-  }
 
   final def main(args: Array[String]): Unit = {
 //    args.foreach(println(_))
@@ -143,7 +121,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
       Path(pth)
     } else Path(ComposerBuild.composerGenDir)
     os.walk(gsrc_dir).foreach { file =>
-      os.remove.all(file)
+      if (file.baseName.nonEmpty && file.baseName.charAt(0) != '.') os.remove.all(file)
     }
     os.makeDir.all(gsrc_dir)
     val targetDir = gsrc_dir / "composer.build"
@@ -165,79 +143,45 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
       )
     )
 
-    addKeepHierarchyAnnotationsForCores(targetDir / "ComposerTop.v")
-
-    // first, get module names in targetDir / "ComposerTop.v"
-    val pattern = Pattern.compile("module (.*) *\\(")
-    val matcher = pattern.matcher(os.read(targetDir / "ComposerTop.v"))
-    var existingModules = Seq.empty[String]
-    while (matcher.find()) {
-      existingModules = existingModules :+ matcher.group(1)
-    }
-
-    // add escapes for $ in module names
-    // add additional escapes for \
-    def addEscapes(s: String): String = {
-      val back = "\\\\"
-      val doubleBack = "\\\\\\\\"
-      s.replaceAll(back, doubleBack).replaceAll("\\$", "\\\\\\$")
-    }
-
-    // then, for each source in the source list, copy in all modules that aren't already defined
-    sourceList.distinct foreach { src =>
-      val srcFileName = src.segments.toSeq.last
-      if (file.Files.isRegularFile(java.nio.file.Paths.get(src.toString()))) {
-        if (srcFileName.endsWith(".v")) {
-          val matcher = pattern.matcher(os.read(src))
-          var srcModules = Seq.empty[String]
-          while (matcher.find()) {
-            srcModules = srcModules :+ matcher.group(1)
-          }
-          // get a list of repeated modules
-          val repeats = srcModules.filter(existingModules.contains(_)).distinct
-          // for each create a sed command to remove the module
-          //        println("In " + src.toString() + " repeats are " + repeats)
-          if (repeats.nonEmpty) {
-            val sedCmds = repeats.map { mod: String => s"/module ${addEscapes(mod)}/,/endmodule/d" }
-            // then, remove the repeated modules from the source
-            // join sedCMds with ;
-            val sedCmd = Seq("sed", "-E", sedCmds.mkString(";"), src.toString)
-            //          println("sedCmd is " + sedCmd)
-
-            os.proc(sedCmd).call(stdout = os.pwd / "tmp.v")
-            os.write.append(targetDir / "ComposerTop.v", os.read(os.pwd / "tmp.v"))
-            os.remove(os.pwd / "tmp.v")
-          } else {
-            os.write.append(targetDir / "ComposerTop.v", os.read(src))
-          }
-          existingModules = existingModules ++ srcModules
-        } else {
-          // not a verilog source, just copy it to the source directory
-          os.copy.over(src, gsrc_dir / srcFileName)
-        }
-      } else {
-        os.copy.over(src, gsrc_dir / srcFileName)
-      }
-    }
+    // --------------- Verilog Annotators ---------------
+    KeepHierarchy(targetDir / "ComposerTop.v")
+    composer.Generation.Annotators.Uniqueify(sourceList, targetDir, gsrc_dir)
 
     ConstraintGeneration.slrMappings.foreach { slrMapping =>
       crossBoundaryDisableList = crossBoundaryDisableList :+ slrMapping._1
     }
     if (crossBoundaryDisableList.nonEmpty && !buildMode.isInstanceOf[BuildMode.Training.type]) {
-      // create sed command to add keep_hierarchy to SLR mappings
-      val sedcmds = crossBoundaryDisableList.distinct.map { name =>
-        s"s/(module ${addEscapes(name)}) /(* keep_hierarchy = \"yes\" *) \\1 /"
+      CrossBoundaryDisable(crossBoundaryDisableList, targetDir)
+    }
+    if (configWithBuildMode(PlatformTypeKey) == PlatformType.FPGA) {
+      val tc_ace = if (configWithBuildMode(HasCoherence).isDefined) {
+        composer.Generation.Annotators.AnnotateXilinxInterface(
+          "M_ACE", (targetDir / "ComposerTop.v").toString(), XilinxInterface.ACE)
+        Some("M_ACE")
+      } else None
+      val tc_axi = (0 until configWithBuildMode(ExtMem).get.nMemoryChannels) map { idx =>
+        composer.Generation.Annotators.AnnotateXilinxInterface(
+          f"M0${idx}_AXI", (targetDir / "ComposerTop.v").toString(), XilinxInterface.AXI4)
+        Some(f"M0${idx}_AXI")
       }
-//      sedcmds foreach {println(_)}
-      val sedcmd = Seq("sed") ++ get_sed_inline_opt() ++ Seq("-E", sedcmds.mkString(";"), (targetDir / "ComposerTop.v").toString())
-//      os.proc(sedcmd).call()
-      System.err.println("Called for cross boundary disables but currently broken...")
+      // implies is AXI
+      val tc_front = {
+        composer.Generation.Annotators.AnnotateXilinxInterface(
+          "S00_AXI", (targetDir / "ComposerTop.v").toString(), XilinxInterface.AXI4)
+        Some("S00_AXI")
+      }
+
+      val tcs = ((Seq(tc_ace, tc_front) ++ tc_axi) filter (_.isDefined) map (_.get)).mkString(":")
+      Annotators.AnnotateTopClock(
+        f"\\(\\* X_INTERFACE_PARAMETER = \"ASSOCIATED_BUSIF $tcs \" \\*\\)",
+        targetDir / "ComposerTop.v"
+      )
     }
     os.walk(targetDir).foreach { file =>
       val extension = file.ext
       os.copy(file, gsrc_dir / ("composer." + extension), replaceExisting = true)
     }
-    //    filterFIRRTL(gsrc_dir / "composer.fir")
+    // -------------------------------------------------
 
     config(PostProcessorMacro)(configWithBuildMode) // do post-processing per backend
 

@@ -9,7 +9,7 @@ import composer.RoccHelpers.FrontBusHub
 import composer.Systems.ComposerTop._
 import composer.common.CLog2Up
 import composer.Generation.Tune.Tunable
-import composer.Platforms.{BuildModeKey, FrontBusProtocol, FrontBusProtocolKey, HasDMA}
+import composer.Platforms.{BuildModeKey, FrontBusAddressBits, FrontBusProtocol, FrontBusProtocolKey, HasDMA, PlatformTypeKey}
 import composer.Protocol.{ACE, AXI4Compat}
 import composer.TLManagement.TLSourceShrinkerDynamic
 import freechips.rocketchip.amba.ahb._
@@ -105,6 +105,10 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     )))
   }) else None
 
+  if (AXI_MEM.isDefined) {
+    AXI_MEM.get.foreach(println(_))
+  }
+
   val dma_port = if (p(HasDMA).isDefined) {
     val dma_node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
       masters = Seq(AXI4MasterParameters(
@@ -169,7 +173,12 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   val S00_AXI = p(FrontBusProtocolKey) match {
     case FrontBusProtocol.AXI4 | FrontBusProtocol.AXIL =>
       val port_cast = ocl_port.asInstanceOf[AXI4MasterNode]
-      val S00_AXI = IO(Flipped(AXI4Compat(port_cast.out(0)._1.params)))
+      val ap = port_cast.out(0)._1.params
+      val S00_AXI = IO(Flipped(new AXI4Compat(MasterPortParams(
+        base = 0,
+        size = 1L << p(FrontBusAddressBits),
+        beatBytes = ap.dataBits / 8,
+        idBits = ap.idBits))))
       AXI4Compat.connectCompatSlave(S00_AXI, port_cast.out(0)._1)
       S00_AXI
     case FrontBusProtocol.AHB =>
@@ -180,11 +189,12 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
       S00_AHB
   }
 
-  val _ = p(HasCoherence) match {
+  p(HasCoherence) match {
     case None => None;
     case Some(cc: CoherenceConfiguration) =>
-      val M_AXI4_ACE = IO(new ACE(cc.memParams))
-      outer.cmd_resp_axilhub.module.io.ace_bus.get <> M_AXI4_ACE
+      val M_ACE = IO(new ACE(cc.memParams))
+      dontTouch(M_ACE)
+      outer.cmd_resp_axilhub.module.io.ace_bus.get <> M_ACE
   }
 
   if (outer.AXI_MEM.isDefined) {
@@ -196,7 +206,8 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
     }
     val ins = dram_ports.map(_.in(0))
     //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
-    (M00_AXI zip ins) foreach { case (i, (o, _)) => AXI4Compat.connectCompatMaster(i, o) }
+    (M00_AXI zip ins) foreach { case (i, (o, _)) =>
+      AXI4Compat.connectCompatMaster(i, o, p(HasCoherence).isDefined) }
 
     // make incoming dma port and connect it
     if (p(HasDMA).isDefined) {

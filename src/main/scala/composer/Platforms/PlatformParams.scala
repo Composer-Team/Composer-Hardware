@@ -34,6 +34,8 @@ case object PlatformNURAM extends Field[Int]
 // mmio
 case object FrontBusBaseAddress extends Field[Long]
 
+case object FrontBusAddressBits extends Field[Int]
+
 case object FrontBusAddressMask extends Field[Long]
 
 case object FrontBusBeatBytes extends Field[Int]
