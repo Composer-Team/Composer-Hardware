@@ -44,6 +44,7 @@ class AXILWidgetModule(outer: FrontBusWidget) extends WidgetModule(outer) {
   // ACE Coherence should only built if enabled and if not running a simulation. Our simulator doesn't instrument
   //   coherence
   if (p(HasCoherence).isDefined && p(BuildModeKey) == BuildMode.Synthesis) {
+    print("Using Coherence")
     val mpp = p(HasCoherence).get
     val nSegments = mpp.maxMemorySegments
     val coherenceManager = Module(new ACEZynqRegionManager(mpp.memParams, nSegments,

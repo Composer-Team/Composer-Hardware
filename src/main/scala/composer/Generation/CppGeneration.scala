@@ -160,7 +160,7 @@ object CppGeneration {
     val response_struct = f"struct $structName {\n // struct members \n" +
       safe_join(structMembersWithType.map(_ + ";")) + "\n" +
       "// constructor\n" +
-      s"$structName(${safe_join(structMembersWithType, ", ")}) : ${safe_join(resp.realElements.map(a => f"${a._1}(${a._1})"))} {}\n}"
+      s"$structName(${safe_join(structMembersWithType, ", ")}) : ${safe_join(resp.realElements.map(a => f"${a._1}(${a._1})"), ", ")} {}\n}"
 
     val template_sig = f"template<> $structName composer::response_handle<$structName>::get()"
     def command_sig(is_dec: Boolean) = f"composer::response_handle<$structName> ${sysName}Command(uint16_t core_id, $signature," +
@@ -172,7 +172,7 @@ object CppGeneration {
         //noinspection DuplicatedCode
         val shiftAmt = 1 + ele._2._1 - ele._2._2
         val mask = if (shiftAmt < 64) (1L << shiftAmt) - 1 else -1L
-        (ele._1, f"(resp & 0x${mask.toHexString}L) >> ${ele._2._2}")
+        (ele._1, f"(resp & (0x${mask.toHexString}L << ${ele._2._2})) >> ${ele._2._2}")
       }
     }.sortBy(_._1).map(_._2).reduce(_ + ", " + _)
     val template_decs = resp.fieldSubranges.filter(_._1.endsWith("_FP")).map { ele =>

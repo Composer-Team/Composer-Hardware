@@ -13,7 +13,7 @@ object ACE {
 }
 
 //noinspection ScalaUnusedSymbol
-class ACE(param: MasterPortParams) extends AXI4Compat(param) {
+class ACE(param: MasterPortParams) extends AXI4Compat(param, 16) {
   val arsnoop = Output(UInt(snoopWidth.W))
   val ardomain = Output(UInt(domainWidth.W))
   val arbar = Output(UInt(barWidth.W))

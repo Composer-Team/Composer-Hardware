@@ -12,6 +12,48 @@ import composer.Protocol.ACEZynqRegionManager.ace_cmd_clean_invalidate
 import composer.common.CLog2Up
 import freechips.rocketchip.subsystem.MasterPortParams
 
+/**
+ * The Region manager is responsible for a couple of things.
+ * 1. Accept commands from the host which contain an address range (start addr, offset)
+ * and enqueue them into a list for managed segments
+ * 2. Accept commands from the host to remove an address from the address manager
+ * 3. Accept commands from host to perform a cache flush on all of the relevant regions
+ * 4. Manage snoop transactions from external sources.
+ *
+ *
+ * 1, 2 - Since the front bus is only 32b at this time, we have to take the command in
+ * multiple beats. This is handled by the front bus enqueueing 32b segments into
+ * a queue
+ *
+ * 3 - Use AXI4 ACE protocol MakeInvalid transaction (D4-221 in protocl spec) to ensure
+ * all cached copies of a cache line are marked invalid.
+ *
+ * 4 - This isn't a cache, so snoops will never succeed. Even for addresses that we
+ * manage, data is only stored here intermittently and it is the responsibility of
+ * the developer to not access data that is borrowed by the FPGA.
+ *
+ * See Zynq TRM pg. 1085 for more info on Zynq usage of ACE.
+ *
+ * The Zynq system has a physically tagged, virtually indexed cache, although there
+ * appears to be some sort of physical->virtual mapping because the TRM specifies
+ * physical addresses to be used on the address bus. This is fine by me :)
+ *
+ * Regions should be able to be held in a couple of different states.
+ * - Read mode - No need for anything but I/O coherency. No special concessions need
+ * to be made here because the HPC and HP buses are I/O coherent. More
+ * explicitly, this means that reads on these buses are coherent with
+ * system caches.
+ * - Write / ReadWrite mode - I/O coherence is fine for ReadWrite mode, obviously not
+ * particularly useful for write mode. At any rate though, these regions
+ * need to be _invalidated_ from system caches before returning a
+ * response. This can be done before or after. Some considerations:
+ * Flushing before is more likely to be harmful for a misbehaving user.
+ * If the user uses in-flight regions in the host system and un-does
+ * the invalidation, then the cache will have to be reinvalidated again
+ * afterwards. On the other hand, data that's flushed from CPU caches
+ * during execution due to cache line eviction will overwrite data.
+ */
+
 
 object ACEZynqRegionManager {
   val ace_cmd_add = 0
@@ -98,7 +140,7 @@ class ACEZynqRegionManager(params: MasterPortParams,
     val barrier_reg = RegInit(false.B)
     barrier := barrier_reg
 
-    val maxBurst = 4
+    val maxBurst = 1
 
     val lbb = CLog2Up(params.beatBytes)
     val addrChopBits = out.addrBits - lbb
@@ -123,48 +165,6 @@ class ACEZynqRegionManager(params: MasterPortParams,
     val cmd_translator = Module(new RegionCommandAssembler(params, nIdxBits))
     cmd_translator.in <> in_cmd
     cmd_translator.out.ready := false.B
-
-    /**
-     * The Region manager is responsible for a couple of things.
-     * 1. Accept commands from the host which contain an address range (start addr, offset)
-     * and enqueue them into a list for managed segments
-     * 2. Accept commands from the host to remove an address from the address manager
-     * 3. Accept commands from host to perform a cache flush on all of the relevant regions
-     * 4. Manage snoop transactions from external sources.
-     *
-     *
-     * 1, 2 - Since the front bus is only 32b at this time, we have to take the command in
-     * multiple beats. This is handled by the front bus enqueueing 32b segments into
-     * a queue
-     *
-     * 3 - Use AXI4 ACE protocol MakeInvalid transaction (D4-221 in protocl spec) to ensure
-     * all cached copies of a cache line are marked invalid.
-     *
-     * 4 - This isn't a cache, so snoops will never succeed. Even for addresses that we
-     * manage, data is only stored here intermittently and it is the responsibility of
-     * the developer to not access data that is borrowed by the FPGA.
-     *
-     * See Zynq TRM pg. 1085 for more info on Zynq usage of ACE.
-     *
-     * The Zynq system has a physically tagged, virtually indexed cache, although there
-     * appears to be some sort of physical->virtual mapping because the TRM specifies
-     * physical addresses to be used on the address bus. This is fine by me :)
-     *
-     * Regions should be able to be held in a couple of different states.
-     * - Read mode - No need for anything but I/O coherency. No special concessions need
-     * to be made here because the HPC and HP buses are I/O coherent. More
-     * explicitly, this means that reads on these buses are coherent with
-     * system caches.
-     * - Write / ReadWrite mode - I/O coherence is fine for ReadWrite mode, obviously not
-     * particularly useful for write mode. At any rate though, these regions
-     * need to be _invalidated_ from system caches before returning a
-     * response. This can be done before or after. Some considerations:
-     * Flushing before is more likely to be harmful for a misbehaving user.
-     * If the user uses in-flight regions in the host system and un-does
-     * the invalidation, then the cache will have to be reinvalidated again
-     * afterwards. On the other hand, data that's flushed from CPU caches
-     * during execution due to cache line eviction will overwrite data.
-     */
 
     val s_idle :: s_add_segment :: s_read_flush :: s_read_wait :: s_emit :: s_emit_wait :: s_emit_ack :: Nil = Enum(7)
     val state = RegInit(s_idle)
@@ -224,7 +224,8 @@ class ACEZynqRegionManager(params: MasterPortParams,
       out.arsnoop := 13.U // 1101
       out.arid := 0.U
       out.araddr := addrHold
-      out.arburst := 0.U
+      out.arburst := 1.U
+      out.aruser := Cat(0xF.U(4.W), 0.U(6.W))
 
       when(txSmall) {
         out.arlen := 0.U
@@ -247,8 +248,8 @@ class ACEZynqRegionManager(params: MasterPortParams,
           addrHold := addrHold + 16.U
           lenHold := lenHold - 1.U
         }.otherwise {
-          lenHold := lenHold - 16.U
-          addrHold := addrHold + 256.U
+          lenHold := lenHold - maxBurst.U
+          addrHold := addrHold + (16 * maxBurst).U
         }
       }
     }.elsewhen(state === s_emit_wait) {

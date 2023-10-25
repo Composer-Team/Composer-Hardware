@@ -327,9 +327,9 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
     ret
   }
 
-  def getComposerIntraCoreIO[Tcmd <: AccelCommand, Tresp <: AccelResponse](endpoint: String,
-                                                                           genCmd: Tcmd = new ComposerRoccCommand,
-                                                                           genResp: Tresp = new AccelRoccUserResponse): CustomIOWithRouting[Tcmd, Tresp] = {
+  def getIntraCoreIO[Tcmd <: AccelCommand, Tresp <: AccelResponse](endpoint: String,
+                                                                   genCmd: Tcmd = new ComposerRoccCommand,
+                                                                   genResp: Tresp = new AccelRoccUserResponse): CustomIOWithRouting[Tcmd, Tresp] = {
     val converter = Module(new ComposerIntraCoreIOModule(endpoint, genCmd, genResp))
     converter.respIO <> composer_response_ios_(endpoint)
     converter.cmdIO <> composer_command_ios_(endpoint)

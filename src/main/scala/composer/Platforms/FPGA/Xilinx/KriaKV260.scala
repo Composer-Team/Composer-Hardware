@@ -42,12 +42,14 @@ class WithKriaPlatform(nMemoryChannels: Int = 1, clockRate_MHz: Int = 100)
     case DefaultClockRateKey => 100
     case PlatformNumSLRs => 1
     case PlatformSLRs => None
-    case HasCoherence => Some(CoherenceConfiguration(MasterPortParams(
-      base = 0,
-      size = 1L << 44,
-      beatBytes = 16,
-      idBits = 6),
-      64))
+    case HasCoherence =>
+      None
+//      Some(CoherenceConfiguration(MasterPortParams(
+//      base = 0,
+//      size = 1L << 44,
+//      beatBytes = 16,
+//      idBits = 6),
+//      64))
     case IsAWS => false
     case PostProcessorMacro => c: Config => {
       if (c(BuildModeKey) == BuildMode.Synthesis) {

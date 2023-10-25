@@ -6,7 +6,7 @@ import composer.Protocol.AXI4Compat._
 import freechips.rocketchip.amba.axi4.{AXI4Bundle, AXI4BundleParameters}
 import freechips.rocketchip.subsystem.MasterPortParams
 
-class AXI4Compat(param: MasterPortParams) extends Bundle {
+class AXI4Compat(param: MasterPortParams, userBits: Int = 0) extends Bundle {
   val addrBits = log2Up(param.size)
   val dataBits = param.beatBytes * 8
   val awid = Output(UInt(param.idBits.W))
@@ -19,7 +19,7 @@ class AXI4Compat(param: MasterPortParams) extends Bundle {
   val awprot = Output(UInt(protWidth.W))
   val awregion = Output(UInt(regionWidth.W))
   val awqos = Output(UInt(qosWidth.W))
-  //  val awuser = Output(UInt(param.))
+  val awuser = Output(UInt(userBits.W))
   val awvalid = Output(Bool())
   val awready = Input(Bool())
 
@@ -44,7 +44,7 @@ class AXI4Compat(param: MasterPortParams) extends Bundle {
   val arprot = Output(UInt(protWidth.W))
   val arregion = Output(UInt(regionWidth.W))
   val arqos = Output(UInt(qosWidth.W))
-  //  val awuser = Output(UInt(param.))
+  val aruser = Output(UInt(userBits.W))
   val arvalid = Output(Bool())
   val arready = Input(Bool())
 
@@ -58,7 +58,7 @@ class AXI4Compat(param: MasterPortParams) extends Bundle {
   def initLow(): Unit = {
     Seq(awid, awaddr, awlen, awsize, awburst, awlock, awcache, awprot, awregion, awqos, awvalid, wdata, wstrb,
       wlast, wvalid, bready, arid, araddr, arlen, arsize, arburst, arlock, arcache, arprot, arregion, arqos,
-      arvalid, rready) foreach (_ := 0.U)
+      arvalid, rready, aruser, awuser) foreach(_ := 0.U)
   }
 }
 
@@ -72,7 +72,7 @@ object AXI4Compat {
   val lenWidth = 8
   val respWidth = 2
 
-  def connectCompatMaster(compat: AXI4Compat, axi4: AXI4Bundle, makeCoherent: Boolean): Unit = {
+  def connectCompatMaster(compat: AXI4Compat, axi4: AXI4Bundle): Unit = {
     axi4.r.bits.id := compat.rid
     axi4.r.bits.data := compat.rdata
     axi4.r.bits.resp := compat.rresp
@@ -87,12 +87,8 @@ object AXI4Compat {
     compat.arprot := axi4.ar.bits.prot
     compat.araddr := axi4.ar.bits.addr
     compat.arburst := axi4.ar.bits.burst
-    if (makeCoherent) {
-      compat.arcache := 1.U
-    } else {
-      compat.arcache := 0.U
-    }
-    //    compat.arcache := axi4.ar.bits.cache
+    compat.aruser := axi4.ar.bits.user.asUInt
+    compat.arcache := 0xF.U //axi4.ar.bits.cache
     compat.arregion := 0.U
     compat.arsize := axi4.ar.bits.size
     axi4.ar.ready := compat.arready
@@ -110,14 +106,9 @@ object AXI4Compat {
     compat.awprot := axi4.aw.bits.prot
     compat.awaddr := axi4.aw.bits.addr
     compat.awburst := axi4.aw.bits.burst
-    if (makeCoherent) {
-      compat.awcache := 1.U
-    } else {
-      compat.awcache := 0.U
-    }
-
-    compat.awcache := axi4.aw.bits.cache
+    compat.awcache := 0xF.U // axi4.aw.bits.cache
     compat.awsize := axi4.aw.bits.size
+    compat.awuser := axi4.aw.bits.user.asUInt
     compat.awregion := 0.U
     axi4.aw.ready := compat.awready
     compat.awvalid := axi4.aw.valid
@@ -146,6 +137,7 @@ object AXI4Compat {
     axi4.ar.bits.burst := compat.arburst
     axi4.ar.bits.cache := compat.arcache
     axi4.ar.bits.size := compat.arsize
+//    axi4.ar.bits.user. := compat.aruser
     compat.arready := axi4.ar.ready
     axi4.ar.valid := compat.arvalid
 
@@ -158,6 +150,7 @@ object AXI4Compat {
     axi4.aw.bits.burst := compat.awburst
     axi4.aw.bits.cache := compat.awcache
     axi4.aw.bits.size := compat.awsize
+//    axi4.aw.bits.user := compat.awuser
     compat.awready := axi4.aw.ready
     axi4.aw.valid := compat.awvalid
 
@@ -177,7 +170,7 @@ object AXI4Compat {
     println(bundleParameters.addrBits)
     new AXI4Compat(
       MasterPortParams(0, 1L << bundleParameters.addrBits, bundleParameters.dataBits / 8,
-        bundleParameters.idBits))
+      bundleParameters.idBits))
   }
 
 }

@@ -9,9 +9,9 @@ import composer.RoccHelpers.FrontBusHub
 import composer.Systems.ComposerTop._
 import composer.common.CLog2Up
 import composer.Generation.Tune.Tunable
-import composer.Platforms.{BuildModeKey, FrontBusAddressBits, FrontBusProtocol, FrontBusProtocolKey, HasDMA, PlatformTypeKey}
+import composer.Platforms.{BuildModeKey, FrontBusAddressBits, FrontBusProtocol, FrontBusProtocolKey, HasDMA, PlatformType, PlatformTypeKey}
 import composer.Protocol.{ACE, AXI4Compat}
-import composer.TLManagement.TLSourceShrinkerDynamic
+import composer.TLManagement.{TLSourceShrinkerDynamic, TLSourceShrinkerDynamicBlocking}
 import freechips.rocketchip.amba.ahb._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
@@ -123,6 +123,8 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     None
   }
 
+
+
   // Connect accelerators to memory
   val composer_mems = accelerator_system.mem map { m =>
     val composer_mem = AXI4IdentityNode()
@@ -132,7 +134,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       := AXI4Buffer()
       := TLToAXI4()
       := TLBuffer()
-      := TLSourceShrinkerDynamic(availableComposerSources)
+      := TLSourceShrinkerDynamicBlocking(availableComposerSources)
       := TLBuffer()
       := m)
     composer_mem
@@ -190,7 +192,7 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   }
 
   p(HasCoherence) match {
-    case None => None;
+    case None => ;
     case Some(cc: CoherenceConfiguration) =>
       val M_ACE = IO(new ACE(cc.memParams))
       dontTouch(M_ACE)
@@ -207,7 +209,7 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
     val ins = dram_ports.map(_.in(0))
     //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
     (M00_AXI zip ins) foreach { case (i, (o, _)) =>
-      AXI4Compat.connectCompatMaster(i, o, p(HasCoherence).isDefined) }
+      AXI4Compat.connectCompatMaster(i, o) }
 
     // make incoming dma port and connect it
     if (p(HasDMA).isDefined) {
