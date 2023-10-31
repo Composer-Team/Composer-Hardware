@@ -25,14 +25,10 @@ private[composer] class AWS_sole()
     case PostProcessorMacro =>
       p: Config =>
         if (p(BuildModeKey) == BuildMode.Synthesis) {
-          val cwd = ComposerBuild.composerVsimDir
-          val cdir = ComposerBuild.composerBin
-          val callable = os.proc(f"$cdir/aws-gen-build")
-          callable.call(
-            cwd = os.Path(cwd),
-            stdin = os.Inherit,
-            stdout = os.Inherit
-          )
+          // rename composer.v to composer.sv
+          val composer_sv = os.Path(ComposerBuild.composerGenDir) / "composer.sv"
+          val composer_v = os.Path(ComposerBuild.composerGenDir) / "composer.v"
+          os.move(composer_v, composer_sv)
         }
   })
 

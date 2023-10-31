@@ -6,7 +6,7 @@ import composer.Generation.Annotators.AnnotateXilinxInterface.XilinxInterface
 import composer.{Generation, HasCoherence}
 import composer.Generation.Annotators.{CrossBoundaryDisable, KeepHierarchy}
 import composer.Generation.ComposerBuild._
-import composer.Platforms.{BuildModeKey, FrontBusProtocol, FrontBusProtocolKey, PlatformType, PlatformTypeKey, PostProcessorMacro}
+import composer.Platforms.{BuildModeKey, FrontBusProtocol, FrontBusProtocolKey, IsAWS, PlatformType, PlatformTypeKey, PostProcessorMacro}
 import firrtl._
 import firrtl.options._
 import firrtl.options.PhaseManager.PhaseDependency
@@ -153,7 +153,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
     if (crossBoundaryDisableList.nonEmpty && !buildMode.isInstanceOf[BuildMode.Training.type]) {
       CrossBoundaryDisable(crossBoundaryDisableList, targetDir)
     }
-    if (configWithBuildMode(PlatformTypeKey) == PlatformType.FPGA) {
+    if (configWithBuildMode(PlatformTypeKey) == PlatformType.FPGA && !configWithBuildMode(IsAWS)) {
       val tc_ace = if (configWithBuildMode(HasCoherence).isDefined) {
         composer.Generation.Annotators.AnnotateXilinxInterface(
           "M_ACE", (targetDir / "ComposerTop.v").toString(), XilinxInterface.ACE)

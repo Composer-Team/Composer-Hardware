@@ -57,6 +57,7 @@ class TLSourceShrinkerDynamicBlocking(maxInFlight: Int)(implicit p: Parameters) 
         val beatsLeftPerAllocation = Reg(Vec(maxInFlight, UInt(log2Up((edgeOut.manager.maxTransfer / edgeOut.manager.beatBytes) + 1).W)))
         val d_last = beatsLeftPerAllocation(out.d.bits.source) === UInt(1)
         val nextFree = PriorityEncoder(~allocated)
+        val full = allocated.andR
 
         when (reset.asBool) {
           allocated.foreach (_ := false.B)
@@ -64,27 +65,28 @@ class TLSourceShrinkerDynamicBlocking(maxInFlight: Int)(implicit p: Parameters) 
 
         val a_in_valid = RegInit(false.B)
         val a_in = Reg(in.a.bits)
+        out.a.valid := a_in_valid
+        out.a.bits := a_in
+        in.a.ready := ((a_in_valid && out.a.fire) || (!a_in_valid)) && !full
+
         when (in.a.fire) {
           a_in := in.a.bits
+          a_in.source := nextFree
           a_in_valid := true.B
+          sourceOut2InMap(nextFree) := in.a.bits.source
+          allocated(nextFree) := true.B
+          beatsLeftPerAllocation(nextFree) := 1.U << (in.a.bits.size - log2Up(edgeOut.manager.beatBytes).U)
+          assert(in.a.bits.size >= log2Up(edgeOut.manager.beatBytes).U, "TLSourceShrinker2: Request too small")
         }
-
-        val full = allocated.andR
-        out.a.valid := a_in_valid && !full
-        out.a.bits := a_in
-        out.a.bits.source := nextFree
-
-        val in_block = (a_in_valid && full) || !a_in_valid
-        // a_in_valid represents the fact that we have a valid tx in a_in
-        // if we have a valid block but can't move it out, then we have to stall the in direction
-        in.a.ready := (!in_block)
-
+        when(out.a.fire) {
+          a_in_valid := in.a.valid
+        }
 
         val d_in = Reg(in.d.bits)
         val d_in_valid = RegInit(false.B)
         in.d.bits := d_in
         in.d.valid := d_in_valid
-        out.d.ready := (d_in_valid && !in.d.ready) || !d_in_valid
+        out.d.ready := (d_in_valid && in.d.ready) || !d_in_valid
         when (in.d.fire) {
           d_in_valid := false.B
         }
@@ -92,24 +94,13 @@ class TLSourceShrinkerDynamicBlocking(maxInFlight: Int)(implicit p: Parameters) 
           d_in := out.d.bits
           d_in_valid := true.B
           d_in.source := sourceOut2InMap(out.d.bits.source)
-        }
-
-
-        when (out.a.fire) {
-          sourceOut2InMap(nextFree) := in.a.bits.source
-          allocated(nextFree) := true.B
-          // has to be big enough for 16 - log2up(beatbytes)
-          beatsLeftPerAllocation(nextFree) := 1.U << (in.a.bits.size - log2Up(edgeOut.manager.beatBytes).U)
-          assert(in.a.bits.size >= log2Up(edgeOut.manager.beatBytes).U, "TLSourceShrinker2: Request too small")
-        }
-
-        when (out.d.fire) {
           beatsLeftPerAllocation(out.d.bits.source) := beatsLeftPerAllocation(out.d.bits.source) - 1.U
           assert(beatsLeftPerAllocation(out.d.bits.source) =/= 0.U)
-          when (d_last) {
+          when(d_last) {
             allocated(out.d.bits.source) := false.B
           }
         }
+
       }
     }
   }
