@@ -10,6 +10,7 @@ import composer.RoccHelpers._
 import composer.TLManagement._
 import composer.common._
 import composer.Platforms.FPGA._
+import freechips.rocketchip.subsystem.ExtMem
 
 import scala.annotation.tailrec
 
@@ -63,13 +64,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
 
   lazy val coreSelect = cmd.bits.cmd.getCoreID
 
-  val addressBits = outer.memory_nodes map { m =>
-    m.out(0)._1.params.addressBits
-  } match {
-    case Seq() => 0
-    case l: Seq[Int] => l.max
-    case _ => 0
-  }
+  val addressBits = CLog2Up(p(ExtMem).get.nMemoryChannels * p(ExtMem).get.master.size)
 
   var gl_incrementer = 0
   val resp = {

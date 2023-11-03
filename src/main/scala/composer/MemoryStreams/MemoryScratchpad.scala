@@ -6,10 +6,10 @@ import chisel3.util._
 import composer._
 import composer.Generation._
 import composer.MemoryStreams.Loaders.CScratchpadPackedSubwordLoader
-import composer.common.{splitIntoChunks, CLog2Up, ShiftReg}
+import composer.common.{CLog2Up, ShiftReg, splitIntoChunks}
 import composer.Generation.Tune._
 import composer.Platforms.{PlatformType, PlatformTypeKey}
-import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.diplomacy.{TransferSizes, _}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 
@@ -40,7 +40,7 @@ class ScratchpadDataPort(val scReqBits: Int, val dataWidthBits: Int) extends CSc
   }
 
   def read(toAddr: UInt, enable: Bool): Bool = {
-    when (enable) {
+    when(enable) {
       this.read(toAddr)
     }
     this.req.fire
@@ -70,18 +70,23 @@ class MemoryScratchpad(csp: CScratchpadParams)(implicit p: Parameters) extends L
 
   val blockBytes = p(CacheBlockBytes)
   lazy val module = new ScratchpadImpl(csp, this)
-  val mem_master_node = if (csp.features.supportMemRequest) {
-    require(csp.dataWidthBits.intValue() <= channelWidthBytes * 8 * p(PrefetchSourceMultiplicity))
-    Some(TLClientNode(Seq(TLMasterPortParameters.v2(
-      masters = Seq(TLMasterParameters.v1(
-        name = "ScratchpadToMemory",
-        sourceId = IdRange(0, InstanceTunable(2, (1, 4), Some(csp.name + "ScratchpadReaderSources"))),
-        supportsProbe = TransferSizes(1, channelWidthBytes * p(PrefetchSourceMultiplicity)),
-        supportsGet = TransferSizes(1, channelWidthBytes * p(PrefetchSourceMultiplicity)),
-        supportsPutFull = TransferSizes(1, channelWidthBytes * p(PrefetchSourceMultiplicity))
-      )),
-      channelBytes = TLChannelBeatBytes(channelWidthBytes)))))
-  } else None
+  require(csp.dataWidthBits.intValue() <= channelWidthBytes * 8 * p(PrefetchSourceMultiplicity))
+  val mem_reader = if (csp.features.supportMemRequest) Some(TLClientNode(Seq(TLMasterPortParameters.v2(
+    masters = Seq(TLMasterParameters.v1(
+      name = "ScratchpadRead",
+      sourceId = IdRange(0, InstanceTunable(2, (1, 4), Some(csp.name + "ScratchpadReaderSources"))),
+      supportsProbe = TransferSizes(channelWidthBytes, channelWidthBytes * p(PrefetchSourceMultiplicity)),
+      supportsGet = TransferSizes(channelWidthBytes, channelWidthBytes * p(PrefetchSourceMultiplicity)),
+    )),
+    channelBytes = TLChannelBeatBytes(channelWidthBytes))))) else None
+  val mem_writer = if (csp.features.supportWriteback) Some(TLClientNode(Seq(TLMasterPortParameters.v2(
+    masters = Seq(TLMasterParameters.v1(
+      name = "ScratchpadWriteback",
+      sourceId = IdRange(0, InstanceTunable(2, (1, 4), Some(csp.name + "ScratchpadReaderSources"))),
+      supportsProbe = TransferSizes(channelWidthBytes, channelWidthBytes * p(PrefetchSourceMultiplicity)),
+      supportsPutFull = TransferSizes(channelWidthBytes, channelWidthBytes * p(PrefetchSourceMultiplicity))
+    )),
+    channelBytes = TLChannelBeatBytes(channelWidthBytes))))) else None
 
   csp.dataWidthBits match {
     case a: Tunable if !a.isIdentity =>
@@ -107,7 +112,7 @@ class ScratchpadImpl(csp: CScratchpadParams,
 
   private val scReqBits = log2Up(nDatas)
   val IOs = Seq.fill(nPorts)(IO(new ScratchpadDataPort(scReqBits, dataWidthBits)))
-  val req = IO(new ScratchpadMemReqPort(if (outer.mem_master_node.isDefined) Some(outer.mem_master_node.get.out(0)._1) else None, nDatas, memoryLengthBits))
+  val req = IO(new ScratchpadMemReqPort(if (outer.mem_reader.isDefined) Some(outer.mem_reader.get.out(0)._1) else None, nDatas, memoryLengthBits))
   private val memory = Seq.fill(datasPerCacheLine)(Memory(latency,
     dataWidth = dataWidthBits,
     nRows = realNRows,
@@ -131,7 +136,7 @@ class ScratchpadImpl(csp: CScratchpadParams,
   // address bits and use them to index into the BRAMs.
   def getHighOrderAddr(addr: UInt): UInt = {
     val highOrderBits = CLog2Up(datasPerCacheLine)
-    addr(addr.getWidth-1, highOrderBits).asUInt
+    addr(addr.getWidth - 1, highOrderBits).asUInt
   }
 
   def getLowOrderAddr(addr: UInt): UInt = {
@@ -140,10 +145,10 @@ class ScratchpadImpl(csp: CScratchpadParams,
       addr(lowOrderBits - 1, 0)
   }
 
-  IOs.zipWithIndex.foreach { case(io, portIdx) =>
+  IOs.zipWithIndex.foreach { case (io, portIdx) =>
     val memIdx = getLowOrderAddr(io.req.bits.addr)
     val memIdxDelay = ShiftReg(memIdx, latency)
-    memory.zipWithIndex foreach { case(mem, mem_idx) =>
+    memory.zipWithIndex foreach { case (mem, mem_idx) =>
       mem.addr(portIdx) := getHighOrderAddr(io.req.bits.addr)
       mem.chip_select(portIdx) := io.req.valid && memIdx === mem_idx.U
       mem.read_enable(portIdx) := !io.req.bits.write_enable
@@ -156,7 +161,7 @@ class ScratchpadImpl(csp: CScratchpadParams,
   }
 
   require(isPow2(datasPerCacheLine))
-  if (outer.mem_master_node.isDefined) {
+  if (outer.mem_reader.isDefined) {
     val loader = Module(specialization match {
       case psw: PackedSubwordScratchpadParams =>
         require(datasPerCacheLine == 1)
@@ -172,9 +177,9 @@ class ScratchpadImpl(csp: CScratchpadParams,
     }
 
     loader.io.sp_write_out.ready := true.B
-    when (loader.io.sp_write_out.valid) {
+    when(loader.io.sp_write_out.valid) {
       val dataSplit = splitIntoChunks(loader.io.sp_write_out.bits.dat, dataWidthBits)
-      memory.zip(dataSplit) foreach { case(mem, dat) =>
+      memory.zip(dataSplit) foreach { case (mem, dat) =>
         val rwp = mem.getReadWritePortIdx(0)
         mem.addr(rwp) := loader.io.sp_write_out.bits.idx
         mem.chip_select(rwp) := true.B
@@ -189,10 +194,13 @@ class ScratchpadImpl(csp: CScratchpadParams,
 
     val tx_ready = p(PlatformTypeKey) match {
       case PlatformType.FPGA =>
-        val reader = Module(new CReader(swWordSize * datasPerCacheLine / 8, 1, tlclient = outer.mem_master_node.get, debugName = Some(s"Scratchpad${csp.name}"))(p.alterPartial {
+        val reader = Module(new SequentialReader(swWordSize * datasPerCacheLine / 8, 1,
+          tl_edge = outer.mem_reader.get.out(0)._2,
+          tl_bundle = outer.mem_reader.get.out(0)._1,
+          debugName = Some(s"Scratchpad${csp.name}"))(p.alterPartial {
           case PrefetchSourceMultiplicity => 32
         }))
-        reader.tl_out <> outer.mem_master_node.get.out(0)._1
+        reader.tl_out <> outer.mem_reader.get.out(0)._1
         reader.io.req.valid := req.init.valid
         reader.io.req.bits.addr := req.init.bits.memAddr
         reader.io.req.bits.len := req.init.bits.len
@@ -205,7 +213,7 @@ class ScratchpadImpl(csp: CScratchpadParams,
         reader.io.channel.data.ready := loader.io.cache_block_in.ready
         reader.io.req.ready
       case PlatformType.ASIC =>
-        val (port, edge) = outer.mem_master_node.get.out(0)
+        val (port, edge) = outer.mem_reader.get.out(0)
         val tx_len_remaining = Reg(UInt(req.init.bits.len.getWidth.W))
         val tx_base_addr = Reg(UInt(req.init.bits.memAddr.getWidth.W))
         val tx_init_index = Reg(UInt(req.init.bits.scAddr.getWidth.W))
@@ -257,12 +265,12 @@ class ScratchpadImpl(csp: CScratchpadParams,
         port.d.ready := loader.io.cache_block_in.ready
         loader.io.cache_block_in.valid := port.d.valid
         loader.io.cache_block_in.bits.dat := port.d.bits.data
-        when (port.d.fire) {
+        when(port.d.fire) {
           val tx = source_txs(port.d.bits.source)
           loader.io.cache_block_in.bits.idxBase := tx.init_index
           tx.init_index := tx.init_index + scratchpad_indices_per_beat.U
           tx.beats_remaining_minus_one := tx.beats_remaining_minus_one - 1.U
-          when (tx.beats_remaining_minus_one === 0.U) {
+          when(tx.beats_remaining_minus_one === 0.U) {
             tx.active := false.B
           }
         }
@@ -284,7 +292,8 @@ class ScratchpadImpl(csp: CScratchpadParams,
     if (supportWriteback) {
       require(specialization.isInstanceOf[FlatPackScratchpadParams] && dataWidthBits % 8 == 0)
       val writer = Module(new SequentialWriter(nBytes = dataWidthBits / 8,
-        TLClientNode = outer.mem_master_node.get))
+        tl_outer = outer.mem_writer.get.out(0)._1,
+        edge = outer.mem_writer.get.out(0)._2))
       writer.tl_out.a.ready := false.B
       writer.tl_out.d.valid := false.B
       writer.tl_out.d.bits := DontCare
@@ -293,7 +302,7 @@ class ScratchpadImpl(csp: CScratchpadParams,
 
       when(wb_state =/= wb_idle) {
         req.init.ready := false.B
-        writer.tl_out <> outer.mem_master_node.get.out(0)._1
+        writer.tl_out <> outer.mem_writer.get.out(0)._1
       }
       writer.io.req.valid := req.writeback.valid
       writer.io.req.bits.len := req.writeback.bits.len
@@ -304,8 +313,8 @@ class ScratchpadImpl(csp: CScratchpadParams,
       val mem_valid = ShiftReg(memory(0).read_enable(0) && wb_state === wb_read, latency)
       channel.data.valid := mem_valid && wb_state === wb_read
       channel.data.bits := memory(0).data_out(0)
-      when (wb_state =/= wb_idle) {
-        IOs foreach (port => port.req.ready := false.B )
+      when(wb_state =/= wb_idle) {
+        IOs foreach (port => port.req.ready := false.B)
       }
       req.writeback.ready := false.B
 
@@ -334,7 +343,7 @@ class ScratchpadImpl(csp: CScratchpadParams,
           }
         }
         is(wb_rewind) {
-          when(writer.io.req.ready && channel.channelIdle) {
+          when(writer.io.req.ready && channel.isFlushed) {
             wb_state := wb_idle
           }
           when(channel.data.ready && !mem_valid) {

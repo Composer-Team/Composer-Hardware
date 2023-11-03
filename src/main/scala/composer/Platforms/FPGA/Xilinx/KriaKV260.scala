@@ -33,7 +33,7 @@ class WithKriaPlatform(nMemoryChannels: Int = 1, clockRate_MHz: Int = 100)
     case HasDiscreteMemory => false
     case FrontBusBeatBytes => 4
     case CoreCommandLatency => 0
-    case PrefetchSourceMultiplicity => 32
+    case PrefetchSourceMultiplicity => 16
 
     case PlatformTypeKey => PlatformType.FPGA
     case FrontBusProtocolKey => FrontBusProtocol.AXI4

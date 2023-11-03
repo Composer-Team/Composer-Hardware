@@ -67,7 +67,8 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
       }
     })
 
-  val mems = systems.flatMap(_.memory_nodes)
+  val reads = systems.flatMap(_.r_nodes)
+  val writes = systems.flatMap(_.w_nodes)
 
   lazy val module = new ComposerAccModule(this)
 }
@@ -144,30 +145,32 @@ class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
 
   val acc = LazyModule(new ComposerAcc())
 
-  val mem = if (acc.mems.nonEmpty) {
-    val nEndpoints = if (p(HasDisjointMemoryControllers)) Math.min(nMemChannels, acc.mems.length)
-    else nMemChannels
-    val mem = Seq.fill(nEndpoints)(TLIdentityNode())
+  val Seq(r_mem, w_mem) = Seq(acc.reads, acc.writes).map { mems =>
+    if (mems.nonEmpty) {
+      val nEndpoints = if (p(HasDisjointMemoryControllers)) Math.min(nMemChannels, mems.length)
+      else nMemChannels
+      val mem_endpoints = Seq.fill(nEndpoints)(TLIdentityNode())
 
-    if (p(HasDisjointMemoryControllers)) {
-      // disjoint memory controllers go to different addresses. The redirection to the correct controller
-      // happens at the crossbar level, so we join all transactions at a single crossbar and then feed out to the
-      // individual channels
-      val crossbarModule = LazyModule(new TLXbar())
-      val crossbar = crossbarModule.node
-      acc.mems foreach (crossbar := _)
-      mem.foreach(_ := crossbar)
-    } else {
-      // controllers can all access the same addresses! Split up end points to be able to access these addresses in
-      // parallel
-      val nondisjointXbars = Seq.fill(nMemChannels)(LazyModule(new TLXbar()))
-      acc.mems.zipWithIndex foreach { case (m, idx) =>
-        nondisjointXbars(idx % nMemChannels).node := m
+      if (p(HasDisjointMemoryControllers)) {
+        // disjoint memory controllers go to different addresses. The redirection to the correct controller
+        // happens at the crossbar level, so we join all transactions at a single crossbar and then feed out to the
+        // individual channels
+        val crossbarModule = LazyModule(new TLXbar())
+        val crossbar = crossbarModule.node
+        mems foreach (crossbar := _)
+        mem_endpoints.foreach(_ := crossbar)
+      } else {
+        // controllers can all access the same addresses! Split up end points to be able to access these addresses in
+        // parallel
+        val nondisjointXbars = Seq.fill(nMemChannels)(LazyModule(new TLXbar()))
+        mems.zipWithIndex foreach { case (m, idx) =>
+          nondisjointXbars(idx % nMemChannels).node := m
+        }
+        mem_endpoints zip nondisjointXbars foreach { case (m, xb) => m := xb.node }
       }
-      mem zip nondisjointXbars foreach { case (m, xb) => m := xb.node }
-    }
-    mem
-  } else Seq()
+      mem_endpoints
+    } else Seq()
+  }
 
   lazy val module = new ComposerAccSystemModule(this)
 }

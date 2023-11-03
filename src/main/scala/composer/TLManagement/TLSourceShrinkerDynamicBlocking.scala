@@ -100,7 +100,6 @@ class TLSourceShrinkerDynamicBlocking(maxInFlight: Int)(implicit p: Parameters) 
             allocated(out.d.bits.source) := false.B
           }
         }
-
       }
     }
   }
@@ -108,9 +107,10 @@ class TLSourceShrinkerDynamicBlocking(maxInFlight: Int)(implicit p: Parameters) 
 
 object TLSourceShrinkerDynamicBlocking
 {
-  def apply(maxInFlight: Int)(implicit p: Parameters): TLNode =
+  def apply(maxInFlight: Int, suggestedName: Option[String] = None)(implicit p: Parameters): TLNode =
   {
     val shrinker = LazyModule(new TLSourceShrinkerDynamicBlocking(maxInFlight))
+    shrinker.suggestName(suggestedName)
     shrinker.node
   }
 }

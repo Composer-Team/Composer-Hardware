@@ -44,7 +44,7 @@ class AccelCoreWrapper(val composerSystemParams: AcceleratorSystemConfig, val co
   lazy val module = composerSystemParams.buildCore(CoreConstructor(composerSystemParams.coreParams, this), p)
   val coreParams = composerSystemParams.coreParams.copy(core_id = core_id, system_id = system_id)
   val blockBytes = p(CacheBlockBytes)
-  val unCachedReaders = coreParams.memoryChannelParams.filter(_.isInstanceOf[CReadChannelParams]).map { para =>
+  val readers = coreParams.memoryChannelParams.filter(_.isInstanceOf[CReadChannelParams]).map { para =>
     val param: CReadChannelParams = para.asInstanceOf[CReadChannelParams]
     (param.name, List.tabulate(para.nChannels) { i =>
       TLClientNode(List(TLMasterPortParameters.v1(
@@ -74,12 +74,9 @@ class AccelCoreWrapper(val composerSystemParams: AcceleratorSystemConfig, val co
       mod.suggestName(param.name)
       (param.name, mod)
   }
-  val readerNodes = unCachedReaders
+  val readerNodes = (readers.map(_._2) :+ scratch_mod.map(_._2.mem_reader).filter(_.isDefined).map(_.get)).flatten
+  val writerNodes = (writers.map(_._2) :+ scratch_mod.map(_._2.mem_writer).filter(_.isDefined).map(_.get)).flatten
   // these go to external memory
-  val mem_nodes = (unCachedReaders ++
-    writers ++
-    scratch_mod.map(i => (i._1, List(i._2.mem_master_node).filter(_.isDefined).map(_.get)))
-    ).flatMap(_._2)
   val externalCoreCommNodes = Map.from(composerSystemParams.canIssueCoreCommandsTo.map { targetSys =>
     (targetSys, TLClientNode(Seq(TLMasterPortParameters.v1(clients = Seq(TLMasterParameters.v1(
       s"${composerSystemParams.name}_core${core_id}_to$targetSys",
@@ -260,13 +257,16 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
                        idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
     val mod = idx match {
       case Some(id_unpack) =>
-        val clients = getTLClients(name, outer.readerNodes)
-        List(Module(new CReader(dataBytes, vlen, clients(id_unpack), debugName = Some(name))))
-      case None => getTLClients(name, outer.readerNodes).map(tab_id => Module(new CReader(dataBytes, vlen, tab_id, debugName = Some(name))))
+        val clients = getTLClients(name, outer.readers)
+        List(Module(new SequentialReader(dataBytes, vlen, clients(id_unpack).out(0)._1,
+          tl_edge = clients(id_unpack).out(0)._2, debugName = Some(name))))
+      case None => getTLClients(name, outer.readers).map(tab_id => Module(new SequentialReader(dataBytes,
+        vlen,
+        tab_id.out(0)._1, tab_id.out(0)._2, debugName = Some(name))))
     }
     //noinspection DuplicatedCode
     mod foreach { m =>
-      m.tl_out <> m.tl_outer
+      m.tl_out <> m.tl_bundle
       m.suggestName(name)
     }
     val ret = (mod.map(_.io.req), mod.map(_.io.channel))
@@ -306,8 +306,11 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
       " same group multiple times. If =0, then you have not described this writer group.")
     //    val param = params(0).asInstanceOf[CWriteChannelParams]
     val mod = idx match {
-      case Some(id) => List(Module(new SequentialWriter(dataBytes, getTLClients(name, outer.writers)(id))))
-      case None => getTLClients(name, outer.writers).map(tab_id => Module(new SequentialWriter(dataBytes, tab_id)))
+      case Some(id) =>
+        val client = getTLClients(name, outer.writers)(id)
+        List(Module(new SequentialWriter(dataBytes, tl_outer = client.out(0)._1, edge = client.out(0)._2)))
+      case None => getTLClients(name, outer.writers).map(tab_id => Module(new SequentialWriter(dataBytes,
+        tab_id.out(0)._1, tab_id.out(0)._2)))
     }
     //noinspection DuplicatedCode
     mod foreach { m =>
@@ -365,7 +368,7 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
         first._2
       case _ =>
         throw new Exception(s"getReaderModules failed. Tried to fetch a channel set with a name($name) that doesn't exist. Declared names: " +
-          outer.unCachedReaders.map(_._1))
+          outer.readers.map(_._1))
     }
   }
 

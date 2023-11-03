@@ -8,7 +8,7 @@ import freechips.rocketchip.tilelink._
 
 class WriterDataChannelIO(val dWidth: Int) extends Bundle {
   val data = Flipped(Decoupled(UInt(dWidth.W)))
-  val channelIdle = Output(Bool())
+  val isFlushed = Output(Bool())
 }
 
 class SequentialWriteChannelIO(maxBytes: Int)(implicit p: Parameters) extends Bundle {
@@ -22,13 +22,14 @@ class SequentialWriteChannelIO(maxBytes: Int)(implicit p: Parameters) extends Bu
  *
  * @param nBytes the number of bytes in a single item
  */
-class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
+class SequentialWriter(nBytes: Int,
+                       val tl_outer: TLBundle,
+                       edge: TLEdgeOut)
                       (implicit p: Parameters) extends Module {
-  val (tl_outer, edge) = TLClientNode.out(0)
   private val nBits = nBytes * 8
   // get TL parameters from edge
-  private val beatBytes = edge.manager.beatBytes
-  private val addressBits = log2Up(edge.manager.maxAddress)
+  private val beatBytes = tl_outer.params.dataBits / 8
+  private val addressBits = tl_outer.params.addressBits
   private val addressBitsChop = addressBits - log2Up(beatBytes)
   private val logNBytes = CLog2Up(nBytes)
   val io = IO(new SequentialWriteChannelIO(nBytes))
@@ -47,8 +48,7 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
   private val haveTransactionToDo = txStates.map(_ === tx_inProgress).reduce(_ || _)
   private val haveAvailableTxSlot = txStates.map(_ === tx_inactive).reduce(_ || _)
 
-  //  val isReallyIdle = state === s_idle && !haveTransactionToDo
-  io.channel.channelIdle := !haveTransactionToDo && state === s_idle
+  io.channel.isFlushed := !haveTransactionToDo
 
   require(nBytes >= 1)
   require(nBytes <= beatBytes)
@@ -69,7 +69,6 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
   private val dataValid = Reg(UInt(wordsPerBeat.W))
 
   private val wdata = dataBuf.asUInt
-  private val wmask = FillInterleaved(nBytes, dataValid)
 
   private val allocatedTransaction = RegInit(0.U(txIDBits.W))
   private val earlyFinish = RegInit(false.B)
@@ -132,8 +131,7 @@ class SequentialWriter(nBytes: Int, TLClientNode: TLClientNode)
         fromSource = allocatedTransaction,
         toAddress = Cat(addr, 0.U(log2Up(beatBytes).W)),
         lgSize = log2Ceil(beatBytes).U,
-        data = wdata,
-        mask = wmask)._2
+        data = wdata)._2
 
       // handle TileLink 'a' interface (request to slave)
       when(tl_out.a.fire) {

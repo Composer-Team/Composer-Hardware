@@ -12,7 +12,6 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 
 
-
 class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: Int, val canBeIntaCoreCommandEndpoint: Boolean, val acc: ComposerAcc)(implicit p: Parameters) extends LazyModuleWithSLRs {
   val nCores = systemParams.nCores
   val coreParams = systemParams.coreParams
@@ -29,7 +28,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
 
   // we want to avoid high-degree xbars. Recursively make multi-stage xbar network
   // add an extra buffer for cores off the main SLR
-  val memory_nodes = {
+  val Seq(r_nodes, w_nodes) = {
     def recursivelyReduceXBar(grp: Seq[TLNode], inc: Int = 0, slr_id: Int): Seq[TLIdentityNode] = {
       def help(a: Seq[Seq[TLNode]]): Seq[TLNode] = {
         a.map { r =>
@@ -48,6 +47,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
         memory_endpoint_identity := x
         memory_endpoint_identity
       }
+
       if (grp.isEmpty) Seq()
       else if (grp.length <= p(CXbarMaxDegree)) grp.map(mapToEndpoint)
       else {
@@ -56,38 +56,44 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
       }
     }
 
-    val endpoints = if (distributeCores) {
-      val mems_per_slr = cores.groupBy(_._1).map(q => (q._1, q._2.flatMap(_._2.mem_nodes)))
-      mems_per_slr.flatMap { case (slr, clients) =>
-        val reduction = recursivelyReduceXBar(clients, slr_id = slr)
-        if (reduction.isEmpty) List()
-        else if (slr == SLRHelper.getMemoryBusSLR) {
-          reduction
-        } else {
-          // route across the SLR and give to a buffer
-          val canal = LazyModuleWithSLR(new TLXbar(), slr_id = slr, requestedName = Some(s"final_slrReduction_xbar_${SLRHelper.getSLRFromIdx(slr)}"))
-          reduction foreach { a => canal.node := a }
-          val sbuf = LazyModule(new TLBuffer())
-          sbuf.suggestName(s"final_slrReduction_buffer_slr${SLRHelper.getSLRFromIdx(slr)}")
-          sbuf.node := canal.node
+    val reads_per_slr = cores.groupBy(_._1).map(q => (q._1, q._2.flatMap(_._2.readerNodes)))
+    val writes_per_slr = cores.groupBy(_._1).map(q => (q._1, q._2.flatMap(_._2.writerNodes)))
 
-          val endpoint = TLIdentityNode()
-          endpoint := sbuf.node
-          List(endpoint)
-        }
-      }.toSeq
-    } else cores.flatMap(_._2.mem_nodes)
+    val endpoints = Seq(reads_per_slr, writes_per_slr) map { nodes =>
+      if (distributeCores) {
+        nodes.flatMap { case (slr, clients) =>
+          val reduction = recursivelyReduceXBar(clients, slr_id = slr)
+          if (reduction.isEmpty) List()
+          else if (slr == SLRHelper.getMemoryBusSLR) {
+            reduction
+          } else {
+            // route across the SLR and give to a buffer
+            val canal = LazyModuleWithSLR(new TLXbar(), slr_id = slr, requestedName = Some(s"final_slrReduction_xbar_${SLRHelper.getSLRFromIdx(slr)}"))
+            reduction foreach { a => canal.node := a }
+            val sbuf = LazyModule(new TLBuffer())
+            sbuf.suggestName(s"final_slrReduction_buffer_slr${SLRHelper.getSLRFromIdx(slr)}")
+            sbuf.node := canal.node
 
-    recursivelyReduceXBar(endpoints, slr_id = SLRHelper.getMemoryBusSLR)
+            val endpoint = TLIdentityNode()
+            endpoint := sbuf.node
+            List(endpoint)
+          }
+        }.toSeq
+      } else nodes.flatMap(_._2).toSeq
+    }
+
+    endpoints map { endpoint =>
+      recursivelyReduceXBar(endpoint, slr_id = SLRHelper.getMemoryBusSLR)
+    }
   }
 
   /* SEND OUT STUFF*/
 
   // ROUTE OUTGOING COMMANDS THROUGH HERE
-//  val canIssueCoreCommands = systemParams.canIssueCoreCommandsTo.nonEmpty
+  //  val canIssueCoreCommands = systemParams.canIssueCoreCommandsTo.nonEmpty
   val outgoingCmdXBars = Map.from(systemParams.canIssueCoreCommandsTo.map { target =>
     val xbar = LazyModule(new TLXbar())
-    cores.map(_._2.externalCoreCommNodes(target)).foreach{ core_target_source => xbar.node := TLBuffer() := core_target_source}
+    cores.map(_._2.externalCoreCommNodes(target)).foreach { core_target_source => xbar.node := TLBuffer() := core_target_source }
     (target, xbar.node)
   })
   // cores have their own independent command client nodes
@@ -125,7 +131,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
     (Some(manager), Some(xbar.node))
   } else (None, None)
 
-  val incomingInternalResponseHandlers = Map.from (systemParams.canIssueCoreCommandsTo.map { target =>
+  val incomingInternalResponseHandlers = Map.from(systemParams.canIssueCoreCommandsTo.map { target =>
     val manager = TLManagerNode(
       Seq(TLSlavePortParameters.v1(
         managers = Seq(TLSlaveParameters.v1(
@@ -135,7 +141,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
       )))
     val xbar = LazyModule(new TLXbar())
     manager := xbar.node
-    (target, (manager,xbar.node))
+    (target, (manager, xbar.node))
   })
 
   lazy val module = new ComposerSystemImp(this)

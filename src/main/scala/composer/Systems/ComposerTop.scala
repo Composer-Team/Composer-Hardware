@@ -11,7 +11,7 @@ import composer.common.CLog2Up
 import composer.Generation.Tune.Tunable
 import composer.Platforms.{BuildModeKey, FrontBusAddressBits, FrontBusProtocol, FrontBusProtocolKey, HasDMA, PlatformType, PlatformTypeKey}
 import composer.Protocol.{ACE, AXI4Compat}
-import composer.TLManagement.{TLSourceShrinkerDynamic, TLSourceShrinkerDynamicBlocking}
+import composer.TLManagement.{TLSourceShrinkerDynamic, TLSourceShrinkerDynamicBlocking, TLToAXI4SRW}
 import freechips.rocketchip.amba.ahb._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
@@ -91,14 +91,20 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   val accelerator_system = LazyModule(new ComposerAccSystem()(dummyTL))
 
   // Rocketchip AXI Nodes
-  val AXI_MEM = if (accelerator_system.mem.nonEmpty) Some(Seq.tabulate(nMemChannels) { channel_idx =>
+
+  val has_memory_endpoints = accelerator_system.r_mem.nonEmpty || accelerator_system.w_mem.nonEmpty
+  val AXI_MEM = if (has_memory_endpoints) Some(Seq.tabulate(nMemChannels) { channel_idx =>
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
         address = Seq(getAddressSet(channel_idx)),
         resources = device.reg,
         regionType = RegionType.UNCACHED,
-        supportsRead = TransferSizes(externalMemParams.master.beatBytes * p(PrefetchSourceMultiplicity)),
-        supportsWrite = TransferSizes(externalMemParams.master.beatBytes * p(PrefetchSourceMultiplicity)),
+        supportsRead = TransferSizes(
+          externalMemParams.master.beatBytes,
+          externalMemParams.master.beatBytes * p(PrefetchSourceMultiplicity)),
+        supportsWrite = TransferSizes(
+          externalMemParams.master.beatBytes,
+          externalMemParams.master.beatBytes * p(PrefetchSourceMultiplicity)),
         interleavedId = Some(1)
       )),
       beatBytes = externalMemParams.master.beatBytes
@@ -123,21 +129,20 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     None
   }
 
-
-
   // Connect accelerators to memory
-  val composer_mems = accelerator_system.mem map { m =>
-    val composer_mem = AXI4IdentityNode()
+  val composer_mems = accelerator_system.r_mem.zip(accelerator_system.w_mem).zipWithIndex map { case ((r, w), idx) =>
     val DMASourceBits = if (p(HasDMA).isDefined) CLog2Up(p(HasDMA).get) else 0
     val availableComposerSources = 1 << (p(ExtMem).get.master.idBits - DMASourceBits)
-    (composer_mem
-      := AXI4Buffer()
-      := TLToAXI4()
-      := TLBuffer()
-      := TLSourceShrinkerDynamicBlocking(availableComposerSources)
-      := TLBuffer()
-      := m)
-    composer_mem
+    println("available srcs: " + availableComposerSources)
+    val Seq(rss, wss) = Seq(r, w).zip(Seq("readIDShrinker", "writeIDShrinker")).map{ case (m, nm) => TLSourceShrinkerDynamicBlocking(availableComposerSources, Some(nm)) := m }
+    val tl2axi = LazyModule(new TLToAXI4SRW(
+      addressSet = ComposerTop.getAddressSet(idx),
+      idMax = availableComposerSources))
+    tl2axi.tlReader := rss
+    tl2axi.tlWriter := wss
+    // readers and writers are separated into separate systems and re-unified for the AXI bus. In reality though,
+    // the read and write busses are logically unrelated so this unification is only symbolic
+    tl2axi.axi_client
   }
   val mem_tops = if (p(HasDMA).isDefined) {
     val dma_mem_xbar = Seq.fill(nMemChannels)(AXI4Xbar(maxFlightPerId = p(MaxInFlightMemTxsPerSource)))
@@ -148,9 +153,8 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       xb := dma
     }
     dma_mem_xbar
-  } else {
-    composer_mems
-  }
+  } else composer_mems
+
   AXI_MEM match {
     case Some(mems) =>
       mem_tops zip mems foreach { case (mt, endpoint) =>

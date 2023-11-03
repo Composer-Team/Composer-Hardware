@@ -3,7 +3,7 @@ package composer.Protocol
 import chisel3._
 import chisel3.util.log2Up
 import composer.Protocol.AXI4Compat._
-import freechips.rocketchip.amba.axi4.{AXI4Bundle, AXI4BundleParameters}
+import freechips.rocketchip.amba.axi4.{AXI4Bundle, AXI4BundleParameters, AXI4Parameters}
 import freechips.rocketchip.subsystem.MasterPortParams
 
 class AXI4Compat(param: MasterPortParams, userBits: Int = 0) extends Bundle {
@@ -72,52 +72,55 @@ object AXI4Compat {
   val lenWidth = 8
   val respWidth = 2
 
-  def connectCompatMaster(compat: AXI4Compat, axi4: AXI4Bundle): Unit = {
-    axi4.r.bits.id := compat.rid
-    axi4.r.bits.data := compat.rdata
-    axi4.r.bits.resp := compat.rresp
-    axi4.r.bits.last := compat.rlast
-    axi4.r.valid := compat.rvalid
-    compat.rready := axi4.r.ready
+  val prot_level = AXI4Parameters.PROT_INSECURE
+  val cache_level = 0xF.U
 
-    compat.arid := axi4.ar.bits.id
-    compat.arqos := axi4.ar.bits.qos
-    compat.arlen := axi4.ar.bits.len
-    compat.arlock := axi4.ar.bits.lock
-    compat.arprot := axi4.ar.bits.prot
-    compat.araddr := axi4.ar.bits.addr
-    compat.arburst := axi4.ar.bits.burst
-    compat.aruser := axi4.ar.bits.user.asUInt
-    compat.arcache := 0xF.U //axi4.ar.bits.cache
-    compat.arregion := 0.U
-    compat.arsize := axi4.ar.bits.size
-    axi4.ar.ready := compat.arready
-    compat.arvalid := axi4.ar.valid
+  def connectCompatMaster(s: AXI4Compat, m: AXI4Bundle): Unit = {
+    m.r.bits.id := s.rid
+    m.r.bits.data := s.rdata
+    m.r.bits.resp := s.rresp
+    m.r.bits.last := s.rlast
+    m.r.valid := s.rvalid
+    s.rready := m.r.ready
 
-    axi4.b.bits.id := compat.bid
-    axi4.b.bits.resp := compat.bresp
-    compat.bready := axi4.b.ready
-    axi4.b.valid := compat.bvalid
+    s.arid := m.ar.bits.id
+    s.arqos := m.ar.bits.qos
+    s.arlen := m.ar.bits.len
+    s.arlock := m.ar.bits.lock
+    s.arprot := prot_level // m.ar.bits.prot
+    s.araddr := m.ar.bits.addr
+    s.arburst := m.ar.bits.burst
+    s.aruser := m.ar.bits.user.asUInt
+    s.arcache := cache_level // 0xF.U //axi4.ar.bits.cache
+    s.arregion := 0.U
+    s.arsize := m.ar.bits.size
+    m.ar.ready := s.arready
+    s.arvalid := m.ar.valid
 
-    compat.awid := axi4.aw.bits.id
-    compat.awqos := axi4.aw.bits.qos
-    compat.awlen := axi4.aw.bits.len
-    compat.awlock := axi4.aw.bits.lock
-    compat.awprot := axi4.aw.bits.prot
-    compat.awaddr := axi4.aw.bits.addr
-    compat.awburst := axi4.aw.bits.burst
-    compat.awcache := 0xF.U // axi4.aw.bits.cache
-    compat.awsize := axi4.aw.bits.size
-    compat.awuser := axi4.aw.bits.user.asUInt
-    compat.awregion := 0.U
-    axi4.aw.ready := compat.awready
-    compat.awvalid := axi4.aw.valid
+    m.b.bits.id := s.bid
+    m.b.bits.resp := s.bresp
+    s.bready := m.b.ready
+    m.b.valid := s.bvalid
 
-    compat.wdata := axi4.w.bits.data
-    compat.wstrb := axi4.w.bits.strb
-    compat.wlast := axi4.w.bits.last
-    compat.wvalid := axi4.w.valid
-    axi4.w.ready := compat.wready
+    s.awid := m.aw.bits.id
+    s.awqos := m.aw.bits.qos
+    s.awlen := m.aw.bits.len
+    s.awlock := 0.U
+    s.awprot := prot_level
+    s.awaddr := m.aw.bits.addr
+    s.awburst := m.aw.bits.burst
+    s.awcache := cache_level // 0xF.U // axi4.aw.bits.cache
+    s.awsize := m.aw.bits.size
+    s.awuser := 0.U
+    s.awregion := 0.U
+    m.aw.ready := s.awready
+    s.awvalid := m.aw.valid
+
+    s.wdata := m.w.bits.data
+    s.wstrb := m.w.bits.strb
+    s.wlast := m.w.bits.last
+    s.wvalid := m.w.valid
+    m.w.ready := s.wready
   }
 
   def connectCompatSlave(compat: AXI4Compat, axi4: AXI4Bundle): Unit = {
@@ -131,11 +134,11 @@ object AXI4Compat {
     axi4.ar.bits.id := compat.arid
     axi4.ar.bits.qos := compat.arqos
     axi4.ar.bits.len := compat.arlen
-    axi4.ar.bits.lock := compat.arlock
-    axi4.ar.bits.prot := compat.arprot
+    axi4.ar.bits.lock := 0.U //compat.arlock
+    axi4.ar.bits.prot := prot_level // compat.arprot
     axi4.ar.bits.addr := compat.araddr
     axi4.ar.bits.burst := compat.arburst
-    axi4.ar.bits.cache := compat.arcache
+    axi4.ar.bits.cache := cache_level // compat.arcache
     axi4.ar.bits.size := compat.arsize
 //    axi4.ar.bits.user. := compat.aruser
     compat.arready := axi4.ar.ready
@@ -144,11 +147,11 @@ object AXI4Compat {
     axi4.aw.bits.id := compat.awid
     axi4.aw.bits.qos := compat.awqos
     axi4.aw.bits.len := compat.awlen
-    axi4.aw.bits.lock := compat.awlock
-    axi4.aw.bits.prot := compat.awprot
+    axi4.aw.bits.lock := 0.U //compat.awlock
+    axi4.aw.bits.prot := prot_level // compat.awprot
     axi4.aw.bits.addr := compat.awaddr
     axi4.aw.bits.burst := compat.awburst
-    axi4.aw.bits.cache := compat.awcache
+    axi4.aw.bits.cache := cache_level // compat.awcache
     axi4.aw.bits.size := compat.awsize
 //    axi4.aw.bits.user := compat.awuser
     compat.awready := axi4.aw.ready

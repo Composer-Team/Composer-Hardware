@@ -1,12 +1,12 @@
 package composer.MemoryStreams
 
 import chipsalliance.rocketchip.config._
-import chisel3.{Reg, _}
+import chisel3._
 import chisel3.util._
 import composer.PrefetchSourceMultiplicity
 import composer.Systems.DataChannelIO
 import composer.common.{CLog2Up, ShiftReg}
-import composer.Generation.{BuildMode}
+import composer.Generation._
 import composer.Generation.Tune._
 import composer.Platforms.{ASICMemoryCompilerKey, BuildModeKey, PlatformType, PlatformTypeKey}
 import freechips.rocketchip.tilelink._
@@ -16,28 +16,29 @@ class ReadChannelIO(dataBytes: Int, vlen: Int)(implicit p: Parameters) extends B
   val channel = new DataChannelIO(dataBytes, vlen)
 }
 
-object CReader {
+object SequentialReader {
   private var has_warned_dp: Boolean = false
 }
 
-class CReader(dataBytes: Int,
-              vlen: Int = 1,
-              tlclient: TLClientNode,
-              debugName: Option[String] = None)(implicit p: Parameters) extends Module {
-  val (tl_outer, tledge) = tlclient.out(0)
-  val beatBytes = tledge.manager.beatBytes
+class SequentialReader(dataBytes: Int,
+                       vlen: Int = 1,
+                       val tl_bundle: TLBundle,
+                       tl_edge: TLEdgeOut,
+                       debugName: Option[String] = None)(implicit p: Parameters) extends Module {
+  val beatBytes = tl_edge.manager.beatBytes
   val beatBits = beatBytes * 8
-  val addressBits = log2Up(tledge.manager.maxAddress)
+  val addressBits = log2Up(tl_edge.manager.maxAddress)
   val maxBytes = dataBytes * vlen
   val largeTxNBeats = Math.max(p(PrefetchSourceMultiplicity), maxBytes / beatBytes)
-  val prefetchRows = tlclient.portParams(0).endSourceId * p(PrefetchSourceMultiplicity)
-  val hasOneSource = tlclient.portParams(0).endSourceId == 1
+  val nSources = tl_edge.client.endSourceId
+  val prefetchRows = nSources * p(PrefetchSourceMultiplicity)
+  val hasOneSource = nSources == 1
   require(isPow2(maxBytes))
 
 
   // io goes to user, TL connects with AXI4
   val io = IO(new ReadChannelIO(dataBytes, vlen))
-  val tl_out = IO(new TLBundle(tl_outer.params))
+  val tl_out = IO(new TLBundle(tl_bundle.params))
   val tl_reg = Module(new Queue(new TLBundleA(tl_out.params), 2, false, false, false))
   tl_out.a <> tl_reg.io.deq
 
@@ -66,7 +67,6 @@ class CReader(dataBytes: Int,
 
   // has to be pow2 to ensure OHToUInt works like we want
 
-  val nSources = tlclient.portParams(0).endSourceId
   if (nSources - 1 > prefetchRows) {
     println(s"CReader was parameterized with maxInFlightTxs($nSources), but only prefetches $prefetchRows rows." +
       s" Consider increasing the number of prefetched rows to at least $nSources or decrease the number of sources." +
@@ -101,8 +101,8 @@ class CReader(dataBytes: Int,
     case PlatformType.ASIC => p(ASICMemoryCompilerKey).mems.exists(_._1 == 2)
   }
 
-  if (!hasDualPortMemory && !CReader.has_warned_dp) {
-    CReader.has_warned_dp = true
+  if (!hasDualPortMemory && !SequentialReader.has_warned_dp) {
+    SequentialReader.has_warned_dp = true
     System.err.println("Warning: CReader is using a single port memory. This may cause performance degradation.")
   }
   val prefetch_buffers_valid = Reg(Vec(prefetchRows, Bool()))
@@ -214,7 +214,7 @@ class CReader(dataBytes: Int,
     is(s_send_mem_request) {
       when(len < largestRead.U) {
         tl_reg.io.enq.valid := sourceAvailable && ((prefetch_writeIdx + 1.U) =/= prefetch_readIdx)
-        tl_reg.io.enq.bits := tledge.Get(
+        tl_reg.io.enq.bits := tl_edge.Get(
           fromSource = chosenSource,
           toAddress = addr,
           lgSize = CLog2Up(beatBytes).U
@@ -238,7 +238,7 @@ class CReader(dataBytes: Int,
           }
         }
         tl_reg.io.enq.valid := sourceAvailable && haveRoomToAlloc
-        tl_reg.io.enq.bits := tledge.Get(
+        tl_reg.io.enq.bits := tl_edge.Get(
           fromSource = chosenSource,
           toAddress = addr,
           lgSize = lgLargestRead.U
