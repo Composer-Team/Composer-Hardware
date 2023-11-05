@@ -35,15 +35,14 @@ class SequentialWriter(nBytes: Int,
   val io = IO(new SequentialWriteChannelIO(nBytes))
   val tl_out = IO(new TLBundle(tl_outer.params))
 
-  private val s_idle :: s_data :: s_allocate :: s_mem :: Nil = Enum(4)
+  private val s_idle :: s_data :: s_mem :: Nil = Enum(3)
   private val state = RegInit(s_idle)
 
   private val tx_inactive :: tx_inProgress :: Nil = Enum(2)
   private val nSources = edge.master.endSourceId
-  //  println(nSources)
   private val txIDBits = log2Up(nSources)
   private val txStates = RegInit(VecInit(Seq.fill(nSources)(tx_inactive)))
-  private val txPriority = PriorityEncoderOH(txStates map (_ === tx_inactive))
+  private val sourceSelected = PriorityEncoder(txStates map (_ === tx_inactive))
 
   private val haveTransactionToDo = txStates.map(_ === tx_inProgress).reduce(_ || _)
   private val haveAvailableTxSlot = txStates.map(_ === tx_inactive).reduce(_ || _)
@@ -70,7 +69,6 @@ class SequentialWriter(nBytes: Int,
 
   private val wdata = dataBuf.asUInt
 
-  private val allocatedTransaction = RegInit(0.U(txIDBits.W))
   private val earlyFinish = RegInit(false.B)
 
   tl_out.a.bits := DontCare
@@ -115,27 +113,21 @@ class SequentialWriter(nBytes: Int,
         idx := idx + 1.U
         req_len := req_len - 1.U
         when(idx === (wordsPerBeat - 1).U || req_len === 1.U) {
-          state := s_allocate
+          state := s_mem
         }
       }
     }
-    is(s_allocate) {
-      when(haveAvailableTxSlot) {
-        allocatedTransaction := OHToUInt(txPriority)
-        state := s_mem
-      }
-    }
     is(s_mem) {
-      tl_out.a.valid := true.B
+      tl_out.a.valid := haveAvailableTxSlot
       tl_out.a.bits := edge.Put(
-        fromSource = allocatedTransaction,
+        fromSource = sourceSelected,
         toAddress = Cat(addr, 0.U(log2Up(beatBytes).W)),
         lgSize = log2Ceil(beatBytes).U,
         data = wdata)._2
 
       // handle TileLink 'a' interface (request to slave)
       when(tl_out.a.fire) {
-        txStates(allocatedTransaction) := tx_inProgress
+        txStates(sourceSelected) := tx_inProgress
         addr := nextAddr
         idx := 0.U
         dataValid := 0.U
