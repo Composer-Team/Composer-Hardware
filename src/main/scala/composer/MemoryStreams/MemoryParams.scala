@@ -70,11 +70,15 @@ trait CChannelParams {
 /**
  * Read Channel group
  *
- * @param name      The name of the channel
- * @param nChannels number of memory access channels of this type
+ * @param name           The name of the channel
+ * @param nChannels      number of memory access channels of this type
  * @param maxInFlightTxs maximum number of AXI/TileLink memory transactions can be inflight per reader module at once
  */
-case class CReadChannelParams(name: String, nChannels: Int = 1, maxInFlightTxs: Int = 2) extends CChannelParams {
+case class CReadChannelParams(name: String,
+                              dataBytes: Int,
+                              vlen: Int = 1,
+                              nChannels: Int = 1,
+                              maxInFlightTxs: Int = 8) extends CChannelParams {
   require(maxInFlightTxs > 1, s"Max In Flight Transactions must be greater than 1. Got: $maxInFlightTxs")
 }
 
@@ -85,7 +89,10 @@ case class CReadChannelParams(name: String, nChannels: Int = 1, maxInFlightTxs: 
  * @param nChannels      number of memory access channels of this type
  * @param maxInFlightTxs maximum number of AXI/TileLink memory transactions can be inflight per writer module at once
  */
-case class CWriteChannelParams(name: String, nChannels: Int = 1, maxInFlightTxs: Int = 2) extends CChannelParams {
+case class CWriteChannelParams(name: String,
+                               dataBytes: Int,
+                               nChannels: Int = 1,
+                               maxInFlightTxs: Int = 8) extends CChannelParams {
 }
 
 /**
@@ -113,8 +120,9 @@ case class CScratchpadParams(name: String,
                              nDatas: Number,
                              latency: Number = 3,
                              nPorts: Int = 2,
-                             features: CScratchpadFeatures = CScratchpadFeatures())extends CChannelParams {
+                             features: CScratchpadFeatures = CScratchpadFeatures()) extends CChannelParams {
   override val nChannels: Int = 1
+
   private[composer] def make(implicit p: Parameters): MemoryScratchpad = {
     new MemoryScratchpad(this)
   }

@@ -187,7 +187,7 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
         throw e
     }
 
-    params._2(core_idx).zipWithIndex.map { case(master_singleton, channelIdx) =>
+    params._2(core_idx).zipWithIndex.map { case (master_singleton, channelIdx) =>
       val master = master_singleton.out(0)
       val port = master._1
       val edge = master._2
@@ -226,15 +226,14 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
   }
 
   case class ReaderModuleChannel(requestChannel: DecoupledIO[ChannelTransactionBundle], dataChannel: DataChannelIO)
+
   case class WriterModuleChannel(requestChannel: DecoupledIO[ChannelTransactionBundle], dataChannel: WriterDataChannelIO)
 
   case class ScratchpadModuleChannel(requestChannel: ScratchpadMemReqPort, dataChannels: Seq[ScratchpadDataPort])
 
   def getReaderModule(name: String,
-                      dataWidthBytes: Int,
-                      vlen: Int = 1,
                       idx: Int = 0): ReaderModuleChannel = {
-    val a = getReaderModules(name, dataWidthBytes, vlen, Some(idx))
+    val a = getReaderModules(name, Some(idx))
     ReaderModuleChannel(a._1(0), a._2(0))
   }
 
@@ -252,17 +251,23 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
    *         commands in software.
    */
   def getReaderModules(name: String,
-                       dataBytes: Int,
-                       vlen: Int,
                        idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
+    val params = outer.coreParams.memoryChannelParams.filter(_.name == name)(0).asInstanceOf[CReadChannelParams]
     val mod = idx match {
       case Some(id_unpack) =>
         val clients = getTLClients(name, outer.readers)
-        List(Module(new SequentialReader(dataBytes, vlen, clients(id_unpack).out(0)._1,
+        List(Module(new SequentialReader(
+          dataBytes = params.dataBytes,
+          vlen = params.vlen,
+          tl_bundle = clients(id_unpack).out(0)._1,
           tl_edge = clients(id_unpack).out(0)._2, debugName = Some(name))))
-      case None => getTLClients(name, outer.readers).map(tab_id => Module(new SequentialReader(dataBytes,
-        vlen,
-        tab_id.out(0)._1, tab_id.out(0)._2, debugName = Some(name))))
+      case None =>
+        getTLClients(name, outer.readers).map(tab_id =>
+          Module(new SequentialReader(
+            dataBytes = params.dataBytes,
+            vlen = params.vlen,
+            tl_bundle = tab_id.out(0)._1,
+            tl_edge = tab_id.out(0)._2, debugName = Some(name))))
     }
     //noinspection DuplicatedCode
     mod foreach { m =>
@@ -282,9 +287,8 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
   }
 
   def getWriterModule(name: String,
-                      dataBytes: Int,
                       idx: Int = 0): WriterModuleChannel = {
-    val a = getWriterModules(name, dataBytes, Some(idx))
+    val a = getWriterModules(name, Some(idx))
     WriterModuleChannel(a._1(0), a._2(0))
   }
 
@@ -298,19 +302,20 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
   }
 
   def getWriterModules(name: String,
-                       dataBytes: Int,
                        idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[WriterDataChannelIO]) = {
 
-    val params = outer.coreParams.memoryChannelParams.filter(_.name == name)
-    require(params.length == 1, "Found writer descriptions (" + params.length + "). If > 1, then you have defined the" +
-      " same group multiple times. If =0, then you have not described this writer group.")
-    //    val param = params(0).asInstanceOf[CWriteChannelParams]
+    val params = outer.coreParams.memoryChannelParams.filter(_.name == name)(0).asInstanceOf[CWriteChannelParams]
     val mod = idx match {
       case Some(id) =>
         val client = getTLClients(name, outer.writers)(id)
-        List(Module(new SequentialWriter(dataBytes, tl_outer = client.out(0)._1, edge = client.out(0)._2)))
-      case None => getTLClients(name, outer.writers).map(tab_id => Module(new SequentialWriter(dataBytes,
-        tab_id.out(0)._1, tab_id.out(0)._2)))
+        List(Module(new SequentialWriter(
+          nBytes = params.dataBytes,
+          tl_outer = client.out(0)._1,
+          edge = client.out(0)._2)))
+      case None => getTLClients(name, outer.writers).map(tab_id =>
+        Module(new SequentialWriter(nBytes = params.dataBytes,
+          tl_outer = tab_id.out(0)._1,
+          edge = tab_id.out(0)._2)))
     }
     //noinspection DuplicatedCode
     mod foreach { m =>

@@ -133,7 +133,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   val composer_mems = accelerator_system.r_mem.zip(accelerator_system.w_mem).zipWithIndex map { case ((r, w), idx) =>
     val DMASourceBits = if (p(HasDMA).isDefined) CLog2Up(p(HasDMA).get) else 0
     val availableComposerSources = 1 << (p(ExtMem).get.master.idBits - DMASourceBits)
-    println("available srcs: " + availableComposerSources)
     val Seq(rss, wss) = Seq(r, w).zip(Seq("readIDShrinker", "writeIDShrinker")).map{ case (m, nm) => TLSourceShrinkerDynamicBlocking(availableComposerSources, Some(nm)) := m }
     val tl2axi = LazyModule(new TLToAXI4SRW(
       addressSet = ComposerTop.getAddressSet(idx),
