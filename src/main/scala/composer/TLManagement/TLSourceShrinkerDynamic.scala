@@ -48,9 +48,9 @@ class TLSourceShrinkerDynamic(maxInFlight: Int)(implicit p: Parameters) extends 
       if (noShrinkRequired(edgeIn.client)) {
         out.a <> in.a
         in.d <> out.d
-        println("No shrink required")
+//        println("No shrink required")
       } else {
-        println("Shrinking because we need " + edgeIn.client.endSourceId + " clients")
+//        println("Shrinking because we need " + edgeIn.client.endSourceId + " clients")
         // map source ids from the side that wants shrinkage to the shrunken space id
         val sourceIn2OutMap = Reg(Vec(edgeIn.client.endSourceId, UInt(width = log2Up(maxInFlight).W)))
         val sourceOut2InMap = Reg(Vec(maxInFlight, UInt(width = log2Up(edgeIn.client.endSourceId).W)))
@@ -66,7 +66,7 @@ class TLSourceShrinkerDynamic(maxInFlight: Int)(implicit p: Parameters) extends 
 
         val a_first = !sourceInIdMapValid(in.a.bits.source)
         val beatsLeftPerAllocation = Reg(Vec(maxInFlight, UInt(log2Up((edgeOut.manager.maxTransfer / edgeOut.manager.beatBytes)+1).W)))
-        println("Largest tx is " + edgeOut.manager.maxTransfer)
+//        println("Largest tx is " + edgeOut.manager.maxTransfer)
 
         val d_last = beatsLeftPerAllocation(out.d.bits.source) === UInt(1)
 

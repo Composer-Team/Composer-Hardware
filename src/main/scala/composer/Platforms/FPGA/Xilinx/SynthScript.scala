@@ -1,9 +1,5 @@
 package composer.Platforms.FPGA.Xilinx
-
-import os.Path
 import org.fusesource.scalate._
-import org.fusesource.scalate.util.FileResourceLoader
-import org.fusesource.scalate.util._
 
 object SynthScript {
   def apply(projectName: String,
@@ -13,14 +9,10 @@ object SynthScript {
             clock_rate: String,
             verilog_file: String = "composer.v",
             top_module: String = "ComposerTop"): String = {
-    System.err.println("INFO: You may see a warning about fail to load a logger class for SLF4J. " +
-      "This is expected behavior. Ignore.")
     val engine = new TemplateEngine
-    engine.resourceLoader = new FileResourceLoader {
-      override def resource(uri: String): Option[TemplateSource] = {
-        val text = os.read(os.resource / "composer" / "FPGA" / uri)
-        Some(TemplateSource.fromText(uri, text))
-      }
+    engine.resourceLoader = (uri: String) => {
+      val text = os.read(os.resource / "composer" / "FPGA" / uri)
+      Some(TemplateSource.fromText(uri, text))
     }
     val environment = Map(
       "project_name" -> projectName,

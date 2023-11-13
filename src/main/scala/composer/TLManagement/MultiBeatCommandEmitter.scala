@@ -11,8 +11,8 @@ class MultiBeatCommandEmitter[T <: AccelCommand](gen: T)(implicit
                                                          p: Parameters
 ) extends Module {
   val in: DecoupledIOWithCRouting[T] = IO(Flipped(DecoupledIOWithCRouting(gen)))
-  val out = IO(Decoupled(new ComposerRoccCommand))
-  if (gen.isInstanceOf[ComposerRoccCommand]) {
+  val out = IO(Decoupled(new AccelRoccCommand))
+  if (gen.isInstanceOf[AccelRoccCommand]) {
     in <> out
   } else {
     val command = Reg(gen)
@@ -73,7 +73,7 @@ class ComposerIntraCoreIOModule[
 
   val out = IO(Flipped(new CustomIOWithRouting[Tcmd, Tresp](genCmd, genResp)))
 
-  val cmdIO = IO(Decoupled(new ComposerRoccCommand()))
+  val cmdIO = IO(Decoupled(new AccelRoccCommand()))
   val respIO = IO(Flipped(Decoupled(new AccelRoccResponse)))
 
   cmdIO <> cmdModule.out

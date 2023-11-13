@@ -5,6 +5,7 @@ import chisel3._
 import chisel3.util._
 import composer._
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
+import composer.Generation.ComposerBuild
 import composer.MemoryStreams.{ScratchpadDataPort, ScratchpadMemReqPort, _}
 import composer.RoccHelpers._
 import composer.TLManagement.{ComposerIntraCoreIOModule, TLClientModule}
@@ -14,6 +15,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 
+import java.io.File
 import scala.collection.immutable.Seq
 
 class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2) extends Bundle {
@@ -32,19 +34,23 @@ class CustomIOWithRouting[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T
   val resp: DecoupledIO[T2] = Flipped(DecoupledIO(bundleOut))
 }
 
-class ComposerCoreIO(implicit p: Parameters) extends CustomIO[ComposerRoccCommand, AccelRoccUserResponse](new ComposerRoccCommand, new AccelRoccUserResponse)
+class ComposerCoreIO(implicit p: Parameters) extends CustomIO[AccelRoccCommand, AccelRoccUserResponse](new AccelRoccCommand, new AccelRoccUserResponse)
 
 class DataChannelIO(dataBytes: Int, vlen: Int = 1) extends Bundle {
   val data = Decoupled(Vec(vlen, UInt((dataBytes * 8).W)))
   val in_progress = Output(Bool())
 }
 
-
 class AccelCoreWrapper(val composerSystemParams: AcceleratorSystemConfig, val core_id: Int, val system_id: Int, val systemRef: ComposerSystem)(implicit p: Parameters) extends LazyModule {
-  lazy val module = composerSystemParams.buildCore(CoreConstructor(composerSystemParams.coreParams, this), p)
-  val coreParams = composerSystemParams.coreParams.copy(core_id = core_id, system_id = system_id)
+  lazy val module: AcceleratorCore = composerSystemParams.moduleConstructor match {
+    case mb: ModuleBuilder => mb.constructor(this, p)
+    case bbc: BlackboxBuilderCustom => new AcceleratorBlackBoxCore(this, bbc)
+    case bbb: BlackboxBuilderRocc => new AcceleratorBlackBoxCore(this, bbb)
+  }
+
   val blockBytes = p(CacheBlockBytes)
-  val readers = coreParams.memoryChannelParams.filter(_.isInstanceOf[CReadChannelParams]).map { para =>
+  val memParams = composerSystemParams.memoryChannelParams
+  val readers = memParams.filter(_.isInstanceOf[CReadChannelParams]).map { para =>
     val param: CReadChannelParams = para.asInstanceOf[CReadChannelParams]
     (param.name, List.tabulate(para.nChannels) { i =>
       TLClientNode(List(TLMasterPortParameters.v1(
@@ -56,7 +62,7 @@ class AccelCoreWrapper(val composerSystemParams: AcceleratorSystemConfig, val co
         )))))
     })
   }
-  val writers = coreParams.memoryChannelParams.filter(_.isInstanceOf[CWriteChannelParams]).map { mcp =>
+  val writers = memParams.filter(_.isInstanceOf[CWriteChannelParams]).map { mcp =>
     val para = mcp.asInstanceOf[CWriteChannelParams]
     (para.name, List.tabulate(para.nChannels) { i =>
       TLClientNode(List(TLMasterPortParameters.v1(
@@ -68,7 +74,7 @@ class AccelCoreWrapper(val composerSystemParams: AcceleratorSystemConfig, val co
           supportsProbe = TransferSizes(1, p(CacheBlockBytes)))))))
     })
   }
-  val scratch_mod = coreParams.memoryChannelParams.filter(_.isInstanceOf[CScratchpadParams]).map(_.asInstanceOf[CScratchpadParams]).map {
+  val scratch_mod = memParams.filter(_.isInstanceOf[CScratchpadParams]).map(_.asInstanceOf[CScratchpadParams]).map {
     param =>
       lazy val mod = LazyModule(param.make)
       mod.suggestName(param.name)
@@ -80,11 +86,11 @@ class AccelCoreWrapper(val composerSystemParams: AcceleratorSystemConfig, val co
   val externalCoreCommNodes = Map.from(composerSystemParams.canIssueCoreCommandsTo.map { targetSys =>
     (targetSys, TLClientNode(Seq(TLMasterPortParameters.v1(clients = Seq(TLMasterParameters.v1(
       s"${composerSystemParams.name}_core${core_id}_to$targetSys",
-      supportsProbe = TransferSizes(1 << log2Up(ComposerRoccCommand.packLengthBytes)),
-      supportsPutFull = TransferSizes(1 << log2Up(ComposerRoccCommand.packLengthBytes))
+      supportsProbe = TransferSizes(1 << log2Up(AccelRoccCommand.packLengthBytes)),
+      supportsPutFull = TransferSizes(1 << log2Up(AccelRoccCommand.packLengthBytes))
     ))))))
   })
-  val intraCoreMemSlaveNodes = coreParams.memoryChannelParams.filter(_.isInstanceOf[CIntraCoreMemoryPortIn]).map {
+  val intraCoreMemSlaveNodes = memParams.filter(_.isInstanceOf[CIntraCoreMemoryPortIn]).map {
     r =>
       val mp = r.asInstanceOf[CIntraCoreMemoryPortIn]
       val memManagerParams = Seq.fill(mp.nChannels)(TLSlavePortParameters.v1(
@@ -111,12 +117,12 @@ class AccelCoreWrapper(val composerSystemParams: AcceleratorSystemConfig, val co
 
       (mp.name, xbars, mp, sps)
   }
-  val intraCoreMemMasters = coreParams.memoryChannelParams.filter(_.isInstanceOf[CIntraCoreMemoryPortOut]).map {
+  val intraCoreMemMasters = memParams.filter(_.isInstanceOf[CIntraCoreMemoryPortOut]).map {
     r =>
       val mp = r.asInstanceOf[CIntraCoreMemoryPortOut]
       val (otherSystemParams, otherSPParams) = try {
         val otherS = p(AcceleratorSystems).filter(_.name == mp.toSystem)(0)
-        val otherSP = otherS.coreParams.memoryChannelParams.filter(_.name == mp.toMemoryPort)(0)
+        val otherSP = otherS.memoryChannelParams.filter(_.name == mp.toMemoryPort)(0)
         (otherS, otherSP.asInstanceOf[CIntraCoreMemoryPortIn])
       } catch {
         case a: Exception =>
@@ -133,8 +139,7 @@ class AccelCoreWrapper(val composerSystemParams: AcceleratorSystemConfig, val co
   }
 }
 
-class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Parameters) extends LazyModuleImp(composerConstructor.composerCoreWrapper) {
-  private val outer = composerConstructor.composerCoreWrapper
+class AcceleratorCore(outer: AccelCoreWrapper)(implicit p: Parameters) extends LazyModuleImp(outer) {
   val composer_response_ios_ = Map.from(outer.composerSystemParams.canIssueCoreCommandsTo.map { target =>
     (target, {
       val io = IO(Flipped(Decoupled(new AccelRoccResponse())))
@@ -145,11 +150,11 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
   private val composer_command_ios_ = outer.externalCoreCommNodes.map { case (target, node) =>
     val mod = Module(new TLClientModule(node))
     node.out(0)._1 <> mod.tl
-    val wire = Wire(Decoupled(new ComposerRoccCommand))
+    val wire = Wire(Decoupled(new AccelRoccCommand))
     wire.ready := mod.io.ready
     mod.io.valid := wire.valid
     // NEED TO TELL OTHER CORE HOW TO SEND RESPONSE BACK
-    val returnRoutingPayload = Cat(outer.system_id.U(SystemIDLengthKey.W), getCoreID.U(CoreIDLengthKey.W))
+    val returnRoutingPayload = Cat(outer.system_id.U(SystemIDLengthKey.W), outer.core_id.U(CoreIDLengthKey.W))
     mod.io.bits.dat := wire.bits.pack(withRoutingPayload = Some(returnRoutingPayload))
     val permAddress = getSystemID(target)
     when(mod.io.fire) {
@@ -163,7 +168,7 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
   private[composer] var using_custom = CustomCommandUsage.unused
   private[composer] var custom_rocc_cmd_nbeats = -1
 
-  def getCoreID: Int = composerConstructor.composerCoreWrapper.core_id
+  //  def getCoreID: Int = composerConstructor.composerCoreWrapper.core_id
 
   def getIntraCoreMemOuts(name: String): CCoreChannelMultiAccessBundle[MemWritePort] = {
     val params = try {
@@ -241,18 +246,13 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
    * Declare reader module implementations associated with a certain channel name.
    * Data channel will read out a vector of UInts of dimension (vlen, dataBytes*8 bits)
    *
-   * @param name      name of channel to instantiate readers for
-   * @param dataBytes width of the data channel to the user module
-   * @param vlen      dimension of the data channel
-   * @param idx       optionally instantiate an implementation for only a single channel in the name group. This may be useful
-   *                  when different channels need to be parameterized differently
    * @return List of transaction information bundles (address and length in bytes) and then a data channel. For
    *         sparse readers, we give back both interfaces and for non-sparse, addresses are provided through separate address
    *         commands in software.
    */
   def getReaderModules(name: String,
                        idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
-    val params = outer.coreParams.memoryChannelParams.filter(_.name == name)(0).asInstanceOf[CReadChannelParams]
+    val params = outer.memParams.filter(_.name == name)(0).asInstanceOf[CReadChannelParams]
     val mod = idx match {
       case Some(id_unpack) =>
         val clients = getTLClients(name, outer.readers)
@@ -293,7 +293,6 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
   }
 
   def getScratchpad(name: String): ScratchpadModuleChannel = {
-    val outer = composerConstructor.composerCoreWrapper
     val lm = outer.scratch_mod.filter(_._1 == name)(0)._2
     lm.suggestName(name)
     val mod = lm.module
@@ -304,7 +303,7 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
   def getWriterModules(name: String,
                        idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[WriterDataChannelIO]) = {
 
-    val params = outer.coreParams.memoryChannelParams.filter(_.name == name)(0).asInstanceOf[CWriteChannelParams]
+    val params = outer.memParams.filter(_.name == name)(0).asInstanceOf[CWriteChannelParams]
     val mod = idx match {
       case Some(id) =>
         val client = getTLClients(name, outer.writers)(id)
@@ -336,7 +335,7 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
   }
 
   def getIntraCoreIO[Tcmd <: AccelCommand, Tresp <: AccelResponse](endpoint: String,
-                                                                   genCmd: Tcmd = new ComposerRoccCommand,
+                                                                   genCmd: Tcmd = new AccelRoccCommand,
                                                                    genResp: Tresp = new AccelRoccUserResponse): CustomIOWithRouting[Tcmd, Tresp] = {
     val converter = Module(new ComposerIntraCoreIOModule(endpoint, genCmd, genResp))
     converter.respIO <> composer_response_ios_(endpoint)
@@ -344,7 +343,7 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
     converter.out
   }
 
-  def ComposerIO[T1 <: AccelCommand](bundleIn: T1): CustomIO[T1, AccelRoccUserResponse] = {
+  def ComposerIO[T1 <: AbstractAccelCommand](bundleIn: T1): CustomIO[T1, AccelRoccUserResponse] = {
     ComposerIO[T1, AccelRoccUserResponse](bundleIn, new AccelRoccUserResponse)
   }
 
@@ -352,13 +351,13 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
 
   def addrBits: Int = log2Up(p(ExtMem).get.master.size)
 
-  def ComposerIO[T1 <: AccelCommand, T2 <: AccelResponse](bundleIn: T1, bundleOut: T2): CustomIO[T1, T2] = {
+  def ComposerIO[T1 <: AbstractAccelCommand, T2 <: AccelResponse](bundleIn: T1, bundleOut: T2): CustomIO[T1, T2] = {
     if (using_custom == CustomCommandUsage.default) {
       throw new Exception("Cannot use custom io after using the default io")
     }
     using_custom = CustomCommandUsage.custom
-    val composerCustomCommandManager = Module(new ComposerCommandBundler[T1, T2](bundleIn, bundleOut, composerConstructor.composerCoreWrapper, outer.systemRef.acc.sysNCmdSourceLookup(outer.composerSystemParams.name)))
-    composerCustomCommandManager.suggestName(composerConstructor.composerCoreWrapper.composerSystemParams.name + "CustomCommand")
+    val composerCustomCommandManager = Module(new ComposerCommandBundler[T1, T2](bundleIn, bundleOut, outer, outer.systemRef.acc.sysNCmdSourceLookup(outer.composerSystemParams.name)))
+    composerCustomCommandManager.suggestName(outer.composerSystemParams.name + "CustomCommand")
     composerCustomCommandManager.cio.cmd <> io_declaration
     composerCustomCommandManager.cio.cmd_in_source := io_source
     composerCustomCommandManager.io.resp.bits.rd := 0.U
@@ -399,7 +398,280 @@ class AcceleratorCore(val composerConstructor: CoreConstructor)(implicit p: Para
   }
 }
 
+class AcceleratorBlackBoxCore(outer: AccelCoreWrapper,
+                              blackboxBuilder: ModuleConstructor)(implicit p: Parameters)
+  extends AcceleratorCore(outer) {
+
+
+  val aio = blackboxBuilder match {
+    case bbc: BlackboxBuilderCustom => ComposerIO(bbc.coreCommand, bbc.coreResponse)
+    case _ => ComposerIO()
+  }
+
+  val readerParams = outer.composerSystemParams.memoryChannelParams.filter(_.isInstanceOf[CReadChannelParams]).map(_.asInstanceOf[CReadChannelParams])
+  val writerParams = outer.composerSystemParams.memoryChannelParams.filter(_.isInstanceOf[CWriteChannelParams]).map(_.asInstanceOf[CWriteChannelParams])
+  val spParams = outer.composerSystemParams.memoryChannelParams.filter(_.isInstanceOf[CScratchpadParams]).map(_.asInstanceOf[CScratchpadParams])
+
+  val rrio = readerParams.map(pr => getReaderModules(pr.name))
+  val writerIOs = writerParams.map(pr => getWriterModules(pr.name))
+  val spIOs = spParams.map(pr => getScratchpad(pr.name))
+
+  class bb extends BlackBox {
+    override val desiredName = outer.composerSystemParams.name + "Wrapper"
+    val io = IO(new Bundle {
+
+      val clock = Input(Clock())
+      val reset = Input(Reset())
+
+      val cmd = Flipped(Decoupled(aio.req.bits.cloneType))
+      val resp = Decoupled(aio.resp.bits.cloneType)
+
+      val read_req = MixedVec(rrio.map(rr => MixedVec(rr._1.map(rrr => Decoupled(rrr.bits.cloneType)))))
+      val read_data = MixedVec(rrio.map(rr => MixedVec(rr._2.map(rrd => Flipped(Decoupled(rrd.data.bits.cloneType))))))
+      val read_inProgress = MixedVec(rrio.map(rr => MixedVec(rr._2.map(_ => Input(Bool())))))
+      val write_req = MixedVec(writerIOs.map(wr => MixedVec(wr._1.map(wrr => Decoupled(wrr.bits.cloneType)))))
+      val write_data = MixedVec(writerIOs.map(wr => MixedVec(wr._2.map(wrd => Decoupled(wrd.data.bits.cloneType)))))
+      val write_isFlushed = MixedVec(writerIOs.map(wr => MixedVec(wr._2.map(_ => Input(Bool())))))
+      val sp_req = MixedVec(spIOs.map(wr => Decoupled(wr.requestChannel.cloneType)))
+      val sp_data_req = MixedVec(spIOs.map(wr => MixedVec(wr.dataChannels.map(spd => Decoupled(spd.req.bits.cloneType)))))
+      val sp_data_resp = MixedVec(spIOs.map(sp => MixedVec(sp.dataChannels.map(spr => Flipped(Valid(spr.res.bits.cloneType))))))
+      //      sp_data.zip(spParams).foreach { case (a, b) => a.suggestName(b.name + "_data") }
+
+    })
+  }
+
+  val impl = Module(new bb)
+  val OUTPUT = true
+  val INPUT = false
+
+  class VerilogPort(nm: String, val dir: Boolean, val dim: Seq[Int], val sources: Seq[String]) {
+    val name = nm.strip().stripSuffix("_")
+  }
+  object VerilogPort {
+    def apply(str: String, bool: Boolean, value: Seq[Int], value1: Seq[String]): VerilogPort = {
+      new VerilogPort(str, bool, value, value1)
+    }
+  }
+
+  def getRecursiveNames(a: Data, other: Seq[(Data, String)] = Seq()): Seq[(Data, String)] = {
+    a match {
+      case b: Bundle =>
+        var acc = other
+        b.elements.foreach { case (_, data) =>
+          acc = getRecursiveNames(data, acc)
+        }
+        acc
+      case v: Vec[_] =>
+        var acc = other
+        v.zipWithIndex.foreach { case (data, _) =>
+          acc = getRecursiveNames(data, acc)
+        }
+        acc
+      case _ => other :+ (a, a.instanceName)
+    }
+  }
+
+  def fixBase(a: String): String = {
+    val q = a.replace(".", "_")
+    if (q.contains("[")) {
+      val idx = q.indexOf("[")
+      q.substring(0, q.indexOf("[")) + "_" + q.substring(idx + 1, q.indexOf("]"))
+    } else {
+      q
+    }
+  }
+
+  def fix2Real(a: String): String = {
+    a.replace(".", "_").replace("bits_", "")
+  }
+
+  // for reads, there are a few dimensions. The first index is the read channel name itself, the second index is
+  // the channel number, and the third index (if applicable) is the vector index
+
+  def getStructureAsPorts(a: Data, primaryDirection: Boolean, structureDepth: Int = 0, yieldSubfieldOnlyWithPrefix: Option[String] = None): Iterable[VerilogPort] = {
+    def getRName(s: String): String = {
+      yieldSubfieldOnlyWithPrefix match {
+        case None => fix2Real(s)
+        case Some(t) => t + "_" + s.split("\\.").takeRight(structureDepth).mkString("_")
+      }
+    }
+    a match {
+      case v: Vec[_] =>
+        v.zipWithIndex.flatMap { case (data, _) =>
+          getStructureAsPorts(data, primaryDirection, structureDepth + 1, yieldSubfieldOnlyWithPrefix)
+        }
+      case de: DecoupledIO[_] =>
+        val v_iname = de.valid.instanceName
+        val r_iname = de.ready.instanceName
+        Seq(
+          VerilogPort(getRName(v_iname), primaryDirection, Seq(1), Seq(fixBase(v_iname))),
+          VerilogPort(getRName(r_iname), !primaryDirection, Seq(1), Seq(fixBase(r_iname)))) ++
+          getStructureAsPorts(de.bits, primaryDirection, structureDepth + 1, yieldSubfieldOnlyWithPrefix)
+      case b: Bundle =>
+        b.elements.flatMap { case (_, data) =>
+          getStructureAsPorts(data, primaryDirection, structureDepth + 1, yieldSubfieldOnlyWithPrefix)
+        }
+      case b =>
+        Seq(VerilogPort(getRName(b.instanceName), primaryDirection, Seq(b.getWidth),
+          Seq(fixBase(b.instanceName))))
+
+    }
+  }
+
+  def getRWChannelAsPorts[T <: Data](a: MixedVec[MixedVec[T]], ps: List[CChannelParams], prefix: String, primaryDirection: Boolean): Iterable[VerilogPort] = {
+    // first dimension corresponds directly to Channel Param names
+    a.zip(ps).flatMap { case (mv: MixedVec[T], param: CChannelParams) =>
+      val portName = param.name + "_"
+      // second dimension corresponds to channel number
+      val vectorLen = param match {
+        case r: CReadChannelParams => r.vlen
+        case _ => 1
+      }
+
+      val channelLen = param.nChannels
+
+      mv.zipWithIndex.flatMap { case (v: T, idx: Int) =>
+        val channelName = channelLen match {
+          case 1 => ""
+          case _ => "_channel" + idx
+        }
+        val base = portName + prefix + channelName
+        // if the field is a Decoupled, we need to take apart that field
+        v match {
+          case d: DecoupledIO[_] =>
+            val valid = d.valid.instanceName
+            val ready = d.ready.instanceName
+            Seq(
+              VerilogPort(base + "_valid", primaryDirection, Seq(1), Seq(fixBase(valid))),
+              VerilogPort(base + "_ready", !primaryDirection, Seq(1), Seq(fixBase(ready)))) ++
+              (d.bits match {
+                case vec: Vec[_] =>
+                  val fieldNames = getRecursiveNames(vec).map(_._2)
+                  val sources = fieldNames.map(fixBase)
+                  Seq(VerilogPort(base, primaryDirection, Seq(vectorLen, vec(0).getWidth), sources))
+                case _ =>
+                  getStructureAsPorts(d.bits, primaryDirection, yieldSubfieldOnlyWithPrefix = Some(base))
+              })
+          case _ =>
+            getStructureAsPorts(v, primaryDirection)
+        }
+      }
+    }
+  }
+
+  impl.io.clock := clock
+  impl.io.reset := reset
+
+  val cmd_fields = getStructureAsPorts(impl.io.cmd, INPUT)
+  val resp_fields = getStructureAsPorts(impl.io.resp, OUTPUT)
+  val rr_fields = getRWChannelAsPorts(impl.io.read_req, readerParams, "req", OUTPUT)
+  val rd_fields = getRWChannelAsPorts(impl.io.read_data, readerParams, "data", INPUT)
+  val wr_fields = getRWChannelAsPorts(impl.io.write_req, writerParams, "req", OUTPUT)
+  val wd_fields = getRWChannelAsPorts(impl.io.write_data, writerParams, "data", OUTPUT)
+  val spr_fields = getRWChannelAsPorts(impl.io.sp_data_req, spParams, "req", OUTPUT)
+  val spd_fields = getRWChannelAsPorts(impl.io.sp_data_resp, spParams, "resp", INPUT)
+
+  impl.io.read_req.zip(rrio).foreach { case (a, b) => a.zip(b._1).foreach { case (c, d) => c <> d } }
+  impl.io.read_data.zip(rrio).foreach { case (a, b) => a.zip(b._2).foreach { case (c, d) => c <> d.data } }
+  impl.io.read_inProgress.zip(rrio).foreach { case (a, b) => a.zip(b._2).foreach { case (c, d) => c <> d.in_progress } }
+  impl.io.write_req.zip(writerIOs).foreach { case (a, b) => a.zip(b._1).foreach { case (c, d) => c <> d } }
+  impl.io.write_data.zip(writerIOs).foreach { case (a, b) => a.zip(b._2).foreach { case (c, d) => c <> d.data } }
+  impl.io.write_isFlushed.zip(writerIOs).foreach { case (a, b) => a.zip(b._2).foreach { case (c, d) => c <> d.isFlushed } }
+  impl.io.sp_data_req.zip(spIOs).foreach { case (a, b) => a.zip(b.dataChannels.map(_.req)).foreach { case (c, d) => c <> d } }
+  impl.io.sp_data_resp.zip(spIOs).foreach { case (a, b) => a.zip(b.dataChannels.map(_.res)).foreach { case (c, d) => c <> d } }
+
+  impl.io.sp_req.zip(spIOs).foreach { case (a, b) => a <> b.requestChannel }
+  impl.io.cmd <> aio.req
+  impl.io.resp <> aio.resp
+
+  def getVerilogPorts(m: Iterable[VerilogPort]): String = {
+    m.map { a =>
+      val dim = a.dim.map { b =>
+        if (b == 1) "" else s"[${b-1}:0]"
+      }.reverse
+      val dir = if (a.dir == OUTPUT) "output" else "input"
+      s"  $dir ${dim.head} ${a.name}${(if (dim.tail.isEmpty) "" else " " ) + dim.tail.mkString("")}"
+    }.mkString(",\n")
+  }
+
+  def getVerilogPortsOfSources(m: Iterable[VerilogPort]): String = {
+    m.flatMap { a =>
+      val dir = if (a.dir == OUTPUT) "output" else "input"
+      val finalDim = a.dim.last
+      val dstr = if (finalDim == 1) "\t" else s"[${finalDim-1}:0]"
+      a.sources.map { src =>
+        f"  $dir $dstr ${fixBase(src)}"
+      }
+    }.mkString(",\n")
+  }
+
+  def getVerilogModulePortInstantiation(m: Iterable[VerilogPort]): (String, String) = {
+    def safeMkString(b: String, d: String, additive: String): String = if (b.isEmpty) d else {if (d.isEmpty) b else b + additive + d}
+    m.map { a =>
+      if (a.sources.length == 1) {
+        // then just wire the port directly
+        (s"  .${a.name}(${a.sources(0)})", "")
+      } else {
+        // otherwise, we need to declare an array wire, wire up the array, and use that wire
+        // as the IO
+        val wireName = a.name + "_wire"
+        val init = s"  .${a.name}($wireName)"
+        val wireDeclaration = f"  wire [${a.dim.head-1}:0] $wireName${a.dim.tail.map(d => "[" + (d-1) + ":0]").mkString("")};"
+        val wireInit = a.sources.zipWithIndex.map { case (src, idx) =>
+          s"  assign $wireName[$idx] = $src;"
+        }.mkString("\n")
+        (init, wireDeclaration + "\n" + wireInit)
+      }
+    }.foldLeft(("", "")) { case ((a, b), (c, d)) => (safeMkString(a, c, ",\n"), safeMkString(b, d, "\n")) }
+  }
+
+  // filter out secret fields
+  val allIOs = (cmd_fields ++ resp_fields ++ rr_fields ++ rd_fields ++ wr_fields ++ wd_fields
+    ++ spr_fields ++ spd_fields).filter(!_.name.contains("__"))
+
+  val userBB =
+    f"""
+       |module ${outer.composerSystemParams.name} (
+       |  input clock,
+       |  input reset,
+       |${getVerilogPorts(allIOs)}
+       |);
+       |
+       |endmodule
+       |""".stripMargin
+
+  val (portInit, wireDec) = getVerilogModulePortInstantiation(allIOs)
+  val bbWrapper =
+    f"""
+       |module ${this.desiredName} (
+       |  input clock,
+       |  input reset,
+       |${getVerilogPortsOfSources(allIOs)}
+       |  );
+       |
+       |$wireDec
+       |
+       |${outer.composerSystemParams.name} ${outer.composerSystemParams.name}_inst (
+       |  .clock(clock),
+       |  .reset(reset),
+       |$portInit
+       |  );
+       |
+       |endmodule
+       |
+       |""".stripMargin
+
+  // Link in Wrapper using ComposerBuild,
+  // write source to file first
+  val wrapperFName = os.Path(ComposerBuild.composerGenDir) / s"${outer.composerSystemParams.name}_chiselLink.v"
+  os.write.over(wrapperFName, bbWrapper)
+  ComposerBuild.addSource(wrapperFName)
+
+  val bbFName = os.Path(ComposerBuild.composerGenDir) / s"${outer.composerSystemParams.name}.v"
+  os.write.over(bbFName, userBB)
+}
+
 class ComposerSystemIO(implicit p: Parameters) extends Bundle {
-  val cmd = Flipped(Decoupled(new ComposerRoccCommand))
+  val cmd = Flipped(Decoupled(new AccelRoccCommand))
   val resp = Decoupled(new AccelRoccResponse())
 }

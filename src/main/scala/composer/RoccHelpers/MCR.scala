@@ -113,7 +113,7 @@ trait MCRFile {
 
 class MCRFileTL(numRegs: Int)(implicit p: Parameters) extends LazyModule with MCRFile {
   require((p(FrontBusBaseAddress) & 0x3FFL) == 0)
-  println(p(FrontBusAddressMask))
+//  println(p(FrontBusAddressMask))
   val node = TLManagerNode(portParams = Seq(TLSlavePortParameters.v1(
     managers = Seq(TLSlaveParameters.v1(
       address = Seq(AddressSet(p(FrontBusBaseAddress), p(FrontBusAddressMask))),

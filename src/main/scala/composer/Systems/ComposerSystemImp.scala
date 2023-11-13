@@ -14,13 +14,13 @@ import freechips.rocketchip.subsystem.ExtMem
 
 import scala.annotation.tailrec
 
-class CommandSrcPair(nSources: Int)(implicit p: Parameters) extends Bundle {
-  val cmd = new ComposerRoccCommand()
+class CommandSrcPair(nSources: Int) extends Bundle {
+  val cmd = new AccelRoccCommand()
   val src = UInt(log2Up(nSources).W)
 }
 
 object CommandSrcPair {
-  def apply(c: ComposerRoccCommand, s: UInt)(implicit p: Parameters): CommandSrcPair = {
+  def apply(c: AccelRoccCommand, s: UInt): CommandSrcPair = {
     val res = Wire(new CommandSrcPair(1))
     res.cmd := c
     res.src := s
@@ -30,7 +30,6 @@ object CommandSrcPair {
 
 class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) extends LazyModuleImpWithSLRs(outer) {
   val sw_io = if (outer.systemParams.canReceiveSoftwareCommands) Some(IO(new ComposerSystemIO())) else None
-  val cores = outer.cores.map(_._2.module)
 
   val validSrcs = Seq(sw_io, outer.internalCommandManager).filter(_.isDefined)
   // if sources can come from multiple domains (sw,managerNode.portParams(0).endSinkId + 1 other systems), then we have to remember where cmds came from
@@ -41,7 +40,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     val (b, e) = managerNode.in(0)
     val manager = ModuleWithSLR(new TLManagerModule(b, e), SLRHelper.getFrontBusSLR)
     managerNode.in(0)._1 <> manager.tl
-    val cmdIO = manager.io.map(r => hasAccessibleUserSubRegions[ComposerRoccCommand](r, new ComposerRoccCommand))
+    val cmdIO = manager.io.map(r => hasAccessibleUserSubRegions[AccelRoccCommand](r, new AccelRoccCommand))
     // 0 is always reserved for software (even if it doesn't exist)
     Some((cmdIO, b.a.bits.source +& 1.U))
   } else None
@@ -75,7 +74,10 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
       } else {
         val subgroups = resps.grouped(degree).toSeq
         val subGroupsArb = subgroups map { sg =>
-          val respArb = ModuleWithSLR(new RRArbiter(new AccelRoccResponse(), sg.length), slr_id, requestedName = Some(f"respArb_${outer.system_id}_${slr_id}_${gl_incrementer}"))
+          val respArb = ModuleWithSLR(
+            new RRArbiter(new AccelRoccResponse(), sg.length),
+            slr_id,
+            requestedName = Some(f"respArb_${outer.system_id}_${slr_id}_$gl_incrementer"))
           val respQ = Module(new Queue(new AccelRoccResponse(), entries = 2))
           gl_incrementer = gl_incrementer + 1
           sg.zipWithIndex.foreach { case (core_resp, idx) =>
@@ -90,32 +92,35 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
 
     val coreGroups = outer.cores.groupBy(_._1)
     if (coreGroups.keys.size == 1) {
-      val coreResps = cores.map { c =>
+      val coreResps = outer.cores.map { case (cidx, c) =>
         val lastRecievedRd = Reg(UInt(5.W))
-        when(c.io_declaration.req.fire) {
-          lastRecievedRd := c.io_declaration.req.bits.inst.rd
+        when(c.module.io_declaration.req.fire) {
+          lastRecievedRd := c.module.io_declaration.req.bits.inst.rd
         }
-        val resp_queue = ModuleWithSLR(new Queue[AccelRoccResponse](new AccelRoccResponse(), entries = 2), SLRHelper.getFrontBusSLR)
+        val resp_queue = ModuleWithSLR(new Queue[AccelRoccResponse](
+          new AccelRoccResponse(), entries = 2), SLRHelper.getFrontBusSLR)
         resp_queue.io.enq.bits.system_id := outer.system_id.U
-        resp_queue.io.enq.bits.core_id := c.composerConstructor.composerCoreWrapper.core_id.U
+        resp_queue.io.enq.bits.core_id := cidx.U
         resp_queue.io.enq.bits.rd := lastRecievedRd
-        resp_queue.io.enq.bits.getDataField := c.io_declaration.resp.bits.getDataField
-        resp_queue.io.enq.valid := c.io_declaration.resp.valid
-        c.io_declaration.resp.ready := resp_queue.io.enq.ready
+        resp_queue.io.enq.bits.getDataField := c.module.io_declaration.resp.bits.getDataField
+        resp_queue.io.enq.valid := c.module.io_declaration.resp.valid
+        c.module.io_declaration.resp.ready := resp_queue.io.enq.ready
         resp_queue.io.deq
       }
       collapseResp(SLRHelper.SLRRespRoutingFanout, 1, coreResps, SLRHelper.getFrontBusSLR)(0)
     } else {
       val respsCollapsed = coreGroups.map { case (slr_id, core_list) =>
-        (slr_id, collapseResp(SLRHelper.SLRRespRoutingFanout, SLRHelper.RespEndpointsPerSLR, core_list.map(_._2).map { c =>
-          c.module.io_declaration.resp.map { ioresp =>
-            val composerRespWire = Wire(new AccelRoccResponse())
-            composerRespWire.getDataField := ioresp.getDataField
-            composerRespWire.rd := ioresp.rd
-            composerRespWire.system_id := outer.system_id.U
-            composerRespWire.core_id := c.core_id.U
-            composerRespWire
-          }
+        (slr_id, collapseResp(SLRHelper.SLRRespRoutingFanout, SLRHelper.RespEndpointsPerSLR, core_list.map(_._2).map {
+          c: AccelCoreWrapper =>
+            val cmod: AcceleratorCore = c.module
+            cmod.io_declaration.resp.map { ioresp =>
+              val composerRespWire = Wire(new AccelRoccResponse())
+              composerRespWire.getDataField := ioresp.getDataField
+              composerRespWire.rd := ioresp.rd
+              composerRespWire.system_id := outer.system_id.U
+              composerRespWire.core_id := c.core_id.U
+              composerRespWire
+            }
         }, slr_id))
       }
       SLRHelper.getCmdRespPath() match {
@@ -125,10 +130,10 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
         case Some(path) =>
           collapseResp(SLRHelper.SLRRespRoutingFanout, 1,
             path.foldRight(Seq[DecoupledIO[AccelRoccResponse]]()) { case (slr_idx, acc) =>
-            collapseResp(SLRHelper.SLRRespRoutingFanout, SLRHelper.RespEndpointsPerSLR,
-              acc ++ respsCollapsed(slr_idx),
-              slr_idx)
-          }, SLRHelper.getFrontBusSLR)(0)
+              collapseResp(SLRHelper.SLRRespRoutingFanout, SLRHelper.RespEndpointsPerSLR,
+                acc ++ respsCollapsed(slr_idx),
+                slr_idx)
+            }, SLRHelper.getFrontBusSLR)(0)
       }
     }
   }
@@ -143,7 +148,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     }))
 
     val a_in = outer.internalCommandManager.get.in(0)._1.a.bits.data
-    val routingPayload = a_in(a_in.getWidth - 1, (new ComposerRoccCommand).getWidth)
+    val routingPayload = a_in(a_in.getWidth - 1, (new AccelRoccCommand).getWidth)
     val fromCore = routingPayload(CoreIDLengthKey - 1, 0)
     val fromSys = routingPayload(CoreIDLengthKey + SystemIDLengthKey - 1, CoreIDLengthKey)
     val intCmd = internalCmdSource.get._1
@@ -220,12 +225,12 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     responseManager.tl <> managerNode.in(0)._1
     val response = hasRoccResponseFields[AccelRoccResponse](new AccelRoccResponse, responseManager.io.bits)
 
-    cores.zipWithIndex.foreach { case (core, core_idx) =>
-      core.composer_response_ios_(target).valid := responseManager.io.valid && response.core_id === core_idx.U
-      core.composer_response_ios_(target).bits := response
+    outer.cores.foreach { case (core_idx, core) =>
+      core.module.composer_response_ios_(target).valid := responseManager.io.valid && response.core_id === core_idx.U
+      core.module.composer_response_ios_(target).bits := response
     }
 
-    responseManager.io.ready := VecInit(cores.map(_.composer_response_ios_(target).ready))(response.core_id)
+    responseManager.io.ready := VecInit(outer.cores.map(_._2.module.composer_response_ios_(target).ready))(response.core_id)
   }
 
   if (p(CoreCommandLatency) > 0) {
@@ -282,28 +287,27 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
       case Some(path) =>
         recursivelyGroupCmds(SLRHelper.SLRRespRoutingFanout, 1,
           path.foldRight(Seq[(DecoupledIO[CommandSrcPair], Seq[Int])]()) { case (slr_id, acc) =>
-          recursivelyGroupCmds(SLRHelper.SLRCmdRoutingFanout, SLRHelper.CmdEndpointsPerSLR,
-            connectCoreGroup(1, acc, None) ++
-              (slr_endpoints.find(_._1 == slr_id) match {
-                case None => Seq()
-                case Some(q) => q._2
-              }),
-            Some(slr_id))
+            recursivelyGroupCmds(SLRHelper.SLRCmdRoutingFanout, SLRHelper.CmdEndpointsPerSLR,
+              connectCoreGroup(1, acc, None) ++
+                (slr_endpoints.find(_._1 == slr_id) match {
+                  case None => Seq()
+                  case Some(q) => q._2
+                }),
+              Some(slr_id))
 
-        }, Some(SLRHelper.getFrontBusSLR))(0)._1
+          }, Some(SLRHelper.getFrontBusSLR))(0)._1
     }
 
     cmd <> origin
   } else {
-    cores.map { core =>
-      core.io_declaration.req.valid := cmd.valid && coreSelect === core.getCoreID.U
-      core.io_declaration.req.bits := cmd.bits.cmd
-      core.io_source := cmd.bits.src
-      core.io_declaration.req.ready
+    outer.cores.map { case (c_idx, core) =>
+      core.module.io_declaration.req.valid := cmd.valid && coreSelect === c_idx.U
+      core.module.io_declaration.req.bits := cmd.bits.cmd
+      core.module.io_source := cmd.bits.src
+      core.module.io_declaration.req.ready
     }
-    cmd.ready := VecInit(cores.map(_.io_declaration.req.ready))(coreSelect)
+    cmd.ready := VecInit(outer.cores.map(_._2.module.io_declaration.req.ready))(coreSelect)
   }
-
 
   tieClocks()
 }

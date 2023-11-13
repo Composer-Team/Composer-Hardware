@@ -90,10 +90,10 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   val cmdRouter = Module(new RoccCommandRouter(Seq(OpcodeSet.custom0, OpcodeSet.custom3)))
   cmdRouter.io.in <> cmdArb.io.out
 
-  val accCmd = Wire(Decoupled(new ComposerRoccCommand)) //CUSTOM3, used for everything else
+  val accCmd = Wire(Decoupled(new AccelRoccCommand)) //CUSTOM3, used for everything else
   accCmd.valid := cmdRouter.io.out(1).valid
   cmdRouter.io.out(1).ready := accCmd.ready
-  accCmd <> cmdRouter.io.out(1).map(ComposerRoccCommand.fromRoccCommand)
+  accCmd <> cmdRouter.io.out(1).map(AccelRoccCommand.fromRoccCommand)
   val system_id = accCmd.bits.inst.system_id
   accCmd.ready := false.B //base case
 
@@ -104,7 +104,7 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   }
 
   val systemSoftwareResps = outer.system_tups.filter(_._3.canReceiveSoftwareCommands) map { sys_tup =>
-    val sys_queue = Module(new Queue(new ComposerRoccCommand, entries = 2))
+    val sys_queue = Module(new Queue(new AccelRoccCommand, entries = 2))
     val params = sys_tup._3
     val sys_idx = outer.name2Id(params.name)
     sys_queue.suggestName(params.name + "_command_queue")
@@ -162,7 +162,7 @@ class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
       } else {
         // controllers can all access the same addresses! Split up end points to be able to access these addresses in
         // parallel
-        val nondisjointXbars = Seq.fill(nMemChannels)(LazyModule(new TLXbar()))
+        val nondisjointXbars = Seq.fill(Math.min(nMemChannels, mems.length))(LazyModule(new TLXbar()))
         mems.zipWithIndex foreach { case (m, idx) =>
           nondisjointXbars(idx % nMemChannels).node := m
         }

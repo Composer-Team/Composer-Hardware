@@ -27,7 +27,7 @@ object hasRoccResponseFields {
 }
 
 trait hasDataField {
-  def nDataBits(implicit p: Parameters): Int = p(XLen)
+  def nDataBits: Int = 64
   private[composer] def getDataField: UInt
 }
 
@@ -35,7 +35,7 @@ trait hasRDField {
   val rd: UInt
 }
 
-class AccelResponse(implicit p: Parameters) extends Bundle with hasAccessibleUserSubRegions with hasDataField with hasRDField {
+class AccelResponse extends Bundle with hasAccessibleUserSubRegions with hasDataField with hasRDField {
   override def sortedElements: Seq[(String, Data)] = elements.toSeq.sortBy(_._1)
   override val reservedNames: Seq[String] = Seq("rd")
   val rd = UInt(5.W)
@@ -57,7 +57,7 @@ trait hasRoccResponseFields extends hasAccessibleUserSubRegions with hasDataFiel
   val rd: UInt
 
 
-  private[composer] def packRocc()(implicit p: Parameters): UInt = {
+  private[composer] def packRocc(): UInt = {
     require(getDataField.getWidth == nDataBits)
     Cat(core_id, system_id, rd, getDataField)
   }

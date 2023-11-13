@@ -112,7 +112,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   }) else None
 
   if (AXI_MEM.isDefined) {
-    AXI_MEM.get.foreach(println(_))
+//    AXI_MEM.get.foreach(println(_))
   }
 
   val dma_port = if (p(HasDMA).isDefined) {
@@ -129,19 +129,26 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     None
   }
 
+  val DMASourceBits = if (p(HasDMA).isDefined) CLog2Up(p(HasDMA).get) else 0
+  val availableComposerSources = 1 << (p(ExtMem).get.master.idBits - DMASourceBits)
+
   // Connect accelerators to memory
-  val composer_mems = accelerator_system.r_mem.zip(accelerator_system.w_mem).zipWithIndex map { case ((r, w), idx) =>
-    val DMASourceBits = if (p(HasDMA).isDefined) CLog2Up(p(HasDMA).get) else 0
-    val availableComposerSources = 1 << (p(ExtMem).get.master.idBits - DMASourceBits)
-    val Seq(rss, wss) = Seq(r, w).zip(Seq("readIDShrinker", "writeIDShrinker")).map{ case (m, nm) => TLSourceShrinkerDynamicBlocking(availableComposerSources, Some(nm)) := m }
-    val tl2axi = LazyModule(new TLToAXI4SRW(
-      addressSet = ComposerTop.getAddressSet(idx),
-      idMax = availableComposerSources))
-    tl2axi.tlReader := rss
-    tl2axi.tlWriter := wss
-    // readers and writers are separated into separate systems and re-unified for the AXI bus. In reality though,
-    // the read and write busses are logically unrelated so this unification is only symbolic
-    tl2axi.axi_client
+  val composer_mems = if (accelerator_system.w_mem.isEmpty) {
+    accelerator_system.r_mem.map{ src => val tl2axi = TLToAXI4() := src ; tl2axi }
+  } else if (accelerator_system.r_mem.isEmpty) {
+    accelerator_system.w_mem.map{ src => val tl2axi = TLToAXI4() := src ; tl2axi }
+  } else {
+    accelerator_system.r_mem.zip(accelerator_system.w_mem).zipWithIndex map { case ((r, w), idx) =>
+      val Seq(rss, wss) = Seq(r, w).zip(Seq("readIDShrinker", "writeIDShrinker")).map { case (m, nm) => TLSourceShrinkerDynamicBlocking(availableComposerSources, Some(nm)) := m }
+      val tl2axi = LazyModule(new TLToAXI4SRW(
+        addressSet = ComposerTop.getAddressSet(idx),
+        idMax = availableComposerSources))
+      tl2axi.tlReader := rss
+      tl2axi.tlWriter := wss
+      // readers and writers are separated into separate systems and re-unified for the AXI bus. In reality though,
+      // the read and write busses are logically unrelated so this unification is only symbolic
+      tl2axi.axi_client
+    }
   }
   val mem_tops = if (p(HasDMA).isDefined) {
     val dma_mem_xbar = Seq.fill(nMemChannels)(AXI4Xbar(maxFlightPerId = p(MaxInFlightMemTxsPerSource)))
@@ -204,7 +211,7 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
 
   if (outer.AXI_MEM.isDefined) {
     val dram_ports = outer.AXI_MEM.get
-    val M00_AXI = dram_ports.zipWithIndex.map{case (a, idx) =>
+    val M00_AXI = dram_ports.zipWithIndex.map { case (a, idx) =>
       val io = IO(AXI4Compat(a.in(0)._1.params))
       io.suggestName(s"M0${idx}_AXI")
       io
@@ -212,7 +219,8 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
     val ins = dram_ports.map(_.in(0))
     //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
     (M00_AXI zip ins) foreach { case (i, (o, _)) =>
-      AXI4Compat.connectCompatMaster(i, o) }
+      AXI4Compat.connectCompatMaster(i, o)
+    }
 
     // make incoming dma port and connect it
     if (p(HasDMA).isDefined) {

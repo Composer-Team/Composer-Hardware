@@ -2,7 +2,7 @@ package composer.TLManagement
 
 import chisel3._
 import chisel3.util._
-import composer.common.ComposerRoccCommand
+import composer.common.AccelRoccCommand
 import freechips.rocketchip.tilelink._
 
 class TLClientModuleIO(tlbundle: TLBundle) extends Bundle {

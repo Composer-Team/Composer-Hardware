@@ -7,7 +7,7 @@ import chisel3.util._
 import composer.Generation.CppGeneration
 import composer.common._
 
-class ComposerCommandBundler[T1 <: AccelCommand, T2 <: AccelResponse](bundleIn: T1, bundleOut: T2, composerCoreWrapper: AccelCoreWrapper, nSources: Int)(implicit p: Parameters) extends Module {
+class ComposerCommandBundler[T1 <: AbstractAccelCommand, T2 <: AccelResponse](bundleIn: T1, bundleOut: T2, composerCoreWrapper: AccelCoreWrapper, nSources: Int)(implicit p: Parameters) extends Module {
   if (composerCoreWrapper.composerSystemParams.canReceiveSoftwareCommands)
     CppGeneration.addUserCppFunctionDefinition(composerCoreWrapper.composerSystemParams.name, bundleIn, bundleOut)
 
@@ -18,8 +18,8 @@ class ComposerCommandBundler[T1 <: AccelCommand, T2 <: AccelResponse](bundleIn: 
   val io = IO(new CustomIO[T1, T2](bundleIn.cloneType, bundleOut.cloneType))
 
   io.req.bits.elements.foreach { case (_, data) => data := DontCare }
-  io.req.bits.__system_id := composerCoreWrapper.system_id.U
-  io.req.bits.__core_id := composerCoreWrapper.core_id.U
+  io.req.bits.getSystemID := composerCoreWrapper.system_id.U
+  io.req.bits.getCoreID := composerCoreWrapper.core_id.U
 
   cio.cmd.resp.valid := io.resp.valid
   cio.cmd.resp.bits.rd := 0.U

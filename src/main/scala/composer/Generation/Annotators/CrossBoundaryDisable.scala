@@ -10,7 +10,7 @@ object CrossBoundaryDisable {
     }
     //      sedcmds foreach {println(_)}
     val sedcmd = Seq("sed") ++ get_sed_inline_opt() ++ Seq("-E", sedcmds.mkString(";"), (targetDir / "ComposerTop.v").toString())
-    println(sedcmd.mkString(" "))
+//    println(sedcmd.mkString(" "))
     os.proc(sedcmd).call()
 //    System.err.println("Called for cross boundary disables but currently broken...")
   }

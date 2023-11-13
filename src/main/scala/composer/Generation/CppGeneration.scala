@@ -1,14 +1,13 @@
 package composer.Generation
 
 import chipsalliance.rocketchip.config._
-import chisel3.experimental._
 import chisel3._
 import chisel3.util.log2Up
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import composer.RoccHelpers.MCRFileMap
 import composer.Systems.{ComposerAcc, ComposerTop}
 import composer._
-import composer.common.{AbstractComposerCommand, AccelResponse}
+import composer.common.{AbstractAccelCommand, AccelResponse}
 import composer.Platforms.{DefaultClockRateKey, FrontBusBaseAddress, FrontBusBeatBytes, HasDiscreteMemory, HasDMA}
 import freechips.rocketchip.subsystem.ExtMem
 import freechips.rocketchip.tile.XLen
@@ -23,7 +22,7 @@ object CppGeneration {
 
   private case class PreprocessorDefinition(ty: String, value: String)
 
-  private case class HookDef(sysName: String, cc: AbstractComposerCommand, resp: AccelResponse) {
+  private case class HookDef(sysName: String, cc: AbstractAccelCommand, resp: AccelResponse) {
     cc.elements.foreach { p =>
       val data = p._2
       val paramName = p._1
@@ -34,7 +33,7 @@ object CppGeneration {
     }
   }
 
-  private var user_enums: List[EnumFactory] = List()
+  private var user_enums: List[chisel3.ChiselEnum] = List()
   private var user_defs: List[CppDefinition] = List()
   private var user_cpp_defs: List[PreprocessorDefinition] = List()
   private var hook_defs: List[HookDef] = List()
@@ -47,7 +46,7 @@ object CppGeneration {
     if (existingDefs.isEmpty) user_defs = CppDefinition(ty_f, name_f, value.toString) :: user_defs
   }
 
-  private[composer] def addUserCppFunctionDefinition(systemName: String, cc: AbstractComposerCommand, resp: AccelResponse): Unit = {
+  private[composer] def addUserCppFunctionDefinition(systemName: String, cc: AbstractAccelCommand, resp: AccelResponse): Unit = {
     val h = HookDef(systemName, cc, resp)
     if (!hook_defs.exists(_.sysName == systemName)) {
       hook_defs = h :: hook_defs
@@ -92,13 +91,14 @@ object CppGeneration {
     elems.foreach(a => addUserCppDefinition(a._1, a._2, a._3))
   }
 
-  def exportChiselEnum(enum: ChiselEnum): Unit = {
+  //noinspection ScalaUnusedSymbol
+  def exportChiselEnum(enum: chisel3.ChiselEnum): Unit = {
     if (!user_enums.contains(enum))
       user_enums = enum :: user_enums
   }
 
 
-  def enumToCpp(myEnum: ChiselEnum): String = {
+  def enumToCpp(myEnum: chisel3.ChiselEnum): String = {
     val enumClassName = myEnum.getClass.getSimpleName.split("\\$")(0)
     s"enum $enumClassName {\n" +
       myEnum.all.map { enumMember =>
@@ -115,7 +115,7 @@ object CppGeneration {
 
   private[composer] def safe_join(s: Seq[String], sep: String = "\n"): String = if (s.isEmpty) "" else if (s.length == 1) s(0) else s.reduce(_ + sep + _)
 
-  def customCommandToCpp(sysName: String, cc: AbstractComposerCommand, resp: AccelResponse)(implicit p: Parameters): (String, String) = {
+  def customCommandToCpp(sysName: String, cc: AbstractAccelCommand, resp: AccelResponse)(implicit p: Parameters): (String, String) = {
     val sub_signature = cc.realElements.sortBy(_._1).map { pa =>
       val isSigned = pa._2.isInstanceOf[SInt]
       getCType(pa._1, pa._2.getWidth, !isSigned) + " " + pa._1
@@ -251,7 +251,6 @@ object CppGeneration {
     val hooks_dec_def = hook_defs map (a => customCommandToCpp(a.sysName, a.cc, a.resp))
     val commandDeclarations = safe_join(hooks_dec_def.map(_._1))
     val commandDefinitions = safe_join(hooks_dec_def.map(_._2))
-    val maxCmdLength = 128
     val addrSet = ComposerTop.getAddressSet(0)
     val idLengths =
       s"""

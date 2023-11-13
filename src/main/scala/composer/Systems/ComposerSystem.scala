@@ -14,10 +14,10 @@ import freechips.rocketchip.tilelink._
 
 class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: Int, val canBeIntaCoreCommandEndpoint: Boolean, val acc: ComposerAcc)(implicit p: Parameters) extends LazyModuleWithSLRs {
   val nCores = systemParams.nCores
-  val coreParams = systemParams.coreParams
+  val memParams = systemParams.memoryChannelParams
   val distributeCores = ConstraintGeneration.canDistributeOverSLRs()
   implicit val baseName = systemParams.name
-  val cores = List.tabulate(nCores) { core_idx: Int =>
+  val cores: List[(Int, AccelCoreWrapper)] = List.tabulate(nCores) { core_idx: Int =>
     p(PlatformTypeKey) match {
       case PlatformType.ASIC => (core_idx, LazyModule(new AccelCoreWrapper(systemParams, core_idx, system_id, this)))
       case PlatformType.FPGA =>
@@ -56,7 +56,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
       }
     }
 
-    val reads_per_slr = cores.groupBy(_._1).map(q => (q._1, q._2.flatMap(_._2.readerNodes)))
+    val reads_per_slr = cores.groupBy(_._1).map(q =>  (q._1, q._2.flatMap(_._2.readerNodes)))
     val writes_per_slr = cores.groupBy(_._1).map(q => (q._1, q._2.flatMap(_._2.writerNodes)))
 
     val endpoints = Seq(reads_per_slr, writes_per_slr) map { nodes =>
@@ -116,7 +116,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
 
   // INTERNAL COMMAND MANAGER NODE
   val (internalCommandManager, incomingInternalCommandXbar) = if (canBeIntaCoreCommandEndpoint) {
-    val l2u_crc = 1 << log2Up(ComposerRoccCommand.packLengthBytes)
+    val l2u_crc = 1 << log2Up(AccelRoccCommand.packLengthBytes)
 
     val manager = TLManagerNode(Seq(TLSlavePortParameters.v1(
       managers = Seq(TLSlaveParameters.v2(

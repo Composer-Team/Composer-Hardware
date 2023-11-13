@@ -6,7 +6,7 @@ import chisel3.util._
 import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import freechips.rocketchip.tile.{RoCCCommand, XLen}
 
-sealed abstract class AbstractComposerCommand(implicit p: Parameters) extends Bundle with hasAccessibleUserSubRegions {
+sealed abstract class AbstractAccelCommand extends Bundle with hasAccessibleUserSubRegions {
 
   def getCoreID: UInt
   def getSystemID: UInt
@@ -20,7 +20,7 @@ sealed abstract class AbstractComposerCommand(implicit p: Parameters) extends Bu
 
   private[composer] def getNBeats: Int = {
     val real_width = realElements.map(_._2.getWidth).sum
-    (real_width.toFloat / (2*p(XLen))).ceil.toInt
+    (real_width.toFloat / (2*64)).ceil.toInt
   }
 
   /**
@@ -29,7 +29,7 @@ sealed abstract class AbstractComposerCommand(implicit p: Parameters) extends Bu
   private[composer] def getRoccBeats: Seq[UInt] = {
     val whole = Cat(realElements.map(_._2.asUInt).reverse)
     val nBeats = getNBeats
-    val payloadWidth = 2 * p(XLen)
+    val payloadWidth = 2 * 64
     (0 until nBeats) map {idx =>
       val high = (idx + 1) * payloadWidth - 1
       val low = idx * payloadWidth
@@ -40,7 +40,7 @@ sealed abstract class AbstractComposerCommand(implicit p: Parameters) extends Bu
   }
 }
 
-class AccelCommand(implicit p: Parameters) extends AbstractComposerCommand {
+class AccelCommand extends AbstractAccelCommand {
   override val reservedNames = Seq("__core_id", "__system_id")
   private[composer] val __core_id = UInt(CoreIDLengthKey.W)
   private[composer] val __system_id = UInt(SystemIDLengthKey.W)
@@ -53,7 +53,7 @@ class AccelCommand(implicit p: Parameters) extends AbstractComposerCommand {
 
   private[composer] def getRoccPayload(idx: UInt): (UInt, UInt)  = {
     val beats = VecInit(this.getRoccBeats)
-    val xlen = p(XLen)
+    val xlen = 64
     (beats(idx)(2*xlen-1, xlen), beats(idx)(xlen-1, 0))
   }
 }
@@ -72,7 +72,7 @@ object AccelCommand {
 }
 
 //noinspection ScalaUnusedSymbol
-class ComposerRoccCommand(implicit p: Parameters) extends AbstractComposerCommand {
+class AccelRoccCommand extends AbstractAccelCommand {
   override val reservedNames = Seq()
 
   override def sortedElements: Seq[(String, Data)] = elements.toSeq
@@ -89,8 +89,8 @@ class ComposerRoccCommand(implicit p: Parameters) extends AbstractComposerComman
     val system_id = UInt(SystemIDLengthKey.W)
     val funct = UInt((7 - SystemIDLengthKey).W)
   }
-  val payload1 = UInt(p(XLen).W)
-  val payload2 = UInt(p(XLen).W)
+  val payload1 = UInt(64.W)
+  val payload2 = UInt(64.W)
 
 
   def pack(bufferToPow2: Boolean = true, withRoutingPayload: Option[UInt] = None): UInt = {
@@ -115,10 +115,10 @@ class ComposerRoccCommand(implicit p: Parameters) extends AbstractComposerComman
   private[composer] def payloadWidth = payload1.getWidth + payload2.getWidth
 }
 
-object ComposerRoccCommand {
+object AccelRoccCommand {
   def packLengthBytes(implicit p: Parameters): Int = (32 + 2 * p(XLen)) / 8
-  def fromRoccCommand(gen: RoCCCommand)(implicit p: Parameters): ComposerRoccCommand = {
-    val wr = Wire(new ComposerRoccCommand)
+  def fromRoccCommand(gen: RoCCCommand)(implicit p: Parameters): AccelRoccCommand = {
+    val wr = Wire(new AccelRoccCommand)
     wr.inst.xd := gen.inst.xd
     wr.inst.funct := gen.inst.funct.tail(SystemIDLengthKey)
     wr.inst.system_id := gen.inst.funct.head(SystemIDLengthKey)

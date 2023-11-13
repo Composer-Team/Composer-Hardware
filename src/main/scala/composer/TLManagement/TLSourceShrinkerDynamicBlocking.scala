@@ -48,9 +48,8 @@ class TLSourceShrinkerDynamicBlocking(maxInFlight: Int)(implicit p: Parameters) 
       if (noShrinkRequired(edgeIn.client)) {
         out.a <> in.a
         in.d <> out.d
-        println("No shrink required")
       } else {
-        println("Shrinking because we need " + edgeIn.client.endSourceId + " clients")
+//        println("Shrinking because we need " + edgeIn.client.endSourceId + " clients")
         // map source ids from the side that wants shrinkage to the shrunken space id
         val sourceOut2InMap = Reg(Vec(maxInFlight, UInt(width = log2Up(edgeIn.client.endSourceId).W)))
         val allocated = Reg(Vec(maxInFlight, Bool()))
