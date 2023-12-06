@@ -4,9 +4,10 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.amba.axi4._
 import chipsalliance.rocketchip.config._
+import composer.Generation.BuildMode
 import composer._
 import composer.common.AccelRoccResponse
-import composer.Platforms.{FrontBusProtocol, FrontBusProtocolKey}
+import composer.Platforms.{BuildModeKey, FrontBusProtocol, FrontBusProtocolKey}
 import composer.Protocol.ACE
 import freechips.rocketchip.amba.ahb.{AHBMasterIdentityNode, AHBSlaveIdentityNode, AHBToTL}
 import freechips.rocketchip.diplomacy._
@@ -21,15 +22,15 @@ class FrontBusHub(implicit p: Parameters) extends LazyModule {
 
   val tl_head = TLIdentityNode()
 
-  val node = p(FrontBusProtocolKey) match {
-    case FrontBusProtocol.AXI4 | FrontBusProtocol.AXIL =>
+  val node = (p(FrontBusProtocolKey), p(BuildModeKey)) match {
+    case (FrontBusProtocol.AXI4, _) | (FrontBusProtocol.AXIL, _) | (_, BuildMode.Simulation) =>
       val node = AXI4IdentityNode()
       // NOTE: need fragmenter because AXI4_2_TL requires a very restrictive AXI format
       // NOTE2: NEED fragmenter because other platforms (e.g., Kria) can emit unpredictable transaction lengths
       //        for MMIO peeks. We witnessed 64b reads on a 32b pointer dereference. Fragmenter splits it up
       widget.node := tl_head := AXI4ToTL() :=  AXI4UserYanker(capMaxFlight = Some(4)) := AXI4Fragmenter() := AXI4IdIndexer(1) := node
       node
-    case FrontBusProtocol.AHB =>
+    case (FrontBusProtocol.AHB, _) =>
       val node = AHBSlaveIdentityNode()
       widget.node := tl_head :=  AHBToTL() := node
       node
@@ -58,6 +59,6 @@ class AXILHubModule(outer: FrontBusHub)(implicit p: Parameters) extends LazyModu
   rocc_to_axil.io.rocc <> io.rocc_out
   axil_to_rocc.io.in <> axil_widget.io.cmds
   io.rocc_in <> axil_to_rocc.io.rocc
-  if (p(HasCoherence).isDefined) axil_widget.io.ace_bus.get <> io.ace_bus.get
+//  if (p(HasCoherence).isDefined) axil_widget.io.ace_bus.get <> io.ace_bus.get
 
 }

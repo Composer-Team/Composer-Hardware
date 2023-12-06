@@ -25,6 +25,7 @@ class WithChipKitPlatform(synthesis: Boolean = false)
     case FrontBusBaseAddress => 0x2000000000L
     case FrontBusAddressMask => 0xffffL
     case FrontBusAddressBits => 16
+    case PrefetchSourceMultiplicity => 16
     case HasDMA => None
     case CXbarMaxDegree => 8
     case HasDiscreteMemory => false
@@ -35,7 +36,7 @@ class WithChipKitPlatform(synthesis: Boolean = false)
     case PlatformTypeKey => PlatformType.ASIC
     case FrontBusProtocolKey => FrontBusProtocol.AHB
     case DefaultClockRateKey => 100
-    case HasCoherence => false
+    case HasCoherence => None
 
     case IsAWS => false
     case HasDisjointMemoryControllers => false

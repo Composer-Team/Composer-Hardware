@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.experimental.BaseModule
 import composer.Generation._
 import composer.MemoryStreams.{HasMemoryInterface, SD}
-import composer.MemoryStreams.RAM.RegMem
+import composer.MemoryStreams.RAM.{RegMem, SyncReadMemMem}
 import composer.Platforms.{ASICMemoryCompilerKey, BuildModeKey, PostProcessorMacro}
 import composer.Platforms.ASIC._
 import composer.Platforms.ASIC.ASAP7.ASAP7_SP_SRAM
@@ -22,6 +22,8 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
                 skipScripts: Boolean = false) extends Config((_, _, _) => {
   case ASICMemoryCompilerKey => new MemoryCompiler {
     override val isActiveHighSignals: Boolean = true
+
+    override def isTooSmall(nRows: Int, nCols: Int): Boolean = nRows <= 32
     override val mems: Map[Int, Seq[SD]] = Map.from(Seq((1, Seq(
       SD(16, 512), SD(18, 512), SD(20, 512), SD(32, 512), SD(34, 512),
       SD(36, 512), SD(40, 512), SD(48, 512), SD(64, 512), SD(72, 512),
@@ -41,7 +43,7 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
           mem.io.sdel := 0.U
           mem
         } else {
-          Module(new RegMem(nRows, nColumns, nPorts, 1))
+          Module(new SyncReadMemMem(0, 0, nPorts, nRows, nColumns, 1))
         }
       }
 
@@ -66,7 +68,7 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
           os.copy.over(src, synwd / "src" / src.baseName, createFolders = true)
         }
       }
-      os.copy.over(cwd / f"$mName.v", synwd / "src" / "composer.sv")
+      os.copy.over(cwd / f"composer.v", synwd / "src" / "composer.sv")
 
       def getFileWithNameApprox(dir: Path, contents: Seq[String]): Path = {
         os.walk(dir).filter(d => contents.map(c => d.toString().contains(c)).reduce(_ && _))(0)
@@ -83,166 +85,173 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
         case ProcessVoltageThreshold.SuperLow => "SLVT"
         case ProcessVoltageThreshold.High => "HVT"
       }
-      val tech_file = "/data/install/pdks/asap7/asap7_snps/icc/asap07_icc.tf"
-      val stdCellDBs = List("SIMPLE", "INVBUF", "AO", "SEQ").map { p =>
-        getFileWithNameApprox(os.Path("/data/install/pdks/asap7/asap7sc7p5t_28/LIB/NLDM/"),
-          Seq(f"asap7sc7p5t_${p}_${stdcell_suffix}_${cornerString}_", ".db")).toString()
-    }.fold("")(_ + " " + _)
-    val stdCellLEFBase = "/data/install/pdks/asap7/asap7sc7p5t_28/LEF"
-    val stdCellLEFs = List(
-      f"$stdCellLEFBase/asap7sc7p5t_28_L_1x_220121a.lef",
-      f"$stdCellLEFBase/asap7sc7p5t_28_R_1x_220121a.lef",
-      f"$stdCellLEFBase/asap7sc7p5t_28_SL_1x_220121a.lef",
-      f"$stdCellLEFBase/asap7sc7p5t_28_SRAM_1x_220121a.lef"
-    ).fold("")(_ + " " + _)
+      try {
+        val tech_file = "/data/install/pdks/asap7/asap7_snps/icc/asap07_icc.tf"
+        val stdCellDBs = List("SIMPLE", "INVBUF", "AO", "SEQ").map { p =>
+          getFileWithNameApprox(os.Path("/data/install/pdks/asap7/asap7sc7p5t_28/LIB/NLDM/"),
+            Seq(f"asap7sc7p5t_${p}_${stdcell_suffix}_${cornerString}_", ".db")).toString()
+        }.fold("")(_ + " " + _)
+        val stdCellLEFBase = "/data/install/pdks/asap7/asap7sc7p5t_28/LEF"
+        val stdCellLEFs = List(
+          f"$stdCellLEFBase/asap7sc7p5t_28_L_1x_220121a.lef",
+          f"$stdCellLEFBase/asap7sc7p5t_28_R_1x_220121a.lef",
+          f"$stdCellLEFBase/asap7sc7p5t_28_SL_1x_220121a.lef",
+          f"$stdCellLEFBase/asap7sc7p5t_28_SRAM_1x_220121a.lef"
+        ).fold("")(_ + " " + _)
 
-    val stdCellLEFs_scaled = List(
-      f"$stdCellLEFBase/scaled/asap7sc7p5t_28_L_4x_220121a.lef",
-      f"$stdCellLEFBase/scaled/asap7sc7p5t_28_R_4x_220121a.lef",
-      f"$stdCellLEFBase/scaled/asap7sc7p5t_28_SL_4x_220121a.lef",
-      f"$stdCellLEFBase/scaled/asap7sc7p5t_28_SRAM_4x_220121a.lef"
-    ).fold("")(_ + " " + _)
-
-
-    val baseMemoryDBs = "/data/install/pdks/asap7/ASAP7_SRAM_0p0/generated/LIB"
-    val baseMemoryLEFs = "/data/install/pdks/asap7/ASAP7_SRAM_0p0/generated/LEF"
-
-    val memoryDBs = os.walk(os.Path(baseMemoryDBs), maxDepth = 1).filter { p =>
-      p.toString().contains(".db")
-    }.map(_.toString()).fold("")(_ + " " + _)
-    val mem_lefs = os.walk(os.Path(baseMemoryLEFs), maxDepth = 1).filter { mem =>
-      mem.toString().contains(".lef")
-    }.map(_.toString()).fold("")(_ + " " + _)
-    val mem_lefs_scaled = os.walk(os.Path(baseMemoryLEFs) / "4xLEF", maxDepth = 1).filter { mem =>
-      mem.toString().contains(".lef")
-    }.map(_.toString()).fold("")(_ + " " + _)
+        val stdCellLEFs_scaled = List(
+          f"$stdCellLEFBase/scaled/asap7sc7p5t_28_L_4x_220121a.lef",
+          f"$stdCellLEFBase/scaled/asap7sc7p5t_28_R_4x_220121a.lef",
+          f"$stdCellLEFBase/scaled/asap7sc7p5t_28_SL_4x_220121a.lef",
+          f"$stdCellLEFBase/scaled/asap7sc7p5t_28_SRAM_4x_220121a.lef"
+        ).fold("")(_ + " " + _)
 
 
-    os.write(synwd / "synth.ssp",
-      f"""set project_path $synwd
-         |set save_path ./out
-         |### tech files
-         |
-         |### library files
-         |set_app_var target_library {$stdCellDBs}
-         |set_app_var link_library "* $memoryDBs $stdCellDBs "
-         |define_design_lib work -path "$synwd/work"
-         |
-         |# suppress annoying messages
-         |suppress_message [list LINT-33 VER-318 OPT-1207 OPT-776 OPT-1206 OPT-777 OPT-1215]
-         |
-         |set_host_options -max_cores 16
-         |report_host_options
-         |
-         |analyze -format sverilog [list src/composer.sv]
-         |elaborate ComposerTop
-         |current_design ComposerTop
-         |link
-         |uniquify
-         |
-         |set peri [expr 1000.0 / ($clockRateMHz / 1000.0)]
-         |create_clock clock -name "clock" -period $$peri
-         |set_cost_priority -delay
-         |compile_ultra -retime -scan -no_autoungroup
-         |# enable this if timing is really tight
-         |# optimize_registers -delay_threshold=$$peri -minimum_period_only
-         |link
-         |check_design
-         |
-         |# Perform the following command if no violations
-         |# write -hierarchy -format verilog -output out/composer.netlist.v""".stripMargin
-    )
+        val baseMemoryDBs = "/data/install/pdks/asap7/ASAP7_SRAM_0p0/generated/LIB"
+        val baseMemoryLEFs = "/data/install/pdks/asap7/ASAP7_SRAM_0p0/generated/LEF"
 
-    val starrcDir = "/data/install/pdks/asap7/asap7_snps/starrc"
-    val layermap = f"$starrcDir/asap07.layermap"
-    val tluplus = f"$starrcDir/asap07.tluplus"
-    //      val starrc_libs = List(
-    //        cmax,
-    //        os.Path(PDK) / "starrc" / "min" / "saed14nm_1p9m_Cmin.tluplus",
-    //        os.Path(PDK) / "starrc" / "nominal" / "saed14nm_1p9m_nominal.tluplus",
-    //        itf_map
-    //      )
-    val periodGHz = 1000.0 / clockRateMHz
-    val processSpeedStr = corner match {
-      case ProcessCorner.Fast => "fast"
-      case ProcessCorner.Typical => "typical"
-      case ProcessCorner.Slow => "slow"
+        val memoryDBs = os.walk(os.Path(baseMemoryDBs), maxDepth = 1).filter { p =>
+          p.toString().contains(".db")
+        }.map(_.toString()).fold("")(_ + " " + _)
+        val mem_lefs = os.walk(os.Path(baseMemoryLEFs), maxDepth = 1).filter { mem =>
+          mem.toString().contains(".lef")
+        }.map(_.toString()).fold("")(_ + " " + _)
+        val mem_lefs_scaled = os.walk(os.Path(baseMemoryLEFs) / "4xLEF", maxDepth = 1).filter { mem =>
+          mem.toString().contains(".lef")
+        }.map(_.toString()).fold("")(_ + " " + _)
+
+
+        os.write(synwd / "synth.tcl",
+          f"""set project_path $synwd
+             |set save_path ./out
+             |### tech files
+             |
+             |### library files
+             |set_app_var target_library {$stdCellDBs}
+             |set_app_var link_library "* $memoryDBs $stdCellDBs "
+             |define_design_lib work -path "$synwd/work"
+             |
+             |# suppress annoying messages
+             |suppress_message [list LINT-33 VER-318 OPT-1207 OPT-776 OPT-1206 OPT-777 OPT-1215]
+             |
+             |set_host_options -max_cores 16
+             |report_host_options
+             |
+             |analyze -format sverilog [list src/composer.sv]
+             |elaborate ComposerTop
+             |current_design ComposerTop
+             |link
+             |uniquify
+             |
+             |set peri [expr 1000.0 / ($clockRateMHz / 1000.0)]
+             |create_clock clock -name "clock" -period $$peri
+             |set_clock_uncertainty 0.2 [get_clocks clock]
+             |set_cost_priority -delay
+             |compile_ultra -retime -scan -no_autoungroup
+             |# enable this if timing is really tight
+             |# optimize_registers -delay_threshold=$$peri -minimum_period_only
+             |link
+             |check_design
+             |
+             |# Perform the following command if no violations
+             |write -hierarchy -format verilog -output out/netlist.v""".stripMargin
+        )
+
+        val starrcDir = "/data/install/pdks/asap7/asap7_snps/starrc"
+        val layermap = f"$starrcDir/asap07.layermap"
+        val tluplus = f"$starrcDir/asap07.tluplus"
+        //      val starrc_libs = List(
+        //        cmax,
+        //        os.Path(PDK) / "starrc" / "min" / "saed14nm_1p9m_Cmin.tluplus",
+        //        os.Path(PDK) / "starrc" / "nominal" / "saed14nm_1p9m_nominal.tluplus",
+        //        itf_map
+        //      )
+        val periodGHz = 1000.0 / clockRateMHz
+        val processSpeedStr = corner match {
+          case ProcessCorner.Fast => "fast"
+          case ProcessCorner.Typical => "typical"
+          case ProcessCorner.Slow => "slow"
+        }
+
+        // create macro arrays
+        //    val macroArrays = MemoryCompiler.registeredMemoryArrays.map { ar =>
+        //      s"create_macro_array -fill_pattern by_row -horizontal_channel_height 10 -vertical_channel_height 10 -num_rows ${ar.rows} -num_cols ${ar.cols} -create_group true -name_edit_group ${ar.name} ${ar.cells reduce (_ + " " + _)}"
+        //    }
+        os.write(synwd / "pnr.tcl",
+          f"""set top_module ComposerTop
+             |# set design_verilog "src/composer.v"
+             |set LIBRARY_CONFIGURATION_FLOW true
+             |set_app_var link_library "* $stdCellDBs $memoryDBs"
+             |
+             |create_lib -scale_factor 4000 -technology $tech_file c1.nlib
+             |
+             |set_ref_libs -library c1.nlib -ref_libs { $mem_lefs_scaled $stdCellLEFs_scaled}
+             |
+             |derive_design_level_via_regions
+             |
+             |
+             |read_verilog -library c1.nlib -design ComposerTop -top ComposerTop out/netlist.v
+             |
+             |### Initialize Scenarios
+             |remove_scenarios -all
+             |remove_corners -all
+             |remove_modes -all
+             |
+             |if { [get_modes func -quiet] == "" } {
+             |    create_mode func
+             |}
+             |if { [get_corner ${cornerString}_cmax -quiet] == "" } {
+             |    create_corner ${cornerString}_cmax
+             |}
+             |create_scenario -mode func -corner ${cornerString}_cmax -name func_${cornerString}_cmax
+             |current_scenario func_${cornerString}_cmax
+             |read_parasitic_tech -layermap $layermap -tlup $tluplus -name maxTLU
+             |remove_sdc -scenarios [current_scenario]
+             |
+             |### Clock Settings
+             |create_clock -period ${periodGHz*1000} -name clock [get_ports clock]
+             |
+             |### Voltage Settings
+             |set_parasitic_parameters -early_spec maxTLU -late_spec maxTLU
+             |set_temperature 25
+             |set_process_number 0.99
+             |set_process_label $processSpeedStr
+             |set_voltage 0.7 -object_list VDD
+             |set_voltage 0.00  -object_list VSS
+             |
+             |### Timing Model
+             |set_timing_derate -early 0.93 -cell_delay -net_delay
+             |set_clock_uncertainty 0.2 [get_clocks clock]
+             |set_max_transition 0.15 [get_clock clock] -clock_path
+             |set_max_transition 0.25 [get_clock clock] -data_path
+             |set_max_capacitance 150 [current_design]
+             |
+             |### Finalize Scenarios
+             |set_scenario_status func_${cornerString}_cmax -active true -setup true -hold true -max_capacitance true -max_transition true -min_capacitance true -leakage_power false -dynamic_power false
+             |
+             |### Floorplan
+             |initialize_floorplan
+             |
+             |set_app_options -name plan.macro.style -value freeform
+             |set_app_options -name plan.macro.integrated -value true
+             |set_attribute [get_flat_cells -filter is_hard_macro] -name physical_status -value unplaced
+             |set_host_options -max_cores 48
+             |
+             |# Place output pins
+             |# set_app_options -name plan.pins.incremental -value false -block [current_block]
+             |# place_pins -self -ports *
+             |
+             |# Place design cells
+             |# set_app_options -name place.coarse.fix_hard_macros -value false
+             |# set_app_options -name plan.place.auto_create_blockages -value auto
+             |# create_placement -floorplan -effort high
+             |
+             |# optimize placement
+             |# place_opt
+             |""".stripMargin)
+      } catch {
+        case e: Exception => println("Failed to write ASAP7 scripts: " + e.toString)
+      }
     }
-
-    // create macro arrays
-//    val macroArrays = MemoryCompiler.registeredMemoryArrays.map { ar =>
-//      s"create_macro_array -fill_pattern by_row -horizontal_channel_height 10 -vertical_channel_height 10 -num_rows ${ar.rows} -num_cols ${ar.cols} -create_group true -name_edit_group ${ar.name} ${ar.cells reduce (_ + " " + _)}"
-//    }
-    os.write(synwd / "pnr.tcl",
-      f"""set top_module ComposerTop
-         |# set design_verilog "src/composer.v"
-         |set LIBRARY_CONFIGURATION_FLOW true
-         |set_app_var link_library "* $stdCellDBs $memoryDBs"
-         |
-         |create_lib -scale_factor 4000 -technology $tech_file c1.nlib
-         |
-         |set_ref_libs -library c1.nlib -ref_libs { $mem_lefs_scaled $stdCellLEFs_scaled}
-         |
-         |derive_design_level_via_regions
-         |
-         |
-         |read_verilog -library c1.nlib -design ComposerTop -top ComposerTop out/composer.netlist.v
-         |
-         |### Initialize Scenarios
-         |remove_scenarios -all
-         |remove_corners -all
-         |remove_modes -all
-         |
-         |if { [get_modes func -quiet] == "" } {
-         |    create_mode func
-         |}
-         |if { [get_corner ${cornerString}_cmax -quiet] == "" } {
-         |    create_corner ${cornerString}_cmax
-         |}
-         |create_scenario -mode func -corner ${cornerString}_cmax -name func_${cornerString}_cmax
-         |current_scenario func_${cornerString}_cmax
-         |read_parasitic_tech -layermap $layermap -tlup $tluplus -name maxTLU
-         |remove_sdc -scenarios [current_scenario]
-         |
-         |### Clock Settings
-         |create_clock -period $periodGHz -name clock [get_ports clock]
-         |
-         |### Voltage Settings
-         |set_parasitic_parameters -early_spec maxTLU -late_spec maxTLU
-         |set_temperature 25
-         |set_process_number 0.99
-         |set_process_label $processSpeedStr
-         |set_voltage 0.7 -object_list VDD
-         |set_voltage 0.00  -object_list VSS
-         |
-         |### Timing Model
-         |set_timing_derate -early 0.93 -cell_delay -net_delay
-         |set clock uncertainty
-         |set_max_transition 0.15 [get_clock clock] -clock_path
-         |set_max_transition 0.25 [get_clock clock] -data_path
-         |set_max_capacitance 150 [current_design]
-         |
-         |### Finalize Scenarios
-         |set_scenario_status func_${cornerString}_cmax -active true -setup true -hold true -max_capacitance true -max_transition true -min_capacitance true -leakage_power false -dynamic_power false
-         |
-         |### Floorplan
-         |initialize_floorplan
-         |
-         |set_app_options -name plan.macro.style -value freeform
-         |set_app_options -name plan.macro.integrated -value true
-         |set_host_options -max_cores 48
-         |
-         |# Place output pins
-         |# set_app_options -name plan.pins.incremental -value false -block [current_block]
-         |# place_pins -self -ports *
-         |
-         |# Place design cells
-         |# set_app_options -name place.coarse.fix_hard_macros -value false
-         |# set_app_options -name plan.place.auto_create_blockages -value auto
-         |# create_placement -floorplan -effort high
-         |
-         |# optimize placement
-         |# place_opt
-         |""".stripMargin)
-  }}
+  }
 })

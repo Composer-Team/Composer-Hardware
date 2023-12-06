@@ -55,11 +55,16 @@ class AXI4Compat(param: MasterPortParams, userBits: Int = 0) extends Bundle {
   val rvalid = Input(Bool())
   val rready = Output(Bool())
 
-  def initLow(): Unit = {
+  def initFromMasterLow(): Unit = {
     Seq(awid, awaddr, awlen, awsize, awburst, awlock, awcache, awprot, awregion, awqos, awvalid, wdata, wstrb,
       wlast, wvalid, bready, arid, araddr, arlen, arsize, arburst, arlock, arcache, arprot, arregion, arqos,
       arvalid, rready, aruser, awuser) foreach(_ := 0.U)
   }
+
+  def initFromSlaveLow(): Unit = {
+    Seq(awready, arready, rvalid, rdata, rresp, rid, rlast, wready, bvalid, bid, bresp) foreach (_ := 0.U)
+  }
+
 }
 
 object AXI4Compat {

@@ -153,7 +153,7 @@ class ACEZynqRegionManager(params: MasterPortParams,
     mapping_memory.initLow(clock)
     val indexHold = Reg(UInt(log2Up(maxSegments).W))
     mapping_memory.addr(0) := indexHold
-    out.initLow()
+    out.initFromMasterLow()
     val nIdxBits = log2Up(maxSegments)
 
     // all snoops are answered in one cycle and the responses are always the same

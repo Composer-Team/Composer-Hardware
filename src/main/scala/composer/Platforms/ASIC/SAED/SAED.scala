@@ -23,6 +23,7 @@ class WithSAED(corner: ProcessCorner = ProcessCorner.Typical,
                voltage: ProcessOperatingConditions = ProcessOperatingConditions.NormalVoltage,
                clockRateMHz: Float = 1000) extends Config((_, _, _) => {
   case ASICMemoryCompilerKey => new MemoryCompiler {
+    override def isTooSmall(nRows: Int, nCols: Int): Boolean = false
     override val mems: Map[Int, Seq[SD]] = Map.from(Seq(
       (1, Seq(
         SD(8, 128), SD(32, 64), SD(32, 256), SD(8, 1024), SD(8, 512), SD(48, 128),

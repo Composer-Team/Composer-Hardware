@@ -118,8 +118,8 @@ case class CScratchpadFeatures(readOnly: Boolean = false,
 case class CScratchpadParams(name: String,
                              dataWidthBits: Number,
                              nDatas: Number,
+                             nPorts: Int,
                              latency: Number = 3,
-                             nPorts: Int = 2,
                              features: CScratchpadFeatures = CScratchpadFeatures()) extends CChannelParams {
   override val nChannels: Int = 1
 

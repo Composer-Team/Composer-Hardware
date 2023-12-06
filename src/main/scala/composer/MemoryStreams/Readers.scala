@@ -93,7 +93,7 @@ class SequentialReader(dataBytes: Int,
 
   val prefetch_blatency = p(PlatformTypeKey) match {
     case PlatformType.FPGA => 3
-    case PlatformType.ASIC => (prefetchRows.toFloat / 256).ceil.toInt + 1
+    case PlatformType.ASIC => (prefetchRows.toFloat / 256).ceil.toInt + 2
   }
 
   val hasDualPortMemory = p(PlatformTypeKey) match {

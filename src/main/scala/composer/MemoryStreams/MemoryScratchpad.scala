@@ -112,7 +112,11 @@ class ScratchpadImpl(csp: CScratchpadParams,
 
   private val scReqBits = log2Up(nDatas)
   val IOs = Seq.fill(nPorts)(IO(new ScratchpadDataPort(scReqBits, dataWidthBits)))
-  val req = IO(new ScratchpadMemReqPort(if (outer.mem_reader.isDefined) Some(outer.mem_reader.get.out(0)._1) else None, nDatas, memoryLengthBits))
+  val req = IO(new ScratchpadMemReqPort(
+    if (outer.mem_reader.isDefined) Some(outer.mem_reader.get.out(0)._1) else None,
+    nDatas,
+    memoryLengthBits
+  ))
   private val memory = Seq.fill(datasPerCacheLine)(Memory(latency,
     dataWidth = dataWidthBits,
     nRows = realNRows,
@@ -193,12 +197,13 @@ class ScratchpadImpl(csp: CScratchpadParams,
     val idxCounter = Reg(UInt(log2Up(realNRows).W))
 
     val tx_ready = p(PlatformTypeKey) match {
-      case PlatformType.FPGA =>
-        val reader = Module(new SequentialReader(swWordSize * datasPerCacheLine / 8, 1,
+      case PlatformType.FPGA | PlatformType.ASIC =>
+        val reader = Module(new SequentialReader(
+          swWordSize * datasPerCacheLine / 8, 1,
           tl_edge = outer.mem_reader.get.out(0)._2,
           tl_bundle = outer.mem_reader.get.out(0)._1,
           debugName = Some(s"Scratchpad${csp.name}"))(p.alterPartial {
-          case PrefetchSourceMultiplicity => 32
+          case PrefetchSourceMultiplicity => 4
         }))
         reader.tl_out <> outer.mem_reader.get.out(0)._1
         reader.io.req.valid := req.init.valid
@@ -212,75 +217,6 @@ class ScratchpadImpl(csp: CScratchpadParams,
         loader.io.cache_block_in.bits.idxBase := idxCounter
         reader.io.channel.data.ready := loader.io.cache_block_in.ready
         reader.io.req.ready
-      case PlatformType.ASIC =>
-        val (port, edge) = outer.mem_reader.get.out(0)
-        val tx_len_remaining = Reg(UInt(req.init.bits.len.getWidth.W))
-        val tx_base_addr = Reg(UInt(req.init.bits.memAddr.getWidth.W))
-        val tx_init_index = Reg(UInt(req.init.bits.scAddr.getWidth.W))
-        val n_sources = edge.master.endSourceId
-        val big_tx_size = 1 << 10
-        val small_tx_size = edge.master.channelBytes.d.get
-        val tx_max_beats = big_tx_size / small_tx_size
-        val scratchpad_indices_per_beat: Int = small_tx_size / csp.dataWidthBits.intValue()
-        require(small_tx_size >= csp.dataWidthBits.intValue() / 8, "ASIC platform currently only supports scratchpads up to width (" + small_tx_size + "), ")
-
-        class PerSourceTx extends Bundle {
-          val active = Bool()
-          val base_addr = UInt(req.init.bits.memAddr.getWidth.W)
-          val init_index = UInt(req.init.bits.scAddr.getWidth.W)
-          val beats_remaining_minus_one = UInt(log2Up(tx_max_beats).W) // only handle 1KB txs at a time
-        }
-        val source_txs = Reg(Vec(n_sources, new PerSourceTx()))
-
-        when(req.init.fire) {
-          tx_len_remaining := req.init.bits.len
-          tx_base_addr := req.init.bits.memAddr
-          tx_init_index := req.init.bits.scAddr
-        }
-
-        val is_tx_available = source_txs.map(!_.active).reduce(_ || _)
-        val chosen_tx = PriorityEncoder(source_txs.map(!_.active))
-        val is_big = tx_len_remaining >= (1 << 10).U
-        val tx_alloc_sz = Mux(is_big, big_tx_size.U, small_tx_size.U)
-        loader.io.cache_block_in.bits.idxBase := DontCare
-        when(is_tx_available) {
-          val tx = source_txs(chosen_tx)
-          tx.base_addr := tx_base_addr
-          tx.beats_remaining_minus_one := Mux(is_big, (tx_max_beats - 1).U, 0.U)
-          tx.init_index := tx_init_index
-          port.a.bits := edge.Get(chosen_tx,
-            tx_base_addr,
-            Mux(is_big, log2Up(big_tx_size).U, log2Up(small_tx_size).U)
-          )._2
-          when(tx_len_remaining > 0.U) {
-            port.a.valid := true.B
-            when(port.a.ready) {
-              tx_base_addr := tx_base_addr + tx_alloc_sz
-              tx_init_index := tx_init_index + Mux(is_big, (tx_max_beats * scratchpad_indices_per_beat).U, scratchpad_indices_per_beat.U)
-              tx_len_remaining := tx_len_remaining - tx_alloc_sz
-              tx.active := true.B
-            }
-          }
-        }
-        port.d.ready := loader.io.cache_block_in.ready
-        loader.io.cache_block_in.valid := port.d.valid
-        loader.io.cache_block_in.bits.dat := port.d.bits.data
-        when(port.d.fire) {
-          val tx = source_txs(port.d.bits.source)
-          loader.io.cache_block_in.bits.idxBase := tx.init_index
-          tx.init_index := tx.init_index + scratchpad_indices_per_beat.U
-          tx.beats_remaining_minus_one := tx.beats_remaining_minus_one - 1.U
-          when(tx.beats_remaining_minus_one === 0.U) {
-            tx.active := false.B
-          }
-        }
-
-        when(reset.asBool) {
-          source_txs.foreach(_.active := false.B)
-          tx_len_remaining := 0.U
-        }
-
-        RegNext(tx_len_remaining === 0.U && source_txs.map(!_.active).reduce(_ && _))
     }
     when(loader.io.cache_block_in.fire) {
       idxCounter := idxCounter + loader.spEntriesPerBeat.U

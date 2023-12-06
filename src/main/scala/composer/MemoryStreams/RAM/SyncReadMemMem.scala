@@ -2,7 +2,7 @@ package composer.MemoryStreams.RAM
 
 import chisel3._
 import chisel3.util._
-import composer.MemoryStreams.CMemoryIOBundle
+import composer.MemoryStreams.{CMemoryIOBundle, HasMemoryInterface}
 import composer.common.ShiftReg
 
 private class SRMMHelper(nReadPorts: Int,
@@ -33,6 +33,7 @@ private class SRMMHelper(nReadPorts: Int,
     when(mio.chip_select(pidx)) {
       cmem.write(mio.addr(pidx), mio.data_in(pidx))
     }
+    mio.data_out(pidx) := DontCare
   }
 
   (0 until nReadPorts) foreach { port_idx =>
@@ -50,10 +51,25 @@ private class SRMMHelper(nReadPorts: Int,
 class SyncReadMemMem(nReadPorts: Int,
                      nWritePorts: Int,
                      nReadWritePorts: Int,
-                     nRows: Int, dataWidth: Int, latency: Int) extends RawModule {
+                     nRows: Int, dataWidth: Int, latency: Int) extends RawModule with HasMemoryInterface {
+
   val mio = IO(new CMemoryIOBundle(nReadPorts, nWritePorts, nReadWritePorts, log2Up(nRows), dataWidth))
   withClockAndReset(mio.clock.asClock, false.B.asAsyncReset) {
     val srmm = Module(new SRMMHelper(nReadPorts, nWritePorts, nReadWritePorts, nRows, dataWidth, latency))
     srmm.mio <> mio
   }
+
+  override def data_in: Seq[UInt] = mio.data_in
+
+  override def data_out: Seq[UInt] = mio.data_out
+
+  override def addr: Seq[UInt] = mio.addr
+
+  override def chip_select: Seq[Bool] = mio.chip_select
+
+  override def read_enable: Seq[Bool] = mio.read_enable
+
+  override def write_enable: Seq[Bool] = mio.write_enable
+
+  override def clocks: Seq[Bool] = Seq(mio.clock)
 }

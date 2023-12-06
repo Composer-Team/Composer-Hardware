@@ -48,8 +48,8 @@ class ACE(param: MasterPortParams) extends AXI4Compat(param, 16) {
   val rack = Output(Bool())
   val wack = Output(Bool())
 
-  override def initLow(): Unit = {
-    super.initLow()
+  override def initFromMasterLow(): Unit = {
+    super.initFromMasterLow()
     Seq(arsnoop, ardomain, arbar, awsnoop, awdomain, awbar, acready, crvalid, crresp, cdvalid, cddata, cdlast,
       rack, wack) foreach (_ := 0.U)
   }

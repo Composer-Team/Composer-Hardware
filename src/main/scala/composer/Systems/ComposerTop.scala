@@ -63,8 +63,8 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   val cmd_resp_axilhub = LazyModule(new FrontBusHub())
 
   // AXI-L Port - commands come through here
-  val COMM_IN = p(FrontBusProtocolKey) match {
-    case FrontBusProtocol.AXI4 | FrontBusProtocol.AXIL =>
+  val COMM_IN = (p(FrontBusProtocolKey), p(BuildModeKey)) match {
+    case (FrontBusProtocol.AXI4, _) | (FrontBusProtocol.AXIL, _) | (_, BuildMode.Simulation) =>
       val axi_master = AXI4MasterNode(Seq(AXI4MasterPortParameters(
         masters = Seq(AXI4MasterParameters(
           name = "S00_AXI",
@@ -75,7 +75,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       )))
       cmd_resp_axilhub.node.asInstanceOf[AXI4IdentityNode] := axi_master
       axi_master
-    case FrontBusProtocol.AHB =>
+    case (FrontBusProtocol.AHB, _) =>
       val ahb_master = AHBSlaveSourceNode(
         portParams = Seq(AHBMasterPortParameters(
           masters = Seq(AHBMasterParameters(
@@ -182,8 +182,8 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
   acc.module.io.cmd <> axil_hub.module.io.rocc_in
   axil_hub.module.io.rocc_out <> acc.module.io.resp
 
-  val S00_AXI = p(FrontBusProtocolKey) match {
-    case FrontBusProtocol.AXI4 | FrontBusProtocol.AXIL =>
+  val S00_AXI = (p(FrontBusProtocolKey), p(BuildModeKey)) match {
+    case (FrontBusProtocol.AXI4, _) | (FrontBusProtocol.AXIL, _) | (_, BuildMode.Simulation) =>
       val port_cast = ocl_port.asInstanceOf[AXI4MasterNode]
       val ap = port_cast.out(0)._1.params
       val S00_AXI = IO(Flipped(new AXI4Compat(MasterPortParams(
@@ -193,20 +193,12 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
         idBits = ap.idBits))))
       AXI4Compat.connectCompatSlave(S00_AXI, port_cast.out(0)._1)
       S00_AXI
-    case FrontBusProtocol.AHB =>
+    case (FrontBusProtocol.AHB, _) =>
       val port_cast = ocl_port.asInstanceOf[AHBSlaveSourceNode]
       val S00_AHB = IO(Flipped(AHBSlaveBundle(port_cast.out(0)._1.params)))
       S00_AHB.suggestName("S00_AHB")
       S00_AHB <> port_cast.out(0)._1
       S00_AHB
-  }
-
-  p(HasCoherence) match {
-    case None => ;
-    case Some(cc: CoherenceConfiguration) =>
-      val M_ACE = IO(new ACE(cc.memParams))
-      dontTouch(M_ACE)
-      outer.cmd_resp_axilhub.module.io.ace_bus.get <> M_ACE
   }
 
   if (outer.AXI_MEM.isDefined) {

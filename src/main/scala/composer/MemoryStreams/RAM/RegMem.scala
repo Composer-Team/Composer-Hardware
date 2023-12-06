@@ -29,12 +29,9 @@ class RegMem(nRows: Int, nColumns: Int, nPorts: Int, latency: Int) extends RawMo
     val out_regs = Reg(Vec(nPorts, UInt(nColumns.W)))
     val out_regs_delayed = ShiftReg(out_regs, latency - 1)
     io.data_out zip out_regs_delayed foreach { case (i, r) => i := r }
-
-
     data_out zip out_regs foreach { case (o, r) => o := r }
     (0 until nPorts) foreach { port_idx =>
       when(io.chip_select(port_idx)) {
-        //        assert(!(io.chip_select(port_idx) && io.read_enable(port_idx) && io.write_enable(port_idx)))
         when(io.read_enable(port_idx)) {
           out_regs(port_idx) := mem(io.addr(port_idx))
         }.elsewhen(io.write_enable(port_idx)) {

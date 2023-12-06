@@ -36,7 +36,7 @@ object Memory {
     val nPorts = nReadPorts + nWritePorts + nReadWritePorts
 
     if (nPorts > mostPortsSupported && (nWritePorts + nReadWritePorts > 1 || mostPortsSupported == 1)) {
-      println("Making Syncread mem becaused " + nPorts + " ports is too many for " + mostPortsSupported + " ports")
+      println("SRMM")
       val regMem = Module(new SyncReadMemMem(nReadPorts, nWritePorts, nReadWritePorts, nRows, dataWidth, latency))
       require(nPorts < 16)
       (0 until nReadPorts) foreach { idx =>
@@ -45,7 +45,9 @@ object Memory {
         regMem.mio.chip_select(ridx) := DontCare
       }
       regMem.mio
-    } else if (nPorts > mostPortsSupported) {
+    }
+    else if (nPorts > mostPortsSupported) {
+      println("Duplicated Mem")
       // duplicate the memory
       val nDuplicates = ((nPorts - 1).toFloat / (mostPortsSupported - 1)).ceil.toInt
 //      println("Duplicate memory " + nDuplicates + " times for " + nPorts + " ports")
@@ -88,9 +90,11 @@ object Memory {
         mio.data_out(reader_idx) := mems(memIdx).data_out(memRW)
       }
       mio
-    } else {
+    }
+    else {
       p(PlatformTypeKey) match {
         case PlatformType.FPGA =>
+          println("FPGA Mem")
           require(latency >= 1)
           val mio = Wire(Output(new CMemoryIOBundle(nReadPorts, nWritePorts, nReadWritePorts, log2Up(nRows), dataWidth)))
           if (latency >= 3 && nPorts <= 2) {
@@ -161,6 +165,7 @@ object Memory {
           }
           mio
         case PlatformType.ASIC =>
+          println("ASIC Mem")
           val cmem = Module(new CASICMemory(latency, dataWidth, nRows, nPorts))
           cmem.suggestName(valName.name)
           TransitName(cmem.io, cmem)
