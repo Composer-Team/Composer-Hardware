@@ -76,7 +76,7 @@ private[composer] class BRAMTDP(latency: Int,
   ComposerBuild.addSource(component)
 
   val mvR = if (latency > 1) {
-    """for (i = 0; i < $latency-1; i = i+1) begin
+    f"""for (i = 0; i < $latency-1; i = i+1) begin
       |      mem_pipe_reg1[i+1] <= mem_pipe_reg1[i];
       |      mem_pipe_reg2[i+1] <= mem_pipe_reg2[i];
       |  end
