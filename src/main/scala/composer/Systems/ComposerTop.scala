@@ -9,9 +9,9 @@ import composer.RoccHelpers.FrontBusHub
 import composer.Systems.ComposerTop._
 import composer.common.CLog2Up
 import composer.Generation.Tune.Tunable
-import composer.Platforms.{BuildModeKey, FrontBusAddressBits, FrontBusProtocol, FrontBusProtocolKey, HasDMA, PlatformType, PlatformTypeKey}
-import composer.Protocol.{ACE, AXI4Compat}
-import composer.TLManagement.{TLSourceShrinkerDynamic, TLSourceShrinkerDynamicBlocking, TLToAXI4SRW}
+import composer.Platforms._
+import composer.Protocol._
+import composer.TLManagement._
 import freechips.rocketchip.amba.ahb._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._

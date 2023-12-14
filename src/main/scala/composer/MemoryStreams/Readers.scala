@@ -11,24 +11,22 @@ import composer.Generation.Tune._
 import composer.Platforms.{ASICMemoryCompilerKey, BuildModeKey, PlatformType, PlatformTypeKey}
 import freechips.rocketchip.tilelink._
 
-class ReadChannelIO(dataBytes: Int, vlen: Int)(implicit p: Parameters) extends Bundle {
+class ReadChannelIO(val dWidth: Int)(implicit p: Parameters) extends Bundle {
   val req = Flipped(Decoupled(new ChannelTransactionBundle))
-  val channel = new DataChannelIO(dataBytes, vlen)
+  val channel = new DataChannelIO(dWidth)
 }
 
 object SequentialReader {
   private var has_warned_dp: Boolean = false
 }
 
-class SequentialReader(dataBytes: Int,
-                       vlen: Int = 1,
+class SequentialReader(val dWidth: Int,
                        val tl_bundle: TLBundle,
-                       tl_edge: TLEdgeOut,
-                       debugName: Option[String] = None)(implicit p: Parameters) extends Module {
+                       tl_edge: TLEdgeOut)(implicit p: Parameters) extends Module {
   val beatBytes = tl_edge.manager.beatBytes
   val beatBits = beatBytes * 8
   val addressBits = log2Up(tl_edge.manager.maxAddress)
-  val maxBytes = dataBytes * vlen
+  val maxBytes = dWidth / 8
   val largeTxNBeats = Math.max(p(PrefetchSourceMultiplicity), maxBytes / beatBytes)
   val nSources = tl_edge.client.endSourceId
   val prefetchRows = nSources * p(PrefetchSourceMultiplicity)
@@ -37,13 +35,14 @@ class SequentialReader(dataBytes: Int,
 
 
   // io goes to user, TL connects with AXI4
-  val io = IO(new ReadChannelIO(dataBytes, vlen))
+  val io = IO(new ReadChannelIO(dWidth))
   val tl_out = IO(new TLBundle(tl_bundle.params))
   val tl_reg = Module(new Queue(new TLBundleA(tl_out.params), 2, false, false, false))
   tl_out.a <> tl_reg.io.deq
+//  tl_out.a.bits.user(AllocateIDSignal) := true.B
 
   val channelWidthBits = maxBytes * 8
-  val storedDataWidthBytes = Math.max(beatBytes, dataBytes)
+  val storedDataWidthBytes = Math.max(beatBytes, dWidth / 8)
   val storedDataWidth = storedDataWidthBytes * 8
   val channelsPerStorage = storedDataWidthBytes / maxBytes
 
@@ -56,7 +55,7 @@ class SequentialReader(dataBytes: Int,
   val state = RegInit(s_idle)
 
   //  val buffer = Seq.fill(channelsPerBeat)(Reg(UInt(channelWidthBits.W)))
-  val channel_buffer = Wire(Vec(vlen, UInt((dataBytes * 8).W)))
+  val channel_buffer = Wire(UInt(dWidth.W))
   val channel_buffer_valid = Wire(Bool())
 
   io.channel.data.valid := channel_buffer_valid
@@ -112,26 +111,31 @@ class SequentialReader(dataBytes: Int,
   when(reset.asBool) {
     prefetch_buffers_valid.foreach(_ := false.B)
   }
-  val prefetch_buffers = Memory(prefetch_blatency, storedDataWidth, prefetchRows, 0, 0, if (hasDualPortMemory) 2 else 1)
+  val nRead = if (hasDualPortMemory) 1 else 0
+  val nWrite = if (hasDualPortMemory) 1 else 0
+  val nRW = if (hasDualPortMemory) 0 else 1
+  val prefetch_buffers = Memory(prefetch_blatency, storedDataWidth, prefetchRows, nRead, nWrite, nRW)
 
-  val (write_ready, read_ready, write_port_idx) = if (hasDualPortMemory) {
+  val (write_ready, read_ready, write_port_idx, read_port_idx) = if (hasDualPortMemory) {
     prefetch_buffers.clock := clock.asBool
-    prefetch_buffers.addr(0) := prefetch_readIdx
-    prefetch_buffers.data_in(0) := DontCare
-    prefetch_buffers.write_enable(0) := false.B
-    prefetch_buffers.read_enable(0) := true.B
-    prefetch_buffers.chip_select(0) := false.B
+    val Ridx = prefetch_buffers.getReadPortIdx(0)
+    val Widx = prefetch_buffers.getWritePortIdx(0)
+    prefetch_buffers.addr(Ridx) := prefetch_readIdx
+    prefetch_buffers.data_in(Ridx) := DontCare
+    prefetch_buffers.write_enable(Ridx) := false.B
+    prefetch_buffers.read_enable(Ridx) := true.B
+    prefetch_buffers.chip_select(Ridx) := false.B
 
-    prefetch_buffers.chip_select(1) := false.B
-    prefetch_buffers.read_enable(1) := false.B
-    prefetch_buffers.write_enable(1) := true.B
-    prefetch_buffers.data_in(1) := DontCare
-    prefetch_buffers.addr(1) := DontCare
-    (true.B, true.B, 1)
+    prefetch_buffers.chip_select(Widx) := false.B
+    prefetch_buffers.read_enable(Widx) := false.B
+    prefetch_buffers.write_enable(Widx) := true.B
+    prefetch_buffers.data_in(Widx) := DontCare
+    prefetch_buffers.addr(Widx) := DontCare
+    (true.B, true.B, Widx, Ridx)
   } else {
     prefetch_buffers.clock := clock.asBool
     val fillLevel = Reg(UInt(log2Up(prefetchRows).W))
-    when (tl_out.d.fire) {
+    when(tl_out.d.fire) {
       fillLevel := fillLevel + 1.U
     }
     prefetch_buffers.addr(0) := prefetch_readIdx
@@ -139,7 +143,7 @@ class SequentialReader(dataBytes: Int,
     prefetch_buffers.write_enable(0) := false.B
     prefetch_buffers.read_enable(0) := true.B
     prefetch_buffers.chip_select(0) := false.B
-    (true.B, !tl_out.d.valid, 0)
+    (true.B, !tl_out.d.valid, 0, 0)
   }
 
   tl_out.d.ready := atLeastOneSourceActive && write_ready
@@ -200,9 +204,9 @@ class SequentialReader(dataBytes: Int,
       when(io.req.fire) {
         addr := io.req.bits.addr
         len := io.req.bits.len
-        assert(io.req.bits.len(log2Up(beatBytes)-1, 0) === 0.U,
+        assert(io.req.bits.len(log2Up(beatBytes) - 1, 0) === 0.U,
           f"The provided length is not aligned to the data bus size. Please align to $beatBytes.\n" +
-          f"Just make sure that you always flush through the data when you're done to make the reader usable again.")
+            f"Just make sure that you always flush through the data when you're done to make the reader usable again.")
         state := s_send_mem_request
         prefetch_writeIdx := 0.U
         prefetch_readIdx := 0.U
@@ -276,28 +280,23 @@ class SequentialReader(dataBytes: Int,
       channel_buffer_q.io.deq.bits(high, low)
     })
 
-  channel_buffer := VecInit((0 until vlen) map { vidx =>
-    val high = (vidx + 1) * dataBytes * 8 - 1
-    val low = vidx * dataBytes * 8
-    channels(data_channel_read_idx)(high, low)
-  })
+  channel_buffer := channels(data_channel_read_idx)
 
-
-  val read_enable_pipeline = ShiftReg(prefetch_buffers.chip_select(0) && read_ready, prefetch_blatency)
+  val read_enable_pipeline = ShiftReg(prefetch_buffers.chip_select(read_port_idx) && read_ready, prefetch_blatency)
   val reads_in_flight = RegInit(0.U(3.W))
   val queue_occupancy = RegInit(0.U(log2Up(channel_buffer_depth + 1).W))
 
   when(prefetch_buffers_valid(prefetch_readIdx) && reads_in_flight + queue_occupancy < channel_buffer_depth.U && read_ready) {
-    prefetch_buffers.chip_select(0) := true.B
+    prefetch_buffers.chip_select(read_port_idx) := true.B
     prefetch_buffers_valid(prefetch_readIdx) := false.B
     prefetch_readIdx := prefetch_readIdx + 1.U
-    when (prefetch_readIdx === (prefetchRows - 1).U) {
+    when(prefetch_readIdx === (prefetchRows - 1).U) {
       prefetch_readIdx := 0.U
     }
   }
 
   // maintain reads in flight
-  when(prefetch_buffers.chip_select(0) && read_enable_pipeline) {}.elsewhen(prefetch_buffers.chip_select(0)) {
+  when(prefetch_buffers.chip_select(read_port_idx) && read_enable_pipeline) {}.elsewhen(prefetch_buffers.chip_select(read_port_idx)) {
     reads_in_flight := reads_in_flight + 1.U
   }.elsewhen(read_enable_pipeline) {
     reads_in_flight := reads_in_flight - 1.U
@@ -311,7 +310,7 @@ class SequentialReader(dataBytes: Int,
   }
 
   channel_buffer_q.io.enq.valid := read_enable_pipeline
-  channel_buffer_q.io.enq.bits := prefetch_buffers.data_out(0)
+  channel_buffer_q.io.enq.bits := prefetch_buffers.data_out(read_port_idx)
   channel_buffer_q.io.deq.ready := false.B
   channel_buffer_valid := channel_buffer_q.io.deq.valid
   when(io.channel.data.fire) {
@@ -327,10 +326,10 @@ class SequentialReader(dataBytes: Int,
     val tx_cycles = PerfCounter(Reg(UInt(64.W)), designObjective = new MinimizeObjective)
     val tx_counter = Reg(UInt(64.W))
     tx_counter := tx_counter + 1.U
-    when (io.req.fire) {
+    when(io.req.fire) {
       tx_counter := 0.U
     }
-    when (io.req.ready && !RegNext(io.req.ready)) {
+    when(io.req.ready && !RegNext(io.req.ready)) {
       tx_cycles := tx_counter
     }
   }

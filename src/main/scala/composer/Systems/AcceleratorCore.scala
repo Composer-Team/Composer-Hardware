@@ -14,6 +14,7 @@ import composer.Generation.Tune.Tunable
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.BundleField
 
 import java.io.File
 import scala.collection.immutable.Seq
@@ -36,8 +37,8 @@ class CustomIOWithRouting[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T
 
 class ComposerCoreIO(implicit p: Parameters) extends CustomIO[AccelRoccCommand, AccelRoccUserResponse](new AccelRoccCommand, new AccelRoccUserResponse)
 
-class DataChannelIO(dataBytes: Int, vlen: Int = 1) extends Bundle {
-  val data = Decoupled(Vec(vlen, UInt((dataBytes * 8).W)))
+class DataChannelIO(dWidth: Int) extends Bundle {
+  val data = Decoupled(UInt(dWidth.W))
   val in_progress = Output(Bool())
 }
 
@@ -139,7 +140,7 @@ class AccelCoreWrapper(val composerSystemParams: AcceleratorSystemConfig, val co
   }
 }
 
-class AcceleratorCore(outer: AccelCoreWrapper)(implicit p: Parameters) extends LazyModuleImp(outer) {
+class AcceleratorCore(val outer: AccelCoreWrapper)(implicit p: Parameters) extends LazyModuleImp(outer) {
   val composer_response_ios_ = Map.from(outer.composerSystemParams.canIssueCoreCommandsTo.map { target =>
     (target, {
       val io = IO(Flipped(Decoupled(new AccelRoccResponse())))
@@ -236,11 +237,20 @@ class AcceleratorCore(outer: AccelCoreWrapper)(implicit p: Parameters) extends L
 
   case class ScratchpadModuleChannel(requestChannel: ScratchpadMemReqPort, dataChannels: Seq[ScratchpadDataPort])
 
-  def getReaderModule(name: String,
-                      idx: Int = 0): ReaderModuleChannel = {
+  private def getMemPWidth(name: String): Int = {
+    outer.memParams.filter(_.name == name)(0).asInstanceOf[CReadChannelParams].dataBytes * 8
+  }
+
+  def getReaderModule(name: String, idx: Int = 0): ReaderModuleChannel = {
     val a = getReaderModules(name, Some(idx))
     ReaderModuleChannel(a._1(0), a._2(0))
   }
+
+  //  def getReaderModule(name: String, idx: Int = 0): ReaderModuleChannel[UInt] = {
+  //    val params = outer.memParams.filter(_.name == name)(0).asInstanceOf[CReadChannelParams]
+  //    val a = getReaderModules(name, UInt((params.dataBytes * 8).W), Some(idx))
+  //    ReaderModuleChannel(a._1(0), a._2(0))
+  //  }
 
   /**
    * Declare reader module implementations associated with a certain channel name.
@@ -251,23 +261,22 @@ class AcceleratorCore(outer: AccelCoreWrapper)(implicit p: Parameters) extends L
    *         commands in software.
    */
   def getReaderModules(name: String,
-                       idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
+                                  idx: Option[Int] = None):
+  (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = {
     val params = outer.memParams.filter(_.name == name)(0).asInstanceOf[CReadChannelParams]
     val mod = idx match {
       case Some(id_unpack) =>
         val clients = getTLClients(name, outer.readers)
         List(Module(new SequentialReader(
-          dataBytes = params.dataBytes,
-          vlen = params.vlen,
+          params.dataBytes * 8,
           tl_bundle = clients(id_unpack).out(0)._1,
-          tl_edge = clients(id_unpack).out(0)._2, debugName = Some(name))))
+          tl_edge = clients(id_unpack).out(0)._2)))
       case None =>
         getTLClients(name, outer.readers).map(tab_id =>
           Module(new SequentialReader(
-            dataBytes = params.dataBytes,
-            vlen = params.vlen,
+            params.dataBytes * 8,
             tl_bundle = tab_id.out(0)._1,
-            tl_edge = tab_id.out(0)._2, debugName = Some(name))))
+            tl_edge = tab_id.out(0)._2)))
     }
     //noinspection DuplicatedCode
     mod foreach { m =>
@@ -447,6 +456,7 @@ class AcceleratorBlackBoxCore(outer: AccelCoreWrapper,
   class VerilogPort(nm: String, val dir: Boolean, val dim: Seq[Int], val sources: Seq[String]) {
     val name = nm.strip().stripSuffix("_")
   }
+
   object VerilogPort {
     def apply(str: String, bool: Boolean, value: Seq[Int], value1: Seq[String]): VerilogPort = {
       new VerilogPort(str, bool, value, value1)
@@ -495,6 +505,7 @@ class AcceleratorBlackBoxCore(outer: AccelCoreWrapper,
         case Some(t) => t + "_" + s.split("\\.").takeRight(structureDepth).mkString("_")
       }
     }
+
     a match {
       case v: Vec[_] =>
         v.zipWithIndex.flatMap { case (data, _) =>
@@ -523,10 +534,6 @@ class AcceleratorBlackBoxCore(outer: AccelCoreWrapper,
     a.zip(ps).flatMap { case (mv: MixedVec[T], param: CChannelParams) =>
       val portName = param.name + "_"
       // second dimension corresponds to channel number
-      val vectorLen = param match {
-        case r: CReadChannelParams => r.vlen
-        case _ => 1
-      }
 
       val channelLen = param.nChannels
 
@@ -548,7 +555,7 @@ class AcceleratorBlackBoxCore(outer: AccelCoreWrapper,
                 case vec: Vec[_] =>
                   val fieldNames = getRecursiveNames(vec).map(_._2)
                   val sources = fieldNames.map(fixBase)
-                  Seq(VerilogPort(base, primaryDirection, Seq(vectorLen, vec(0).getWidth), sources))
+                  Seq(VerilogPort(base, primaryDirection, Seq(1, vec(0).getWidth), sources))
                 case _ =>
                   getStructureAsPorts(d.bits, primaryDirection, yieldSubfieldOnlyWithPrefix = Some(base))
               })
@@ -587,10 +594,10 @@ class AcceleratorBlackBoxCore(outer: AccelCoreWrapper,
   def getVerilogPorts(m: Iterable[VerilogPort]): String = {
     m.map { a =>
       val dim = a.dim.map { b =>
-        if (b == 1) "" else s"[${b-1}:0]"
+        if (b == 1) "" else s"[${b - 1}:0]"
       }.reverse
       val dir = if (a.dir == OUTPUT) "output" else "input"
-      s"  $dir ${dim.head} ${a.name}${(if (dim.tail.isEmpty) "" else " " ) + dim.tail.mkString("")}"
+      s"  $dir ${dim.head} ${a.name}${(if (dim.tail.isEmpty) "" else " ") + dim.tail.mkString("")}"
     }.mkString(",\n")
   }
 
@@ -598,7 +605,7 @@ class AcceleratorBlackBoxCore(outer: AccelCoreWrapper,
     m.flatMap { a =>
       val dir = if (a.dir == OUTPUT) "output" else "input"
       val finalDim = a.dim.last
-      val dstr = if (finalDim == 1) "\t" else s"[${finalDim-1}:0]"
+      val dstr = if (finalDim == 1) "\t" else s"[${finalDim - 1}:0]"
       a.sources.map { src =>
         f"  $dir $dstr ${fixBase(src)}"
       }
@@ -606,7 +613,10 @@ class AcceleratorBlackBoxCore(outer: AccelCoreWrapper,
   }
 
   def getVerilogModulePortInstantiation(m: Iterable[VerilogPort]): (String, String) = {
-    def safeMkString(b: String, d: String, additive: String): String = if (b.isEmpty) d else {if (d.isEmpty) b else b + additive + d}
+    def safeMkString(b: String, d: String, additive: String): String = if (b.isEmpty) d else {
+      if (d.isEmpty) b else b + additive + d
+    }
+
     m.map { a =>
       if (a.sources.length == 1) {
         // then just wire the port directly
@@ -616,7 +626,7 @@ class AcceleratorBlackBoxCore(outer: AccelCoreWrapper,
         // as the IO
         val wireName = a.name + "_wire"
         val init = s"  .${a.name}($wireName)"
-        val wireDeclaration = f"  wire [${a.dim.head-1}:0] $wireName${a.dim.tail.map(d => "[" + (d-1) + ":0]").mkString("")};"
+        val wireDeclaration = f"  wire [${a.dim.head - 1}:0] $wireName${a.dim.tail.map(d => "[" + (d - 1) + ":0]").mkString("")};"
         val wireInit = a.sources.zipWithIndex.map { case (src, idx) =>
           s"  assign $wireName[$idx] = $src;"
         }.mkString("\n")

@@ -70,15 +70,16 @@ class TLToAXI4SRWImpl(outer: TLToAXI4SRW) extends LazyModuleImp(outer) {
       // Fan out the ARW channel to AR and AW
       val axiLen = (UIntToOH(in.a.bits.size) >> CLog2Up(out_width / 8)).asUInt - 1.U
       if (isWrite) {
-
         // use queues to obey the irrevocability of AXI4 whereas TL components aren't
         // irrevocable
         val aw_queue = Module(new Queue(new AXI4BundleAW(out.params), entries=4))
         val w_queue = Module(new Queue(new AXI4BundleW(out.params), entries=4))
+        val wBeatCounter = RegInit(0.U(axiLen.getWidth.W))
+        val doingLongWriteTx = RegInit(false.B)
 
         aw_queue.io.enq.bits.id := in.a.bits.source
         aw_queue.io.enq.bits.addr := edgeIn.address(in.a.bits)
-        aw_queue.io.enq.bits.burst := 1.U // INCR
+        aw_queue.io.enq.bits.burst := AXI4Parameters.BURST_INCR
         aw_queue.io.enq.bits.cache := 0.U
         aw_queue.io.enq.bits.len := axiLen
         aw_queue.io.enq.bits.size := CLog2Up(out_width / 8).U
@@ -88,21 +89,31 @@ class TLToAXI4SRWImpl(outer: TLToAXI4SRW) extends LazyModuleImp(outer) {
         aw_queue.io.enq.bits.user := in.a.bits.user
         // Currently only support PutFull, so all the data will be
         // present in the same beat
-        w_queue.io.enq.bits.last := true.B
+        w_queue.io.enq.bits.last := (axiLen === 0.U) || (doingLongWriteTx && wBeatCounter === axiLen)
+        when (doingLongWriteTx && w_queue.io.enq.fire) {
+          wBeatCounter := wBeatCounter + 1.U
+          when (wBeatCounter === axiLen) {
+            wBeatCounter := 0.U
+            doingLongWriteTx := false.B
+          }
+        }
         w_queue.io.enq.bits.user := in.a.bits.user
         w_queue.io.enq.bits.data := in.a.bits.data
         w_queue.io.enq.bits.strb := in.a.bits.mask
-
-        aw_queue.io.enq.valid := in.a.valid && w_queue.io.enq.ready
-        w_queue.io.enq.valid := in.a.valid && aw_queue.io.enq.ready
-        in.a.ready := aw_queue.io.enq.ready && w_queue.io.enq.ready
+        aw_queue.io.enq.valid := in.a.valid && w_queue.io.enq.ready && !doingLongWriteTx
+        w_queue.io.enq.valid := in.a.valid && (aw_queue.io.enq.ready || doingLongWriteTx)
+        in.a.ready := (aw_queue.io.enq.ready || doingLongWriteTx) && w_queue.io.enq.ready
+        when (aw_queue.io.enq.fire && axiLen > 0.U) {
+          doingLongWriteTx := true.B
+          wBeatCounter := wBeatCounter + 1.U
+        }
 
         out.aw <> aw_queue.io.deq
         out.w <> w_queue.io.deq
 
         in.d.bits := edgeIn.AccessAck(
           toSource = out.b.bits.id,
-          lgSize = CLog2Up(out_width / 8).U,
+          lgSize = 0.U,
           denied = out.b.bits.resp =/= AXI4Parameters.RESP_OKAY)
         in.d.valid := out.b.valid
         out.b.ready := in.d.ready

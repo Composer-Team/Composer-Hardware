@@ -6,6 +6,7 @@ import chisel3._
 import chisel3.util._
 import composer._
 import freechips.rocketchip.subsystem.ExtMem
+import freechips.rocketchip.util.{DataKey, SimpleBundleField}
 
 /**
  * Bundle used to communicate memory requests between user and memory manager
@@ -76,7 +77,6 @@ trait CChannelParams {
  */
 case class CReadChannelParams(name: String,
                               dataBytes: Int,
-                              vlen: Int = 1,
                               nChannels: Int = 1,
                               maxInFlightTxs: Int = 8) extends CChannelParams {
   require(maxInFlightTxs > 1, s"Max In Flight Transactions must be greater than 1. Got: $maxInFlightTxs")

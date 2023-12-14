@@ -199,10 +199,9 @@ class ScratchpadImpl(csp: CScratchpadParams,
     val tx_ready = p(PlatformTypeKey) match {
       case PlatformType.FPGA | PlatformType.ASIC =>
         val reader = Module(new SequentialReader(
-          swWordSize * datasPerCacheLine / 8, 1,
+          swWordSize * datasPerCacheLine,
           tl_edge = outer.mem_reader.get.out(0)._2,
-          tl_bundle = outer.mem_reader.get.out(0)._1,
-          debugName = Some(s"Scratchpad${csp.name}"))(p.alterPartial {
+          tl_bundle = outer.mem_reader.get.out(0)._1)(p.alterPartial {
           case PrefetchSourceMultiplicity => 4
         }))
         reader.tl_out <> outer.mem_reader.get.out(0)._1
@@ -213,7 +212,7 @@ class ScratchpadImpl(csp: CScratchpadParams,
           idxCounter := req.init.bits.scAddr
         }
         loader.io.cache_block_in.valid := reader.io.channel.data.valid
-        loader.io.cache_block_in.bits.dat := reader.io.channel.data.bits(0)
+        loader.io.cache_block_in.bits.dat := reader.io.channel.data.bits
         loader.io.cache_block_in.bits.idxBase := idxCounter
         reader.io.channel.data.ready := loader.io.cache_block_in.ready
         reader.io.req.ready

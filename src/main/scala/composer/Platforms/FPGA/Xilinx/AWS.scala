@@ -28,7 +28,7 @@ private[composer] class AWS_sole()
           // rename composer.v to composer.sv
           val composer_sv = os.Path(ComposerBuild.composerGenDir) / "composer.sv"
           val composer_v = os.Path(ComposerBuild.composerGenDir) / "composer.v"
-          os.move(composer_v, composer_sv)
+          os.copy.over(composer_v, composer_sv)
         }
   })
 

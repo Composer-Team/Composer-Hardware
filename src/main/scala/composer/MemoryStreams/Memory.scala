@@ -101,6 +101,7 @@ object Memory {
             val memoryWidth = dataWidth // XilinxBRAMTDP.get_bram_width(dataWidth)
             val banks = 1 // (dataWidth.toFloat / memoryWidth).ceil.toInt
             val rowRoundPow2 = nRows
+            val isSimple = nPorts == 2 && nReadPorts == 1 && nWritePorts == 1
 
             val mems = Seq.tabulate(banks) { bank_idx =>
               val high_idx = {
@@ -126,6 +127,26 @@ object Memory {
                 cmem.io.WEB := mio.write_enable(0)
                 mio.data_out(0) := cmem.io.O
                 cmem
+              } else if (isSimple) {
+                val cmem = Module(new BRAMSDP(
+                  latency - 2,
+                  high_idx - low_idx + 1,
+                  rowRoundPow2,
+                  debugName = debugName.getOrElse(valName.name)))
+                cmem.suggestName(valName.name)
+                val ridx = mio.getReadPortIdx(0)
+                val widx = mio.getWritePortIdx(0)
+                cmem.io.I := mio.data_in(widx)(high_idx, low_idx)
+                cmem.io.CE := mio.clock.asBool
+                cmem.io.A_write := mio.addr(widx)
+                cmem.io.CSB_write := mio.chip_select(widx)
+                cmem.io.WEB := mio.write_enable(widx)
+                cmem.io.OEB := mio.read_enable(ridx)
+                mio.data_out(ridx) := cmem.io.O
+                mio.data_out(widx) := DontCare
+                cmem.io.A_read := mio.addr(ridx)
+                cmem.io.CSB_read := mio.chip_select(ridx)
+                cmem
               } else {
                 val cmem = Module(new BRAMTDP(
                   latency - 2,
@@ -150,11 +171,11 @@ object Memory {
               }
               (mem, bank_idx)
             }
-
-            mio.data_out(0) := Cat(mems.map(_._1.data_out(0)).reverse)
-            if (nPorts == 2) {
-              mio.data_out(1) := Cat(mems.map(_._1.data_out(1)).reverse)
-            }
+//            mio.data_out(0) := Cat(mems.map(_._1.data_out(0)).reverse)
+//            if (isSimple) {
+//            } else if (nPorts == 2) {
+//              mio.data_out(1) := Cat(mems.map(_._1.data_out(1)).reverse)
+//            }
           } else {
             val cmem = Module(new SyncReadMemMem(nReadPorts, nWritePorts, nReadWritePorts, nRows, dataWidth, latency))
             mio <> cmem.mio

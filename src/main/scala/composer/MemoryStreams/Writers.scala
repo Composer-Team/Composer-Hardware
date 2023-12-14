@@ -3,7 +3,7 @@ package composer.MemoryStreams
 import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config._
-import composer.common.CLog2Up
+import composer.PrefetchSourceMultiplicity
 import freechips.rocketchip.tilelink._
 
 class WriterDataChannelIO(val dWidth: Int) extends Bundle {
@@ -26,123 +26,128 @@ class SequentialWriter(nBytes: Int,
                        val tl_outer: TLBundle,
                        edge: TLEdgeOut)
                       (implicit p: Parameters) extends Module {
-  private val nBits = nBytes * 8
-  // get TL parameters from edge
+  require(isPow2(nBytes))
   private val beatBytes = tl_outer.params.dataBits / 8
   private val addressBits = tl_outer.params.addressBits
   private val addressBitsChop = addressBits - log2Up(beatBytes)
-  private val logNBytes = CLog2Up(nBytes)
+  private val nSources = edge.master.endSourceId
   val io = IO(new SequentialWriteChannelIO(nBytes))
   val tl_out = IO(new TLBundle(tl_outer.params))
-
-  private val s_idle :: s_data :: s_mem :: Nil = Enum(3)
-  private val state = RegInit(s_idle)
-
-  private val tx_inactive :: tx_inProgress :: Nil = Enum(2)
-  private val nSources = edge.master.endSourceId
-  private val txIDBits = log2Up(nSources)
-  private val txStates = RegInit(VecInit(Seq.fill(nSources)(tx_inactive)))
-  private val sourceSelected = PriorityEncoder(txStates map (_ === tx_inactive))
-
-  private val haveTransactionToDo = txStates.map(_ === tx_inProgress).reduce(_ || _)
-  private val haveAvailableTxSlot = txStates.map(_ === tx_inactive).reduce(_ || _)
-
-  io.channel.isFlushed := !haveTransactionToDo
-
-  require(nBytes >= 1)
-  require(nBytes <= beatBytes)
-  require(isPow2(nBytes))
-
-  private val wordsPerBeat = beatBytes / nBytes
-
-  private val addr = Reg(UInt(addressBitsChop.W))
-  private val req_tx_max_length_beats = (1L << addressBits) / nBytes
-  private val req_tx_mlb_bits = log2Up(req_tx_max_length_beats)
-  private val req_len = Reg(UInt(req_tx_mlb_bits.W))
-
-  private val nextAddr = addr + 1.U
-
-  private val idx = Reg(UInt(log2Ceil(wordsPerBeat).W))
-
-  private val dataBuf = Reg(Vec(wordsPerBeat, UInt(nBits.W)))
-  private val dataValid = Reg(UInt(wordsPerBeat.W))
-
-  private val wdata = dataBuf.asUInt
-
-  private val earlyFinish = RegInit(false.B)
-
-  tl_out.a.bits := DontCare
+  io.req.ready := false.B
+  io.channel.data.ready := false.B
   tl_out.a.valid := false.B
-  // handle TileLink 'd' interface (response from slave)
-  tl_out.d.ready := haveTransactionToDo
-  when(tl_out.d.fire) {
-    txStates(tl_out.d.bits.source) := tx_inactive
-  }
+  tl_out.a.bits := DontCare
 
-  switch(state) {
-    is(s_idle) {
+  val burst_queue = Module(new Queue(
+    UInt(tl_outer.params.dataBits.W),
+    p(PrefetchSourceMultiplicity) * nSources,
+    pipe = true))
+  burst_queue.io.deq.ready := tl_out.a.fire
+
+  // keep two different counts so that we can keep enqueueing while bursting
+  val burst_progress_count = RegInit(0.U(log2Up(p(PrefetchSourceMultiplicity)).W))
+  val burst_occupancy = RegInit(0.U((log2Up(p(PrefetchSourceMultiplicity) * edge.master.endSourceId) + 1).W))
+
+  val req_len, req_addr = RegInit(0.U(addressBitsChop.W))
+
+  val sourceBusyBits = Reg(Vec(edge.master.endSourceId, Bool()))
+  when(reset.asBool) {
+    sourceBusyBits.foreach(_ := false.B)
+  }
+  val sourcesInProgress = sourceBusyBits.fold(false.B)(_ || _)
+  val hasAvailableSource = (~sourceBusyBits.asUInt).asBools.fold(false.B)(_ || _)
+  val nextSource = PriorityEncoder(~sourceBusyBits.asUInt)
+
+  val burst_inProgress = RegInit(false.B)
+  val sourceInProgress = Reg(UInt(tl_out.params.sourceBits.W))
+  val addrInProgress = Reg(UInt(addressBits.W))
+  require(isPow2(p(PrefetchSourceMultiplicity)))
+
+  io.busy := true.B
+  io.channel.isFlushed := sourceBusyBits.asUInt === 0.U
+  when(req_len === 0.U) {
+    when(!sourcesInProgress) {
+      io.busy := false.B
+      io.req.ready := true.B
       when(io.req.fire) {
-        if (nBytes == beatBytes) {
-          idx := 0.U
-        } else {
-          idx := io.req.bits.addr(log2Ceil(beatBytes), logNBytes)
-        }
-        req_len := io.req.bits.len >> logNBytes
-        if (logNBytes > 0) {
-          assert(io.req.bits.len(logNBytes - 1, 0) === 0.U,
-            s"Currently support only requests that are divisble by the bus width(${1 << logNBytes}B).\n" +
-              s"If you need this, let me know.")
-        }
-        addr := io.req.bits.addr >> log2Up(beatBytes)
-        dataValid := 0.U
-
-        if (nBytes > 1) {
-          assert(io.req.bits.addr(log2Ceil(nBytes) - 1, 0) === 0.U,
-            "FixedSequentialWriteChannel: Unaligned request to addr(%x), required alignment to %d\n", io.req.bits.addr, log2Ceil(nBytes).U)
-        }
-        // wait for data from the core
-        state := s_data
+        req_len := io.req.bits.len >> log2Up(beatBytes)
+        req_addr := io.req.bits.addr >> log2Up(beatBytes)
       }
     }
-    is(s_data) {
-      // when the core data channel fires, put the data in the write
-      // buffer and update buffer maintance state
-      when(io.channel.data.fire) {
-        dataBuf(idx) := io.channel.data.bits
-        dataValid := dataValid | UIntToOH(idx)
-        idx := idx + 1.U
-        req_len := req_len - 1.U
-        when(idx === (wordsPerBeat - 1).U || req_len === 1.U) {
-          state := s_mem
-        }
+  }
+  when(burst_inProgress) {
+    tl_out.a.valid := true.B
+    assert(burst_queue.io.deq.valid)
+    tl_out.a.bits := edge.Put(
+      sourceInProgress,
+      addrInProgress,
+      log2Up(p(PrefetchSourceMultiplicity) * beatBytes).U,
+      burst_queue.io.deq.bits)._2
+    when(tl_out.a.fire) {
+      burst_progress_count := burst_progress_count + 1.U
+      when(burst_progress_count === (p(PrefetchSourceMultiplicity) - 1).U) {
+        // try to allocate
+        burst_inProgress := false.B
       }
     }
-    is(s_mem) {
-      tl_out.a.valid := haveAvailableTxSlot
-      tl_out.a.bits := edge.Put(
-        fromSource = sourceSelected,
-        toAddress = Cat(addr, 0.U(log2Up(beatBytes).W)),
-        lgSize = log2Ceil(beatBytes).U,
-        data = wdata)._2
+  }.otherwise {
+    val isSmall = req_len < p(PrefetchSourceMultiplicity).U
+    val burstSize = Mux(isSmall,
+      1.U,
+      p(PrefetchSourceMultiplicity).U)
+    tl_out.a.valid := hasAvailableSource && burst_occupancy >= burstSize && req_len > 0.U
+    tl_out.a.bits := edge.Put(
+      nextSource,
+      Cat(req_addr, 0.U(log2Up(beatBytes).W)),
+      Mux(isSmall, log2Up(beatBytes).U, log2Up(beatBytes * p(PrefetchSourceMultiplicity)).U),
+      burst_queue.io.deq.bits)._2
+    when(tl_out.a.fire) {
+      sourceBusyBits(nextSource) := true.B
+      sourceInProgress := nextSource
+      addrInProgress := Cat(req_addr, 0.U(log2Up(beatBytes).W))
+      burst_progress_count := burst_progress_count + 1.U
+      req_len := req_len - burstSize
+      req_addr := req_addr + burstSize
+      when(!isSmall) {
+        burst_inProgress := true.B
 
-      // handle TileLink 'a' interface (request to slave)
-      when(tl_out.a.fire) {
-        txStates(sourceSelected) := tx_inProgress
-        addr := nextAddr
-        idx := 0.U
-        dataValid := 0.U
-        when(req_len === 0.U || earlyFinish) {
-          state := s_idle
-          earlyFinish := false.B
-        }.otherwise {
-          state := s_data
-        }
       }
     }
   }
 
-  io.req.ready := state === s_idle
-  io.channel.data.ready := state === s_data
-  io.busy := state =/= s_idle
+  when(burst_queue.io.enq.fire) {
+    when(!burst_queue.io.deq.fire) {
+      burst_occupancy := burst_occupancy + 1.U
+    }
+  }.otherwise {
+    when(burst_queue.io.deq.fire) {
+      burst_occupancy := burst_occupancy - 1.U
+    }
+  }
+
+  if (nBytes == beatBytes) {
+    io.channel.data <> burst_queue.io.enq
+  } else if (nBytes < beatBytes) {
+    val beatLim = beatBytes / nBytes
+    val beatBuffer = Reg(Vec(beatLim, UInt((nBytes * 8).W)))
+    val beatCounter = RegInit(0.U(log2Up(beatLim).W))
+    io.channel.data.ready := burst_queue.io.enq.ready
+    burst_queue.io.enq.valid := false.B
+    burst_queue.io.enq.bits := Cat(beatBuffer.reverse)
+    when(io.channel.data.fire) {
+      beatBuffer(beatCounter) := io.channel.data.bits
+      when(beatCounter === (beatLim - 1).U) {
+        burst_queue.io.enq.valid := true.B
+        beatCounter := 0.U
+      }
+    }
+  } else {
+    require(requirement = false, "Unexpected")
+  }
+
+  tl_out.d.ready := true.B
+  when(tl_out.d.fire) {
+    sourceBusyBits(tl_out.d.bits.source) := false.B
+  }
 }
 

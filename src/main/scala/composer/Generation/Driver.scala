@@ -120,10 +120,10 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
       val pth = args.filter(a => a.length > 9 && a.substring(0, 9) == "--target=")(0).substring(9)
       Path(pth)
     } else Path(ComposerBuild.composerGenDir)
-    os.walk(gsrc_dir).foreach { file =>
-      val isDirectory = os.isDir(file)
-      if (file.baseName.nonEmpty && file.baseName.charAt(0) != '.' && !isDirectory) os.remove.all(file)
-    }
+//    os.walk(gsrc_dir).foreach { file =>
+//      val isDirectory = os.isDir(file)
+//      if (file.baseName.nonEmpty && file.baseName.charAt(0) != '.' && !isDirectory) os.remove.all(file)
+//    }
     os.makeDir.all(gsrc_dir)
     val targetDir = gsrc_dir / "composer.build"
     val configWithBuildMode = new Config(config.alterPartial {
