@@ -3,39 +3,128 @@ package composer.Systems
 import chipsalliance.rocketchip.config._
 import chisel3.util._
 import composer._
-import composer.Generation.{ConstraintGeneration, LazyModuleWithSLRs}
+import composer.Generation._
+import composer.MemoryStreams._
 import composer.RoccHelpers._
 import composer.common._
 import composer.Platforms._
 import composer.Platforms.FPGA._
 import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.tilelink._
 
+object ComposerSystem {
+}
 
 class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: Int, val canBeIntaCoreCommandEndpoint: Boolean, val acc: ComposerAcc)(implicit p: Parameters) extends LazyModuleWithSLRs {
   val nCores = systemParams.nCores
   val memParams = systemParams.memoryChannelParams
+  val blockBytes = p(CacheBlockBytes)
   val distributeCores = ConstraintGeneration.canDistributeOverSLRs()
   implicit val baseName = systemParams.name
-  val cores: List[(Int, AccelCoreWrapper)] = List.tabulate(nCores) { core_idx: Int =>
-    p(PlatformTypeKey) match {
-      case PlatformType.ASIC => (core_idx, LazyModule(new AccelCoreWrapper(systemParams, core_idx, system_id, this)))
-      case PlatformType.FPGA =>
-        (core_idx % p(PlatformNumSLRs), LazyModuleWithSLR(new AccelCoreWrapper(systemParams, core_idx, system_id, this), slr_id = core_idx % p(PlatformNumSLRs)))
-      case _ => throw new Exception()
+  val readers = (0 until nCores) map { core_id =>
+    memParams.filter(_.isInstanceOf[CReadChannelParams]).map { para =>
+      val param: CReadChannelParams = para.asInstanceOf[CReadChannelParams]
+      (param.name, List.tabulate(para.nChannels) { i =>
+        TLClientNode(List(TLMasterPortParameters.v1(
+          clients = List(TLMasterParameters.v1(
+            name = s"ReadChannel_sys${system_id}_core${core_id}_${para.name}$i",
+            supportsGet = TransferSizes(blockBytes, blockBytes * p(PrefetchSourceMultiplicity)),
+            supportsProbe = TransferSizes(blockBytes, blockBytes * p(PrefetchSourceMultiplicity)),
+            sourceId = IdRange(0, param.maxInFlightTxs)
+          )))))
+      })
     }
   }
+  val writers = (0 until nCores) map { core_id =>
+    memParams.filter(_.isInstanceOf[CWriteChannelParams]).map { mcp =>
+      val para = mcp.asInstanceOf[CWriteChannelParams]
+      (para.name, List.tabulate(para.nChannels) { i =>
+        TLClientNode(List(TLMasterPortParameters.v1(
+          List(TLMasterParameters.v1(
+            name = s"WriteChannel_sys${system_id}_core${core_id}_${para.name}$i",
+            sourceId = IdRange(0, para.maxInFlightTxs),
+            supportsPutFull = TransferSizes(1, p(CacheBlockBytes)),
+            supportsPutPartial = TransferSizes(1, p(CacheBlockBytes)),
+            supportsProbe = TransferSizes(1, p(CacheBlockBytes)))))))
+      })
+    }
+  }
+  val scratch_mod = Seq.fill(nCores)(memParams.filter(_.isInstanceOf[CScratchpadParams]).map(_.asInstanceOf[CScratchpadParams]).map {
+    param =>
+      lazy val mod = LazyModule(param.make)
+      mod.suggestName(param.name)
+      (param.name, mod)
+  })
+  val readerNodes = (0 until nCores).map(coreIdx =>
+    (readers(coreIdx).map(_._2) :+ scratch_mod(coreIdx).map(_._2.mem_reader).filter(_.isDefined).map(_.get)).flatten)
+  val writerNodes = (0 until nCores).map(coreIdx =>
+    (writers(coreIdx).map(_._2) :+ scratch_mod(coreIdx).map(_._2.mem_writer).filter(_.isDefined).map(_.get)).flatten)
+  // these go to external memory
+  val externalCoreCommNodes = (0 until nCores).map(coreIdx => Map.from(systemParams.canIssueCoreCommandsTo.map { targetSys =>
+    (targetSys, TLClientNode(Seq(TLMasterPortParameters.v1(clients = Seq(TLMasterParameters.v1(
+      s"${systemParams.name}_core${coreIdx}_to$targetSys",
+      supportsProbe = TransferSizes(1 << log2Up(AccelRoccCommand.packLengthBytes)),
+      supportsPutFull = TransferSizes(1 << log2Up(AccelRoccCommand.packLengthBytes))
+    ))))))
+  }))
+  val intraCoreMemSlaveNodes = memParams.filter(_.isInstanceOf[CIntraCoreMemoryPortIn]).map {
+    r =>
+      val mp = r.asInstanceOf[CIntraCoreMemoryPortIn]
+      val memManagerParams = Seq.fill(mp.nChannels)(TLSlavePortParameters.v1(
+        managers = Seq(TLSlaveParameters.v1(
+          address = Seq(AddressSet(0, mp.nDatas.intValue() * mp.dataWidthBits.intValue() / 8 - 1)),
+          regionType = RegionType.IDEMPOTENT,
+          supportsPutFull = TransferSizes(mp.dataWidthBits.intValue() / 8)
+        )), beatBytes = mp.dataWidthBits.intValue() / 8
+      ))
+      val xbar_sp_pairs = memManagerParams map { mm_param =>
+        val intraCoreMemXbar = TLXbar()
+        val sp = LazyModule(new IntraCoreScratchpad(
+          asMemorySlave = mm_param,
+          dataWidthBits = mp.dataWidthBits,
+          nDatas = mp.nDatas,
+          latency = mp.latency,
+          nPorts = 1,
+          readOnly = mp.readOnly))
+        sp.mem_slave_node := intraCoreMemXbar
+        (intraCoreMemXbar, sp)
+      }
+      val xbars = xbar_sp_pairs.map(_._1)
+      val sps = xbar_sp_pairs.map(_._2)
 
-  // we want to avoid high-degree xbars. Recursively make multi-stage xbar network
-  // add an extra buffer for cores off the main SLR
+      (mp.name, xbars, mp, sps)
+  }
+  val intraCoreMemMasters = memParams.filter(_.isInstanceOf[CIntraCoreMemoryPortOut]).map {
+    r =>
+      val mp = r.asInstanceOf[CIntraCoreMemoryPortOut]
+      val (otherSystemParams, otherSPParams) = try {
+        val otherS = p(AcceleratorSystems).filter(_.name == mp.toSystem)(0)
+        val otherSP = otherS.memoryChannelParams.filter(_.name == mp.toMemoryPort)(0)
+        (otherS, otherSP.asInstanceOf[CIntraCoreMemoryPortIn])
+      } catch {
+        case a: Exception =>
+          System.err.println("Could not properly find system and memory port given by outward memory port params.")
+          throw a
+      }
+      val memMasters = Seq.fill(otherSystemParams.nCores, otherSPParams.nChannels)(TLClientNode(Seq(TLMasterPortParameters.v1(
+        clients = Seq(TLMasterParameters.v1(
+          f"intraCoreMemPortOut_${mp.toSystem}_to_${mp.toMemoryPort}",
+          supportsProbe = TransferSizes(otherSPParams.dataWidthBits.intValue() / 8),
+          supportsPutFull = TransferSizes(otherSPParams.dataWidthBits.intValue() / 8)
+        ))))))
+      (mp, memMasters, otherSPParams)
+  }
+
+
   val Seq(r_nodes, w_nodes) = {
     def recursivelyReduceXBar(grp: Seq[TLNode], inc: Int = 0, slr_id: Int): Seq[TLIdentityNode] = {
       def help(a: Seq[Seq[TLNode]]): Seq[TLNode] = {
         a.map { r =>
-          val memory_xbar = LazyModuleWithSLR(new TLXbar(), slr_id = slr_id, requestedName = Some(s"memory_xbar_${SLRHelper.getSLRFromIdx(slr_id)}"))
+          val memory_xbar = LazyModuleWithFloorplan(new TLXbar(), slr_id = slr_id, requestedName = Some(s"memory_xbar_${SLRHelper.getSLRFromIdx(slr_id)}"))
 
           r.foreach(memory_xbar.node := _)
-          val memory_xbar_buffer = LazyModuleWithSLR(new TLBuffer(), slr_id = slr_id, requestedName = Some(s"memory_xbar_buffer_slr${SLRHelper.getSLRFromIdx(slr_id)}"))
+          val memory_xbar_buffer = LazyModuleWithFloorplan(new TLBuffer(), slr_id = slr_id, requestedName = Some(s"memory_xbar_buffer_slr${SLRHelper.getSLRFromIdx(slr_id)}"))
 
           memory_xbar_buffer.node := memory_xbar.node
           memory_xbar_buffer.node
@@ -56,8 +145,12 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
       }
     }
 
-    val reads_per_slr = cores.groupBy(_._1).map(q =>  (q._1, q._2.flatMap(_._2.readerNodes)))
-    val writes_per_slr = cores.groupBy(_._1).map(q => (q._1, q._2.flatMap(_._2.writerNodes)))
+
+    def getNodesBySLR(q: IndexedSeq[List[TLClientNode]]): Map[Int, IndexedSeq[TLClientNode]] =
+      q.zipWithIndex.groupBy(pr => core2slr(pr._2)).map[Int, IndexedSeq[TLClientNode]](p => (p._1, p._2.flatMap(_._1)))
+
+    val reads_per_slr = getNodesBySLR(readerNodes)
+    val writes_per_slr = getNodesBySLR(writerNodes)
 
     val endpoints = Seq(reads_per_slr, writes_per_slr) map { nodes =>
       if (distributeCores) {
@@ -68,7 +161,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
             reduction
           } else {
             // route across the SLR and give to a buffer
-            val canal = LazyModuleWithSLR(new TLXbar(), slr_id = slr, requestedName = Some(s"final_slrReduction_xbar_${SLRHelper.getSLRFromIdx(slr)}"))
+            val canal = LazyModuleWithFloorplan(new TLXbar(), slr_id = slr, requestedName = Some(s"final_slrReduction_xbar_${SLRHelper.getSLRFromIdx(slr)}"))
             reduction foreach { a => canal.node := a }
             val sbuf = LazyModule(new TLBuffer())
             sbuf.suggestName(s"final_slrReduction_buffer_slr${SLRHelper.getSLRFromIdx(slr)}")
@@ -93,7 +186,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
   //  val canIssueCoreCommands = systemParams.canIssueCoreCommandsTo.nonEmpty
   val outgoingCmdXBars = Map.from(systemParams.canIssueCoreCommandsTo.map { target =>
     val xbar = LazyModule(new TLXbar())
-    cores.map(_._2.externalCoreCommNodes(target)).foreach { core_target_source => xbar.node := TLBuffer() := core_target_source }
+    externalCoreCommNodes.map(_(target)).foreach { core_target_source => xbar.node := TLBuffer() := core_target_source }
     (target, xbar.node)
   })
   // cores have their own independent command client nodes

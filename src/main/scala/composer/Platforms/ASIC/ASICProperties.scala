@@ -11,7 +11,7 @@ object ProcessCorner extends Enumeration {
 
 //noinspection ScalaUnusedSymbol
 object ProcessTemp extends Enumeration {
-  val C25, CM40, C125 = Value
+  val C25, C0, CM40, C125 = Value
   type ProcessTemp = Value
 }
 

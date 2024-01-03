@@ -7,9 +7,9 @@ import chisel3.util._
 import composer.Generation.CppGeneration
 import composer.common._
 
-class ComposerCommandBundler[T1 <: AbstractAccelCommand, T2 <: AccelResponse](bundleIn: T1, bundleOut: T2, composerCoreWrapper: AccelCoreWrapper, nSources: Int)(implicit p: Parameters) extends Module {
-  if (composerCoreWrapper.composerSystemParams.canReceiveSoftwareCommands)
-    CppGeneration.addUserCppFunctionDefinition(composerCoreWrapper.composerSystemParams.name, bundleIn, bundleOut)
+class ComposerCommandBundler[T1 <: AbstractAccelCommand, T2 <: AccelResponse](bundleIn: T1, bundleOut: T2, outer: ComposerSystem, nSources: Int)(implicit p: Parameters) extends Module {
+  if (outer.systemParams.canReceiveSoftwareCommands)
+    CppGeneration.addUserCppFunctionDefinition(outer.systemParams.name, bundleIn, bundleOut)
 
   val cio = IO(new Bundle() {
     val cmd = Flipped(new ComposerCoreIO)
@@ -18,8 +18,9 @@ class ComposerCommandBundler[T1 <: AbstractAccelCommand, T2 <: AccelResponse](bu
   val io = IO(new CustomIO[T1, T2](bundleIn.cloneType, bundleOut.cloneType))
 
   io.req.bits.elements.foreach { case (_, data) => data := DontCare }
-  io.req.bits.getSystemID := composerCoreWrapper.system_id.U
-  io.req.bits.getCoreID := composerCoreWrapper.core_id.U
+  io.req.bits.getSystemID := outer.system_id.U
+//  require(false, "FIX CORE ID OVERWRITE DONT FORGET")
+  io.req.bits.getCoreID := DontCare
 
   cio.cmd.resp.valid := io.resp.valid
   cio.cmd.resp.bits.rd := 0.U

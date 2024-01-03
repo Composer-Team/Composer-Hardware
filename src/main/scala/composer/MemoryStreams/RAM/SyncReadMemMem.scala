@@ -47,7 +47,6 @@ private class SRMMHelper(nReadPorts: Int,
   }
 }
 
-
 class SyncReadMemMem(nReadPorts: Int,
                      nWritePorts: Int,
                      nReadWritePorts: Int,

@@ -79,7 +79,7 @@ case class CReadChannelParams(name: String,
                               dataBytes: Int,
                               nChannels: Int = 1,
                               maxInFlightTxs: Int = 8) extends CChannelParams {
-  require(maxInFlightTxs > 1, s"Max In Flight Transactions must be greater than 1. Got: $maxInFlightTxs")
+  require(maxInFlightTxs > 0, s"Max In Flight Transactions must be greater than 0. Got: $maxInFlightTxs")
 }
 
 /**

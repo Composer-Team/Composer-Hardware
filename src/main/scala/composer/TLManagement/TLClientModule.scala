@@ -1,18 +1,24 @@
 package composer.TLManagement
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import composer.RoccHelpers.ComposerConsts
 import composer.common.AccelRoccCommand
 import freechips.rocketchip.tilelink._
 
-class TLClientModuleIO(tlbundle: TLBundle) extends Bundle {
-  val dat = UInt(tlbundle.params.dataBits.W)
-  val addr = UInt(tlbundle.params.addressBits.W)
+class TLClientModuleIO(implicit p: Parameters) extends Bundle {
+  val dat = UInt(ComposerConsts.InternalCommandWidth().W)
+  val addr = UInt(ComposerConsts.getInternalCmdRoutingAddressWidth().W)
 }
-class TLClientModule(tlclient: TLClientNode) extends Module {
+class TLClientModule(tlclient: TLClientNode)(implicit p: Parameters) extends Module {
   val (tlbundle, tledge) = tlclient.out(0)
-  val io = IO(Flipped(Decoupled(new TLClientModuleIO(tlbundle))))
+  val io = IO(Flipped(Decoupled(new TLClientModuleIO)))
   val tl = IO(new TLBundle(tlbundle.params))
+
+  // sanity checks - do not remove
+  assert(tlbundle.params.dataBits == ComposerConsts.InternalCommandWidth())
+  assert(tlbundle.params.addressBits == ComposerConsts.getInternalCmdRoutingAddressWidth())
 
   val s_canEmit :: s_waitForAck :: Nil = Enum(2)
   val state = RegInit(s_canEmit)

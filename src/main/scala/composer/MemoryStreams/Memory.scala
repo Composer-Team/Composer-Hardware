@@ -31,7 +31,7 @@ object Memory {
 //    println(s"Creating CMemory with $nReadPorts read ports, $nWritePorts write ports, $nReadWritePorts read/write ports: $debugName, $valName")
     val mostPortsSupported = p(PlatformTypeKey) match {
       case PlatformType.FPGA => 2
-      case PlatformType.ASIC => p(ASICMemoryCompilerKey).mems.keys.max
+      case PlatformType.ASIC => p(ASICMemoryCompilerKey).mostPortsSupported
     }
     val nPorts = nReadPorts + nWritePorts + nReadWritePorts
 
@@ -302,10 +302,9 @@ trait HasMemoryInterface {
   def clocks: Seq[Bool]
 }
 
-// SRAM DIM
 case class SD(dWidth: Int, nRows: Int)
 
-case class CascadeDescriptor(depth: Int, bankWidths: Seq[Int])
+case class CascadeDescriptor(depths: Seq[Int], bankWidths: Seq[Int])
 /**
  * ALL LOGIC IMPLEMENTED HERE MUST BE ACTIVE LOW
  */

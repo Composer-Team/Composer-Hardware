@@ -5,7 +5,7 @@ import chisel3.util._
 import composer.MemoryStreams._
 import composer.common.ShiftReg
 
-class RegMem(nRows: Int, nColumns: Int, nPorts: Int, latency: Int) extends RawModule with HasMemoryInterface {
+class RegMem(nRows: Int, nColumns: Int, nPorts: Int, latency: Int) extends RawModule with HasMemoryInterface{
   val io = IO(new CMemoryIOBundle(0, 0, nPorts, log2Up(nRows), nColumns))
 
   override def data_in: Seq[UInt] = io.data_in

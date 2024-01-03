@@ -97,7 +97,7 @@ class SequentialReader(val dWidth: Int,
 
   val hasDualPortMemory = p(PlatformTypeKey) match {
     case PlatformType.FPGA => true
-    case PlatformType.ASIC => p(ASICMemoryCompilerKey).mems.exists(_._1 == 2)
+    case PlatformType.ASIC => p(ASICMemoryCompilerKey).mostPortsSupported >= 2
   }
 
   if (!hasDualPortMemory && !SequentialReader.has_warned_dp) {

@@ -2,7 +2,7 @@ package composer.Platforms
 
 import chipsalliance.rocketchip.config._
 import composer.Generation.{BuildMode, ComposerBuild}
-import composer.Platforms.ASIC.MemoryCompiler
+import composer.Platforms.ASIC.{CanCompileMemories, MemoryCompiler}
 import composer.Platforms.FrontBusProtocol.FrontBusProtocol
 import composer.Platforms.PlatformType.PlatformType
 
@@ -45,7 +45,6 @@ case object FrontBusProtocolKey extends Field[FrontBusProtocol]
 // default clock rates (MHz)(used in simulation) - can be overriden
 case object DefaultClockRateKey extends Field[Int]
 
-
 case object PlatformNumSLRs extends Field[Int]
 
 case object PlatformPreferedSLRCmdRespRoutingPath extends Field[Option[Seq[String]]]
@@ -54,7 +53,7 @@ case object IsAWS extends Field[Boolean]
 
 case object PostProcessorMacro extends Field[Config => Unit]
 
-case object ASICMemoryCompilerKey extends Field[MemoryCompiler]
+case object ASICMemoryCompilerKey extends Field[MemoryCompiler with CanCompileMemories]
 
 case object BuildModeKey extends Field[BuildMode]
 

@@ -38,12 +38,23 @@ object CppGeneration {
   private var user_cpp_defs: List[PreprocessorDefinition] = List()
   private var hook_defs: List[HookDef] = List()
 
-  def addUserCppDefinition[t](ty: String, name: String, value: t): Unit = {
+  def addUserCppDefinition[t](ty: String, name: String, value: t,
+                              resolveConflicts: Option[(String, t) => t] = None): Unit = {
     val ty_f = ty.trim
     val name_f = name.trim
     val existingDefs = user_defs.filter(_.name == name_f)
-    existingDefs.foreach(a => require(a.ty == ty_f && a.value == value.toString, s"Redefining ${a.name} from (${a.ty}, ${a.value}) to ($ty, $value)"))
     if (existingDefs.isEmpty) user_defs = CppDefinition(ty_f, name_f, value.toString) :: user_defs
+    else {
+      resolveConflicts match {
+        case Some(resolver) =>
+          val without = user_defs.filter(_.name != name_f)
+          user_defs = CppDefinition(ty_f, name_f, resolver(existingDefs(0).value, value).toString) :: without
+        case None =>
+          existingDefs.foreach(a => require(a.ty == ty_f && a.value == value.toString, s"Redefining ${a.name} from (${a.ty}, ${a.value}) to ($ty, $value)"))
+
+      }
+
+    }
   }
 
   private[composer] def addUserCppFunctionDefinition(systemName: String, cc: AbstractAccelCommand, resp: AccelResponse): Unit = {
@@ -87,8 +98,9 @@ object CppGeneration {
     }
   }
 
-  def addUserCppDefinition[t](elems: Seq[(String, String, t)]): Unit = {
-    elems.foreach(a => addUserCppDefinition(a._1, a._2, a._3))
+  def addUserCppDefinition[t](elems: Seq[(String, String, t)],
+                              resolver: Option[(String, t) => t] = None): Unit = {
+    elems.foreach(a => addUserCppDefinition(a._1, a._2, a._3, resolver))
   }
 
   //noinspection ScalaUnusedSymbol
@@ -163,8 +175,10 @@ object CppGeneration {
       s"$structName(${safe_join(structMembersWithType, ", ")}) : ${safe_join(resp.realElements.map(a => f"${a._1}(${a._1})"), ", ")} {}\n}"
 
     val template_sig = f"template<> $structName composer::response_handle<$structName>::get()"
+
     def command_sig(is_dec: Boolean) = f"composer::response_handle<$structName> ${sysName}Command(uint16_t core_id, $signature," +
       f" const std::vector<composer::remote_ptr>& memory_operands${if (is_dec) " = {}" else ""})"
+
     val template_def = resp.fieldSubranges.map { ele =>
       if (ele._1.endsWith("_FP")) {
         (ele._1, f"__${ele._1}")
@@ -211,7 +225,7 @@ object CppGeneration {
            |  for (int i = 0; i < ${numCommands - 1}; ++i) {
            |    composer::rocc_cmd::start_cmd(${sysName}_ID, false, 0, false, false, core_id, payloads[i*2+1], payloads[i*2]).send();
            |  }
-           |  return composer::rocc_cmd::start_cmd(${sysName}_ID, true, 0, false, false, core_id, payloads[${(numCommands - 1) *2 + 1}], payloads[${(numCommands - 1)*2}]).send(memory_operands).to<$structName>();
+           |  return composer::rocc_cmd::start_cmd(${sysName}_ID, true, 0, false, false, core_id, payloads[${(numCommands - 1) * 2 + 1}], payloads[${(numCommands - 1) * 2}]).send(memory_operands).to<$structName>();
            |}
            |""".stripMargin
     val declaration =
@@ -228,19 +242,29 @@ object CppGeneration {
     // we might have multiple address spaces...
     val path = Path(ComposerBuild.composerGenDir)
     os.makeDir.all(path)
-    val mem = p(ExtMem).get
 
-    val allocator =
-      s"""
-         |#ifdef SIM
-         |#define NUM_DDR_CHANNELS ${mem.nMemoryChannels}
-         |#endif
-         |#define ALLOCATOR_SIZE_BYTES (0x${p(PlatformPhysicalMemoryBytes).toHexString}L)
-         |${if (!p(HasDiscreteMemory)) "#ifdef SIM" else ""}
-         |""".stripMargin + "#define COMPOSER_USE_CUSTOM_ALLOC\n" +
-        (if (!p(HasDiscreteMemory)) "#endif" else "")
-
-    val addrBits = s"const uint8_t composerNumAddrBits = ${log2Up(mem.master.size)};"
+    val (allocator, addrBits) = p(ExtMem) match {
+      case Some(mem) =>
+        (
+          s"""
+             |#ifdef SIM
+             |#define NUM_DDR_CHANNELS ${mem.nMemoryChannels}
+             |#endif
+             |#define ALLOCATOR_SIZE_BYTES (0x${p(PlatformPhysicalMemoryBytes).toHexString}L)
+             |${if (!p(HasDiscreteMemory)) "#ifdef SIM" else ""}
+             |""".stripMargin + "#define COMPOSER_USE_CUSTOM_ALLOC\n" +
+            (if (!p(HasDiscreteMemory)) "#endif" else ""),
+          s"const uint8_t composerNumAddrBits = ${log2Up(mem.master.size)};")
+      case None =>
+        (
+          s"""
+             |#ifdef SIM
+             |#define NUM_DDR_CHANNELS 0
+             |#endif
+             |#define ALLOCATOR_SIZE_BYTES (0x${p(PlatformPhysicalMemoryBytes).toHexString}L)
+             |""".stripMargin,
+          s"const uint8_t composerNumAddrBits = 0;")
+    }
     val defines = safe_join(user_defs map { deff => s"const ${deff.ty} ${deff.name} = ${deff.value};" })
     val enums = safe_join(user_enums map enumToCpp)
     val cpp_defs = safe_join(user_cpp_defs map { ppd => s"#define ${ppd.ty} ${ppd.value}\n" })
@@ -251,47 +275,50 @@ object CppGeneration {
     val hooks_dec_def = hook_defs map (a => customCommandToCpp(a.sysName, a.cc, a.resp))
     val commandDeclarations = safe_join(hooks_dec_def.map(_._1))
     val commandDefinitions = safe_join(hooks_dec_def.map(_._2))
-    val addrSet = ComposerTop.getAddressSet(0)
-    val idLengths =
-      s"""
-         |static const uint8_t system_id_bits = $SystemIDLengthKey;
-         |static const uint8_t core_id_bits = $CoreIDLengthKey;
-         |static const composer::composer_pack_info pack_cfg(system_id_bits, core_id_bits);
-         |static const uint64_t addrMask = 0x${addrSet.mask.toLong.toHexString};
-         |""".stripMargin
+    val (idLengths, dma_def, mem_def) = p(ExtMem) match {
+      case Some(_) => {
+        val addrSet = ComposerTop.getAddressSet(0)
 
-    // this next stuff is just for simulation
-    def getVerilatorDtype(width: Int): String = {
-      width match {
-        case x if x <= 8 => "CData"
-        case x if x <= 16 => "SData"
-        case x if x <= 32 => "IData"
-        case x if x <= 64 => "QData"
-        case _ => "ERROR"
+        // this next stuff is just for simulation
+        def getVerilatorDtype(width: Int): String = {
+          width match {
+            case x if x <= 8 => "CData"
+            case x if x <= 16 => "SData"
+            case x if x <= 32 => "IData"
+            case x if x <= 64 => "QData"
+            case _ => "ERROR"
+          }
+        }
+
+        (
+          s"""
+             |static const uint64_t addrMask = 0x${addrSet.mask.toLong.toHexString};
+             |""".stripMargin
+          , if (p(HasDMA).isDefined) "#define COMPOSER_HAS_DMA" else "",
+          p(ExtMem) match {
+            case Some(a) =>
+              val strobeDtype = getVerilatorDtype(p(ExtMem).get.master.beatBytes)
+              val addrWid = log2Up(a.master.size)
+              val addrDtype = getVerilatorDtype(addrWid)
+              val idDtype = getVerilatorDtype(p(ExtMem).get.master.idBits)
+              s"#ifdef SIM\n" +
+                s"#include <verilated.h>\n" +
+                s"using ComposerMemAddressSimDtype=$addrDtype;\n" +
+                s"using ComposerStrobeSimDtype=$strobeDtype;\n" +
+                s"using ComposerMemIDDtype=$idDtype;\n" +
+                s"#define DEFAULT_PL_CLOCK ${p(DefaultClockRateKey)}\n" +
+                (p(HasDMA) match {
+                  case None => ""
+                  case Some(a) => s"using ComposerDMAIDtype=${getVerilatorDtype(a)};\n"
+                }) +
+                s"#define DATA_BUS_WIDTH ${p(ExtMem).get.master.beatBytes * 8}\n" +
+                s"#endif"
+            case None =>
+              "// No memory detected, not defining Address Sim Dtype"
+          }
+        )
       }
-    }
-
-    val dma_def = if (p(HasDMA).isDefined) "#define COMPOSER_HAS_DMA" else ""
-    val mem_def = p(ExtMem) match {
-      case Some(a) =>
-        val strobeDtype = getVerilatorDtype(p(ExtMem).get.master.beatBytes)
-        val addrWid = log2Up(a.master.size)
-        val addrDtype = getVerilatorDtype(addrWid)
-        val idDtype = getVerilatorDtype(p(ExtMem).get.master.idBits)
-        s"#ifdef SIM\n" +
-          s"#include <verilated.h>\n" +
-          s"using ComposerMemAddressSimDtype=$addrDtype;\n" +
-          s"using ComposerStrobeSimDtype=$strobeDtype;\n" +
-          s"using ComposerMemIDDtype=$idDtype;\n" +
-          s"#define DEFAULT_PL_CLOCK ${p(DefaultClockRateKey)}\n" +
-          (p(HasDMA) match {
-            case None => ""
-            case Some(a) => s"using ComposerDMAIDtype=${getVerilatorDtype(a)};\n"
-          }) +
-          s"#define DATA_BUS_WIDTH ${p(ExtMem).get.master.beatBytes * 8}\n" +
-          s"#endif"
-      case None =>
-        "// No memory detected, not defining Address Sim Dtype"
+      case None => ("", "", "")
     }
     val mmio_addr = "const uint64_t ComposerMMIOOffset = 0x" + p(FrontBusBaseAddress).toHexString + "L;"
 
@@ -326,6 +353,9 @@ object CppGeneration {
          |$cpp_defs
          |
          |// MMIO address + field offsets
+         |static const uint8_t system_id_bits = $SystemIDLengthKey;
+         |static const uint8_t core_id_bits = $CoreIDLengthKey;
+         |static const composer::composer_pack_info pack_cfg(system_id_bits, core_id_bits);
          |$mmios
          |$mmio_addr
          |

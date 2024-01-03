@@ -111,10 +111,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     )))
   }) else None
 
-  if (AXI_MEM.isDefined) {
-//    AXI_MEM.get.foreach(println(_))
-  }
-
   val dma_port = if (p(HasDMA).isDefined) {
     val dma_node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
       masters = Seq(AXI4MasterParameters(
@@ -134,12 +130,25 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   // Connect accelerators to memory
   val composer_mems = if (accelerator_system.w_mem.isEmpty) {
-    accelerator_system.r_mem.map{ src => val tl2axi = TLToAXI4() := src ; tl2axi }
+    accelerator_system.w_mem.map { src =>
+      val tl2axi = LazyModule(new TLToAXI4R(
+        addressSet = ComposerTop.getAddressSet(0),
+        idMax = availableComposerSources))
+      tl2axi.tlReader := src
+      tl2axi.axi_client
+    }
   } else if (accelerator_system.r_mem.isEmpty) {
-    accelerator_system.w_mem.map{ src => val tl2axi = TLToAXI4() := src ; tl2axi }
+    accelerator_system.w_mem.map { src =>
+      val tl2axi = LazyModule(new TLToAXI4W(
+        addressSet = ComposerTop.getAddressSet(0),
+        idMax = availableComposerSources))
+      tl2axi.tlWriter := src
+      tl2axi.axi_client
+    }
   } else {
     accelerator_system.r_mem.zip(accelerator_system.w_mem).zipWithIndex map { case ((r, w), idx) =>
-      val Seq(rss, wss) = Seq(r, w).zip(Seq("readIDShrinker", "writeIDShrinker")).map { case (m, nm) => TLSourceShrinkerDynamicBlocking(availableComposerSources, Some(nm)) := m }
+      val Seq(rss, wss) = Seq(r, w).zip(Seq("readIDShrinker", "writeIDShrinker")).map {
+        case (m, nm) => TLSourceShrinkerDynamicBlocking(availableComposerSources, Some(nm)) := m }
       val tl2axi = LazyModule(new TLToAXI4SRW(
         addressSet = ComposerTop.getAddressSet(idx),
         idMax = availableComposerSources))
@@ -165,9 +174,9 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     case Some(mems) =>
       mem_tops zip mems foreach { case (mt, endpoint) =>
         endpoint :=
-          AXI4Buffer() :=
-          AXI4UserYanker(capMaxFlight = Some(p(MaxInFlightMemTxsPerSource))) :=
           AXI4Buffer() := mt
+//          AXI4UserYanker(None) :=
+//          AXI4Buffer() := mt
       }
     case None => ;
   }
@@ -216,7 +225,8 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
 
     // make incoming dma port and connect it
     if (p(HasDMA).isDefined) {
-      val dma = IO(Flipped(AXI4Compat(outer.AXI_MEM.get(0).in(0)._1.params)))
+      val params = outer.AXI_MEM.get(0).in(0)._1.params
+      val dma = IO(Flipped(AXI4Compat(params.copy(idBits = p(HasDMA).get))))
       AXI4Compat.connectCompatSlave(dma, outer.dma_port.get.out(0)._1)
     }
 
@@ -232,7 +242,9 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
 
   // Generate C++ headers once all of the cores have been generated so that they have
   //   the opportunity to dictate which symbols they want exported
-  CppGeneration.genCPPHeader(outer.cmd_resp_axilhub.widget.module.crRegistry, acc.acc)
+  CppGeneration.genCPPHeader(outer.cmd_resp_axilhub.widget.module.crRegistry, acc.acc)(p.alterPartial {
+    case ExtMem => if (outer.AXI_MEM.isDefined) p(ExtMem) else p(ExtMem).map(_.copy(nMemoryChannels = 0))
+  })
   ConstraintGeneration.writeConstraints()
   if (p(BuildModeKey).isInstanceOf[BuildMode.Tuning]) {
     Tunable.exportNames()

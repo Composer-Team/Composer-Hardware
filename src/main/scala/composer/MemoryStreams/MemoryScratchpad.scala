@@ -47,11 +47,11 @@ class ScratchpadDataPort(val scReqBits: Int, val dataWidthBits: Int) extends CSc
   }
 }
 
-class ScratchpadMemReqPort(mem_out: Option[TLBundle], nDatas: Int, memLenBits: Int) extends Bundle {
+class ScratchpadMemReqPort(addrBits: Int, nDatas: Int) extends Bundle {
   val init, writeback = Flipped(Decoupled(new Bundle() {
-    val memAddr = UInt(if (mem_out.isDefined) mem_out.get.params.addressBits.W else 1.W)
+    val memAddr = UInt(addrBits.W)
     val scAddr = UInt(log2Up(nDatas).W)
-    val len = UInt(memLenBits.W)
+    val len = UInt(addrBits.W)
   }))
 }
 
@@ -113,10 +113,8 @@ class ScratchpadImpl(csp: CScratchpadParams,
   private val scReqBits = log2Up(nDatas)
   val IOs = Seq.fill(nPorts)(IO(new ScratchpadDataPort(scReqBits, dataWidthBits)))
   val req = IO(new ScratchpadMemReqPort(
-    if (outer.mem_reader.isDefined) Some(outer.mem_reader.get.out(0)._1) else None,
-    nDatas,
-    memoryLengthBits
-  ))
+    log2Up(p(ExtMem).get.nMemoryChannels*p(ExtMem).get.master.size),
+    nDatas))
   private val memory = Seq.fill(datasPerCacheLine)(Memory(latency,
     dataWidth = dataWidthBits,
     nRows = realNRows,

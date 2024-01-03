@@ -1,6 +1,6 @@
 package composer.Generation.Tune
 
-import composer.Generation.{BuildArgs, ComposerBuild}
+import composer.Generation.{BuildArgs, CLogger, ComposerBuild}
 
 import java.io.FileWriter
 import scala.language.implicitConversions
@@ -60,8 +60,8 @@ class InstanceTunable(val default: Int, val range: (Int, Int), name: Option[Stri
   override def getValue: Int = {
     val arg = BuildArgs.args.get(tag)
     arg match {
-      case Some(a) => println("Found " + a + " in args for " + tag)
-      case _ => println("Using " + default + " for " + tag)
+      case Some(a) => CLogger.log("Found " + a + " in args for " + tag)
+      case _ => CLogger.log("Using " + default + " for " + tag)
     }
     arg.getOrElse(default)
   }

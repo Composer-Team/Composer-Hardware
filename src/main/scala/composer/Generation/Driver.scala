@@ -50,6 +50,13 @@ object ComposerBuild {
     os.proc(Seq("sed", "-i.backup", "-e", "1d", "-e", "/printf/d", "-e", "/assert/d", path.toString())).call()
   }
 
+  private[composer] var partitionModules: Seq[String] = Seq("ComposerTop")
+
+  def requestModulePartition(moduleName: String): Unit =
+    partitionModules = partitionModules :+ moduleName
+
+  def getPartitions: Seq[String] = partitionModules
+
   private[composer] def addSource(): Unit = {}
 
   def composerRoot(): String = {
@@ -65,14 +72,17 @@ object ComposerBuild {
     else throw new Exception(errorNoCR)
   }
 
-  private[composer] val composerGenDir: String =
+  val composerGenDir: String =
     composerRoot() + "/Composer-Hardware/vsim/generated-src"
 
-  private[composer] val composerVsimDir: String =
+  val composerVsimDir: String =
     composerRoot() + "/Composer-Hardware/vsim/"
-  private[composer] val composerBin: String = composerRoot() + "/bin/"
-  private[composer] var symbolicMemoryResources: Seq[Path] = Seq.empty
-  private[composer] var sourceList: Seq[Path] = Seq.empty
+  val composerBin: String = composerRoot() + "/bin/"
+  val gsrc_dir = Path(ComposerBuild.composerGenDir)
+  val targetDir = gsrc_dir / "composer.build"
+
+  var symbolicMemoryResources: Seq[Path] = Seq.empty
+  var sourceList: Seq[Path] = Seq.empty
 
   def addSource(p: Path): Unit = {
     sourceList = sourceList :+ p
@@ -116,25 +126,18 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
           (pr(0), pr(1).toInt)
       }
     )
-    val gsrc_dir = if (args.filter(_.length > 9).exists(_.substring(0, 9) == "--target=")) {
-      val pth = args.filter(a => a.length > 9 && a.substring(0, 9) == "--target=")(0).substring(9)
-      Path(pth)
-    } else Path(ComposerBuild.composerGenDir)
-//    os.walk(gsrc_dir).foreach { file =>
-//      val isDirectory = os.isDir(file)
-//      if (file.baseName.nonEmpty && file.baseName.charAt(0) != '.' && !isDirectory) os.remove.all(file)
-//    }
+
     os.makeDir.all(gsrc_dir)
-    val targetDir = gsrc_dir / "composer.build"
     val configWithBuildMode = new Config(config.alterPartial {
       case BuildModeKey => buildMode
     })
     new ComposerChipStage().transform(
       AnnotationSeq(
         Seq(
-          new firrtl.options.TargetDirAnnotation(targetDir.toString()),
           // if you want to get annotation output for debugging, uncomment the following line
-          new OutputAnnotationFileAnnotation(targetDir.toString()),
+          new EmitAllModulesAnnotation(classOf[VerilogEmitter]),
+          new TargetDirAnnotation(targetDir.toString()),
+//          new OutputAnnotationFileAnnotation(targetDir.toString()),
           new TopModuleAnnotation(Class.forName("composer.Systems.ComposerTop")),
           Generation.Stage.ConfigsAnnotation(configWithBuildMode),
           CustomDefaultMemoryEmission(MemoryNoInit),
@@ -145,8 +148,9 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
     )
 
     // --------------- Verilog Annotators ---------------
-    KeepHierarchy(targetDir / "ComposerTop.v")
-    composer.Generation.Annotators.Uniqueify(sourceList, targetDir, gsrc_dir)
+//    KeepHierarchy(targetDir / "ComposerTop.v")
+    partitionModules foreach println
+    composer.Generation.Annotators.UniqueMv(sourceList, targetDir)
 
     ConstraintGeneration.slrMappings.foreach { slrMapping =>
       crossBoundaryDisableList = crossBoundaryDisableList :+ slrMapping._1
@@ -178,10 +182,10 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
         targetDir / "ComposerTop.v"
       )
     }
-    os.walk(targetDir).foreach { file =>
-      val extension = file.ext
-      os.copy(file, gsrc_dir / ("composer." + extension), replaceExisting = true)
-    }
+//    os.walk(targetDir).foreach { file =>
+//      val extension = file.ext
+//      os.copy(file, gsrc_dir / ("composer." + extension), replaceExisting = true)
+//    }
     // -------------------------------------------------
 
     config(PostProcessorMacro)(configWithBuildMode) // do post-processing per backend

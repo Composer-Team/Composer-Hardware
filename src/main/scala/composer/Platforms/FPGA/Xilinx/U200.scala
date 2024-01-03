@@ -16,16 +16,16 @@ private[composer] class U200Base(nMemoryChannels: Int)
             base = 0,
             size = 0x400000000L,
             beatBytes = 64,
-            idBits = 6
+            idBits = 16
           ),
           nMemoryChannels
         )
       )
-      require(1 <= nMemoryChannels && nMemoryChannels <= 4)
+      require(0 <= nMemoryChannels && nMemoryChannels <= 4)
       q
     // 16GB memory per DIMM
     case PlatformPhysicalMemoryBytes => (16L << 30) * nMemoryChannels
-    case HasDMA => Some(2)
+    case HasDMA => Some(6)
     // TODO this can be tuned
     case CXbarMaxDegree => 8
     case HasDiscreteMemory => true
@@ -39,7 +39,7 @@ private[composer] class U200Base(nMemoryChannels: Int)
     case PlatformNURAM => 960
     case PlatformNBRAM => 2160
     case HasCoherence => None
-    case PrefetchSourceMultiplicity => 32
+    case PrefetchSourceMultiplicity => 64
 
     case CoreCommandLatency => 4
     case HasDisjointMemoryControllers => true

@@ -3,7 +3,6 @@ package composer.Platforms.ASIC.SAED
 import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3.experimental.BaseModule
 import composer.MemoryStreams.{HasMemoryInterface, SD}
-import composer._
 import composer.Generation.ComposerBuild
 import composer.MemoryStreams.RAM.RegMem
 import composer.Platforms.ASIC._
@@ -12,45 +11,52 @@ import composer.Platforms.ASIC.ProcessCorner.ProcessCorner
 import composer.Platforms.ASIC.ProcessOperatingConditions.ProcessOperatingConditions
 import composer.Platforms.ASIC.ProcessTemp.ProcessTemp
 import composer.Platforms.ASIC.ProcessVoltageThreshold.ProcessVoltageThreshold
-import os.Path
 
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+
+class SAEDMemoryCompiler extends MemoryCompiler with CannotCompileMemories {
+
+  // TODO Fixme
+  override val supportedCorners: Seq[(ProcessCorner, ProcessTemp)] = Seq.empty
+
+  override val availableMems: Map[Int, Seq[SD]] = Map.from(Seq(
+    (1, Seq(
+      SD(8, 128), SD(32, 64), SD(32, 256), SD(8, 1024), SD(8, 512), SD(48, 128),
+      SD(50, 32), SD(34, 64), SD(46, 256), SD(46, 128), SD(8, 64), SD(128, 64),
+      SD(128, 256), SD(8, 256), SD(48, 256), SD(128, 512), SD(32, 512))),
+    (2, Seq(SD(4, 16), SD(4, 32), SD(4, 64), SD(8, 16), SD(8, 32), SD(8, 64),
+      SD(8, 128), SD(16, 16), SD(16, 32), SD(16, 64), SD(16, 128), SD(32, 16),
+      SD(32, 64), SD(32, 128), SD(22, 32), SD(39, 32)))))
+
+  override val mostPortsSupported: Int = 2
+  override val isActiveHighSignals: Boolean = false // active low
+
+  override def generateMemoryFactory(nPorts: Int, nRows: Int, nColumns: Int)(implicit p: Parameters): () => BaseModule with HasMemoryInterface = {
+    def makeMemory(): BaseModule with HasMemoryInterface = {
+      if (nPorts == 1) {
+        new SAED_1RW_SRAM(nRows, nColumns)
+      } else if (nPorts == 2) {
+        new SAED_2RW_SRAM(nRows, nColumns)
+      } else {
+        new RegMem(nRows, nColumns, nPorts, 1)
+      }
+    }
+
+    makeMemory
+  }
+
+  def getMemoryName(nPorts: Int, nRows: Int, nColumns: Int): String = {
+    f"SRAM${nPorts}RW${nRows}x$nColumns"
+  }
+}
 
 class WithSAED(corner: ProcessCorner = ProcessCorner.Typical,
                temp: ProcessTemp = ProcessTemp.C25,
                threshold: ProcessVoltageThreshold = ProcessVoltageThreshold.Regular,
                voltage: ProcessOperatingConditions = ProcessOperatingConditions.NormalVoltage,
                clockRateMHz: Float = 1000) extends Config((_, _, _) => {
-  case ASICMemoryCompilerKey => new MemoryCompiler {
-    override def isTooSmall(nRows: Int, nCols: Int): Boolean = false
-    override val mems: Map[Int, Seq[SD]] = Map.from(Seq(
-      (1, Seq(
-        SD(8, 128), SD(32, 64), SD(32, 256), SD(8, 1024), SD(8, 512), SD(48, 128),
-        SD(50, 32), SD(34, 64), SD(46, 256), SD(46, 128), SD(8, 64), SD(128, 64),
-        SD(128, 256), SD(8, 256), SD(48, 256), SD(128, 512), SD(32, 512))),
-      (2, Seq(SD(4, 16), SD(4, 32), SD(4, 64), SD(8, 16), SD(8, 32), SD(8, 64),
-        SD(8, 128), SD(16, 16), SD(16, 32), SD(16, 64), SD(16, 128), SD(32, 16),
-        SD(32, 64), SD(32, 128), SD(22, 32), SD(39, 32)))))
-    override val isActiveHighSignals: Boolean = false // active low
-
-    override def generateMemoryFactory(nPorts: Int, nRows: Int, nColumns: Int)(implicit p: Parameters): () => BaseModule with HasMemoryInterface = {
-      def makeMemory(): BaseModule with HasMemoryInterface = {
-        if (nPorts == 1) {
-          new SAED_1RW_SRAM(nRows, nColumns)
-        } else if (nPorts == 2) {
-          new SAED_2RW_SRAM(nRows, nColumns)
-        } else {
-          new RegMem(nRows, nColumns, nPorts, 1)
-        }
-      }
-      makeMemory
-    }
-
-    override def getMemoryName(nPorts: Int, nRows: Int, nColumns: Int): String = {
-      f"SRAM${nPorts}RW${nRows}x$nColumns"
-    }
-  }
+  case ASICMemoryCompilerKey => new SAEDMemoryCompiler()
   case PostProcessorMacro => (_: Parameters) => {
     val cwd = os.Path(ComposerBuild.composerGenDir)
     val timestamp = LocalDateTime.now()
@@ -63,10 +69,6 @@ class WithSAED(corner: ProcessCorner = ProcessCorner.Typical,
       }
     }
     os.copy.over(cwd / "composer.v", synwd / "src" / "composer.sv")
-
-    def getFileWithEndingInDir(dir: Path, suffix: String): Path = {
-      os.walk(dir).filter(_.toString().contains(suffix))(0)
-    }
 
     val cornerString = corner match {
       case ProcessCorner.Typical => "tt"
@@ -105,9 +107,9 @@ class WithSAED(corner: ProcessCorner = ProcessCorner.Typical,
     //      val memoryPaths: Seq[Path] = ComposerBuild.symbolicMemoryResources.distinct.map(p => p / "db_nldm" / s"saed14sram_$cornerString$voltageString$tempString.db")
     //    val memoryDBs = List("dual", "single").map(p => f"$baseMemories/logic_synth/$p/saed14sram_$cornerString$voltageString$tempString.db").fold("")(_ + " " + _)
     val memoryDBs = List("dual").map(p => f"$baseMemories/logic_synth/$p/saed14sram_$cornerString$voltageString$tempString.db").fold("")(_ + " " + _)
-    val mem_pnrs = List("1rw", "2rw").map { mem =>
-      f"$baseMemories/ndm/saed14_sram_${mem}_frame_only.ndm"
-    }.fold("")(_ + " " + _)
+//    val mem_pnrs = List("1rw", "2rw").map { mem =>
+//      f"$baseMemories/ndm/saed14_sram_${mem}_frame_only.ndm"
+//    }.fold("")(_ + " " + _)
 
     os.write(synwd / "synth.ssp",
       f"""set project_path $synwd

@@ -32,16 +32,18 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
 
   // tie together intra-core memory ports in one system to core/channel sps individually in another system
   system_tups.foreach { case (sys, _, _) =>
-    sys.cores.foreach { case (_, core) =>
-      core.intraCoreMemMasters.foreach { case (pparams, clients, _) =>
-        val assoc_endpoints = system_tups.filter(_._3.name == pparams.toSystem)(0)._1.cores.map(_._2.intraCoreMemSlaveNodes.filter(_._1 == pparams.toMemoryPort)(0)).map(_._2)
-        require(clients.flatten.length == assoc_endpoints.flatten.length, "sanity - if this doesn't work, somethign bad has happened")
-        clients.flatten zip assoc_endpoints.flatten foreach { case (c, e) =>
+    sys.intraCoreMemMasters.foreach { case (mpo, nodes_per_core, mpi) =>
+      val target = mpo.toSystem
+      val targetSys = system_tups(name2Id(target))
+      val assoc_endpoints = targetSys._1.intraCoreMemSlaveNodes.filter(_._1 == mpo.name).map(_._2)
+//      val assoc_endpoints = system_tups.filter(_._3.name == pparams.toSystem)(0)._1.cores.map(_._2.intraCoreMemSlaveNodes.filter(_._1 == pparams.toMemoryPort)(0)).map(_._2)
+      nodes_per_core foreach { clients =>
+        require(clients.length == assoc_endpoints.flatten.length, "sanity - if this doesn't work, somethign bad has happened")
+        clients zip assoc_endpoints.flatten foreach { case (c, e) =>
           val buffer = TLBuffer()
           e := buffer
           buffer := c
         }
-
       }
     }
   }

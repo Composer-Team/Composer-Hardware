@@ -129,15 +129,20 @@ class SequentialWriter(nBytes: Int,
     io.channel.data <> burst_queue.io.enq
   } else if (nBytes < beatBytes) {
     val beatLim = beatBytes / nBytes
-    val beatBuffer = Reg(Vec(beatLim, UInt((nBytes * 8).W)))
+    val beatBuffer = Reg(Vec(beatLim-1, UInt((nBytes * 8).W)))
     val beatCounter = RegInit(0.U(log2Up(beatLim).W))
     io.channel.data.ready := burst_queue.io.enq.ready
     burst_queue.io.enq.valid := false.B
-    burst_queue.io.enq.bits := Cat(beatBuffer.reverse)
+    burst_queue.io.enq.bits := DontCare
     when(io.channel.data.fire) {
-      beatBuffer(beatCounter) := io.channel.data.bits
+      val bytesGrouped = (0 until nBytes).map(i => io.channel.data.bits((i + 1) * 8 - 1, i * 8))
+      beatBuffer(beatCounter) := Cat(bytesGrouped.reverse)
+      beatCounter := beatCounter + 1.U
       when(beatCounter === (beatLim - 1).U) {
         burst_queue.io.enq.valid := true.B
+        val beatBufferCat = Cat(beatBuffer.reverse)
+        val bgc = Cat(bytesGrouped.reverse)
+        burst_queue.io.enq.bits := Cat(bgc, beatBufferCat)
         beatCounter := 0.U
       }
     }

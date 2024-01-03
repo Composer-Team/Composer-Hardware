@@ -6,8 +6,8 @@ import chisel3._
 import composer.MemoryStreams.HasMemoryInterface
 import composer.Platforms.ASICMemoryCompilerKey
 
-class ASAP7_SP_SRAM (rows: Int, dataBits: Int)(implicit p: Parameters) extends BlackBox with HasMemoryInterface {
-  override val desiredName = p(ASICMemoryCompilerKey).getMemoryName(nPorts = 1, rows, dataBits)
+class ASAP7SRAM(rows: Int, dataBits: Int)(implicit p: Parameters) extends BlackBox with HasMemoryInterface {
+  override val desiredName = p(ASICMemoryCompilerKey).asInstanceOf[ASAP7MemoryCompiler].getMemoryName(nPorts = 1, rows, dataBits)
   val addrBits = log2Up(rows)
   val io = IO(new Bundle() {
     val clk = Input(Bool())

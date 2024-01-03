@@ -86,6 +86,7 @@ class TLSourceShrinkerDynamicBlocking(maxNIDs: Int)(implicit p: Parameters) exte
         when(in.a.fire) {
           a_in := in.a.bits
           a_in_valid := true.B
+          prevSource := in.a.bits.source
           when (isTxContinuation) {
             a_in.source := prevSourceMap
             longBeatCount := longBeatCount + 1.U

@@ -7,28 +7,32 @@ import chisel3.util._
 import composer.Generation.BuildMode
 import composer.MemoryStreams.RAM.{RegMem, SyncReadMemMem}
 import composer.MemoryStreams._
-import composer.Platforms.{ASICMemoryCompilerKey, BuildModeKey}
+import composer.Platforms.ASIC.ProcessCorner.ProcessCorner
+import composer.Platforms.ASIC.ProcessTemp.ProcessTemp
+import composer.Platforms.{ASICMemoryCompilerKey, BuildModeKey, DefaultClockRateKey}
+import os.Path
 
 import scala.annotation.tailrec
 
-abstract class MemoryCompiler {
-  /**
-   * Sequence of available memories for each number of supported ports
-   */
-  val mems: Map[Int, Seq[SD]]
+/**
+ * The linkage of this memory compiler goes to an actual program that can compile memories, their datasheets, etc...
+ * This in an important distinction because it makes it much harder to enumerate all of the memories in a search for
+ * a memory cascade. To deal with this, such a compiler must provide its own search.
+ */
+trait CanCompileMemories {
+  def getMemoryCascade(suggestedRows: Int, suggestedColumns: Int, nPorts: Int, latency: Int, reqFreqMHz: Int): Option[CascadeDescriptor]
+}
 
-  val isActiveHighSignals: Boolean
+/**
+ * The linkage of this memory compiler is to a static list of memories that we don't expect to have datasheets
+ * or much of anything besides just the cell libs. Provide just the
+ */
+trait CannotCompileMemories extends CanCompileMemories {
+  val availableMems: Map[Int, Seq[SD]]
 
-  def isTooSmall(nRows: Int, nCols: Int): Boolean
-
-  def generateMemoryFactory(nPorts: Int, nRows: Int, nColumns: Int)(implicit p: Parameters): () => BaseModule with HasMemoryInterface
-
-  def getMemoryName(nPorts: Int, nRows: Int, nColumns: Int): String
-
-  def getMemoryCascade(suggestedRows: Int, suggestedColumns: Int, nPorts: Int, latency: Int): CascadeDescriptor = {
+  def getMemoryCascade(suggestedRows: Int, suggestedColumns: Int, nPorts: Int, latency: Int, reqFreqMHz: Int = 0): Option[CascadeDescriptor] = {
     // first figure out how deep we have to cascade.
-    val ms = mems.get(nPorts)
-    ms match {
+    availableMems.get(nPorts) match {
       case Some(memSet) =>
         val maxRows = memSet.map(_.nRows).max
         require(latency * maxRows >= suggestedRows,
@@ -73,14 +77,24 @@ abstract class MemoryCompiler {
         val sieveRes = sieve(max_width, basis,
           Map.from(basis.map(p => (p, List(p)))))
         val chosenWidth = sieveRes.filter(p => p._1 >= suggestedColumns).toList.minBy(_._1)
-        CascadeDescriptor(chosenDepth, chosenWidth._2)
+        Some(CascadeDescriptor(Seq.fill(chosenWidth._2.length)(chosenDepth), chosenWidth._2))
       case None =>
         // The memory compiler doesn't support SRAMs with the require portage. Pass the problem down the line.
         // if the Compiler supports RegMems, then it will succeed, otherwise, fail later
         val d = 1 << log2Up((suggestedRows.toFloat / latency).ceil.toInt)
-        CascadeDescriptor(d, Seq(suggestedColumns))
+        Some(CascadeDescriptor(Seq(d), Seq(suggestedColumns)))
     }
   }
+}
+
+abstract class MemoryCompiler {
+  val supportedCorners: Seq[(ProcessCorner, ProcessTemp)]
+
+  val mostPortsSupported: Int
+
+  val isActiveHighSignals: Boolean
+
+  def generateMemoryFactory(nPorts: Int, nRows: Int, nColumns: Int)(implicit p: Parameters): () => BaseModule with HasMemoryInterface
 }
 
 private class C_ASIC_MemoryCascade(rows: Int,
@@ -119,118 +133,109 @@ private class C_ASIC_MemoryCascade(rows: Int,
 
 object MemoryCompiler {
   case class MemoryArrayDescriptor(name: String, rows: Int, cols: Int, modPath: String, cells: Seq[String])
+
   /**
    * Build a large SRAM structure from the provided SRAM cells in the library. This function is expected to be
    * called from a module that will implement the required size and width of the memory with a given latency.
    * This method will implement that behavior given the provided SRAM cells. For this reason, the caller should
    * not implement logic in the module - only call this function. The caller should also have an implicit `io`
    * of type `CMemoryIOBundle` so that we can correctly tie signals.
-   * @param latency latency of the memory
+   *
+   * @param latency   latency of the memory
    * @param dataWidth width of the data
-   * @param nRows number of elements of data in the memory
-   * @param nPorts number of ports for the memory. Not all ports are supported for all memories. This will be
-   *               library and platform limited.
-   * @param io IO in the parent context. Needs to be a CMemoryIOBundle
+   * @param nRows     number of elements of data in the memory
+   * @param nPorts    number of ports for the memory. Not all ports are supported for all memories. This will be
+   *                  library and platform limited.
+   * @param io        IO in the parent context. Needs to be a CMemoryIOBundle
    */
   def buildSRAM(Latency: Int, dataWidth: Int, nRows: Int, nPorts: Int)(implicit io: CMemoryIOBundle, p: Parameters): Unit = {
-    if (p(ASICMemoryCompilerKey).isTooSmall(nRows, dataWidth) || p(BuildModeKey) == BuildMode.Simulation) {
-      println("Override Using SRMM for memory")
-      val mem = Module(new SyncReadMemMem(0, 0, nPorts, nRows, dataWidth, Latency))
-      mem.mio.clock := io.clock
-      mem.suggestName(s"mem_${nRows}x${dataWidth}x${nPorts}_l${Latency}")
-      // hook ports into io
+    val (memory_chain_latency, preStage, postStage) = {
+      def works(latency: Int): Boolean = {
+        p(ASICMemoryCompilerKey).getMemoryCascade(nRows, dataWidth, nPorts, latency, p(DefaultClockRateKey)).isDefined
+      }
+
+      def rn[T <: Data](x: T): T = {
+        val r = Wire(x.cloneType)
+        withClock(io.clock.asClock) {
+          r := RegNext(x)
+        }
+        r
+      }
+
+      if (works(Latency - 2)) (Latency - 2, (x: Data) => rn(x), (x: Data) => rn(x))
+      else if (works(Latency - 1)) (Latency - 1, (x: Data) => x, (x: Data) => rn(x))
+      else {
+        val mem = Module(new SyncReadMemMem(0, 0, nPorts, nRows, dataWidth, Latency))
+        mem.mio.clock := io.clock
+        mem.suggestName(s"mem_${nRows}x${dataWidth}x${nPorts}_l${Latency}")
+        // hook ports into io
         (0 until nPorts) foreach { port_idx =>
-        io.data_out(port_idx) := mem.mio.data_out(port_idx)
-        mem.mio.data_in(port_idx) := io.data_in(port_idx)
-        mem.mio.read_enable(port_idx) := io.read_enable(port_idx)
-        mem.mio.chip_select(port_idx) := io.chip_select(port_idx)
-        mem.mio.write_enable(port_idx) := io.write_enable(port_idx)
-        mem.mio.addr(port_idx) := io.addr(port_idx)
-
-      }
-    } else {
-      println("Using SRAM for memory")
-      val (memory_chain_latency, preStage, postStage) = {
-        def works(latency: Int): Boolean = {
-          try {
-            p(ASICMemoryCompilerKey).getMemoryCascade(nRows, dataWidth, nPorts, latency).depth
-            true
-          } catch {
-            case _: Throwable => false
-          }
+          io.data_out(port_idx) := mem.mio.data_out(port_idx)
+          mem.mio.data_in(port_idx) := io.data_in(port_idx)
+          mem.mio.read_enable(port_idx) := io.read_enable(port_idx)
+          mem.mio.chip_select(port_idx) := io.chip_select(port_idx)
+          mem.mio.write_enable(port_idx) := io.write_enable(port_idx)
+          mem.mio.addr(port_idx) := io.addr(port_idx)
         }
-
-        def rn[T <: Data](x: T): T = {
-          val r = Wire(x.cloneType)
-          withClock (io.clock.asClock) {
-            r := RegNext(x)
-          }
-          r
-        }
-
-        if (works(Latency-2)) (Latency-2, (x: Data) => rn(x), (x: Data) => rn(x))
-        else if (works(Latency-1)) (Latency-1, (x: Data) => x, (x: Data) => rn(x))
-        else {
-          require(works(Latency), "The provided latency is not sufficient for providiing memory of the requested size and width")
-          (Latency, (x: Data) => x, (x: Data) => x)
-        }
+        composer.Generation.CLogger.log(s"Failed to find suitable SRAM configuration for ${nPorts}x${nRows}x${dataWidth} at L=${Latency}" +
+          s" Falling back to Register-based memory")
+        (Latency, (x: Data) => x, (x: Data) => x)
       }
-      val memoryStructure = p(ASICMemoryCompilerKey).getMemoryCascade(nRows, dataWidth, nPorts, memory_chain_latency)
-      val totalRowBits = log2Up(nRows)
-      val cascadeRows = Seq.fill(memory_chain_latency)(memoryStructure.depth)
-      val addressBases = cascadeRows.zip(cascadeRows.scan(0)(_ + _)).map {
-        case (sz, sum) => sum >> log2Up(sz)
-      }
+    }
+    val memoryStructure = p(ASICMemoryCompilerKey).getMemoryCascade(nRows, dataWidth, nPorts, memory_chain_latency, p(DefaultClockRateKey)).get
+    val totalRowBits = log2Up(nRows)
+    val cascadeRows = memoryStructure.depths
+    val addressBases = cascadeRows.zip(cascadeRows.scan(0)(_ + _)).map {
+      case (sz, sum) => sum >> log2Up(sz)
+    }
 
-      def al_switch(a: Bool): Bool = {
-        if (p(ASICMemoryCompilerKey).isActiveHighSignals) a else !a
-      }
+    def al_switch(a: Bool): Bool = {
+      if (p(ASICMemoryCompilerKey).isActiveHighSignals) a else !a
+    }
 
-      val banks = Seq.tabulate(memoryStructure.bankWidths.length) { bank_idx =>
-        val data_offset = (0 until bank_idx).map(memoryStructure.bankWidths(_)).sum
-        val bank_width = memoryStructure.bankWidths(bank_idx)
-        val banks_i = io.data_in.map(d => d(data_offset + bank_width - 1, data_offset))
-        val banks_o = Seq.fill(nPorts)(Wire(UInt(bank_width.W)))
-        val cascade = Seq.tabulate(memory_chain_latency) { idx =>
-          val m = Module(
-            new C_ASIC_MemoryCascade(
-              cascadeRows(idx),
-              bank_width,
-              Math.max(0, totalRowBits - log2Up(cascadeRows(idx))),
-              addressBases(idx),
-              nPorts
-            )
+    val banks = Seq.tabulate(memoryStructure.bankWidths.length) { bank_idx =>
+      val data_offset = (0 until bank_idx).map(memoryStructure.bankWidths(_)).sum
+      val bank_width = memoryStructure.bankWidths(bank_idx)
+      val banks_i = io.data_in.map(d => d(data_offset + bank_width - 1, data_offset))
+      val banks_o = Seq.fill(nPorts)(Wire(UInt(bank_width.W)))
+      val cascade = Seq.tabulate(memory_chain_latency) { idx =>
+        val m = Module(
+          new C_ASIC_MemoryCascade(
+            cascadeRows(idx),
+            bank_width,
+            Math.max(0, totalRowBits - log2Up(cascadeRows(idx))),
+            addressBases(idx),
+            nPorts
           )
-          m.suggestName(s"mem_${nRows}x${dataWidth}x${nPorts}_l${memory_chain_latency}_bank${bank_idx}_stage${idx}}")
-          m
-        }
-        cascade zip cascade.tail foreach { case (front, back) =>
-          back.io.addr <> front.io.addr_FW
-          back.io.chip_select <> front.io.chip_select_FW
-          back.io.data_in <> front.io.data_out
-          back.io.write_enable <> front.io.write_enable_FW
-          back.io.read_enable <> front.io.read_enable_FW
-        }
-        cascade.foreach { csc => csc.io.clock := io.clock }
-        val head = cascade.head
-        val tail = cascade.last
-        (0 until nPorts) foreach { port_idx =>
-          head.io.addr(port_idx) := preStage(io.addr(port_idx))
-          head.io.data_in(port_idx) := preStage(banks_i(port_idx))
-          head.io.chip_select(port_idx) := preStage(al_switch(io.chip_select(port_idx)))
-          head.io.write_enable(port_idx) := preStage(al_switch(io.write_enable(port_idx)))
-          head.io.read_enable(port_idx) := preStage(al_switch(io.read_enable(port_idx)))
-          banks_o(port_idx) := tail.io.data_out(port_idx)
-        }
-        (bank_idx, banks_o, cascade.map(_.name))
+        )
+        m.suggestName(s"mem_${nRows}x${dataWidth}x${nPorts}_l${memory_chain_latency}_bank${bank_idx}_stage${idx}}")
+        m
       }
+      cascade zip cascade.tail foreach { case (front, back) =>
+        back.io.addr <> front.io.addr_FW
+        back.io.chip_select <> front.io.chip_select_FW
+        back.io.data_in <> front.io.data_out
+        back.io.write_enable <> front.io.write_enable_FW
+        back.io.read_enable <> front.io.read_enable_FW
+      }
+      cascade.foreach { csc => csc.io.clock := io.clock }
+      val head = cascade.head
+      val tail = cascade.last
+      (0 until nPorts) foreach { port_idx =>
+        head.io.addr(port_idx) := preStage(io.addr(port_idx))
+        head.io.data_in(port_idx) := preStage(banks_i(port_idx))
+        head.io.chip_select(port_idx) := preStage(al_switch(io.chip_select(port_idx)))
+        head.io.write_enable(port_idx) := preStage(al_switch(io.write_enable(port_idx)))
+        head.io.read_enable(port_idx) := preStage(al_switch(io.read_enable(port_idx)))
+        banks_o(port_idx) := tail.io.data_out(port_idx)
+      }
+      (bank_idx, banks_o, cascade.map(_.name))
+    }
 
-      //    unregisteredMemoryArrays = unregisteredMemoryArrays :+ (s"mem_${nRows}x${dataWidth}x${nPorts}_l${latency}", memoryStructure.bankWidths.length, latency, banks.flatMap(_._3))
-      withClock(io.clock.asClock) {
-        (0 until nPorts) foreach { port_idx =>
-          val bank_o = banks.map(p => (p._1, p._2(port_idx)))
-          io.data_out(port_idx) := postStage(Cat(bank_o.sortBy(_._1).reverse.map(_._2)))
-        }
+    withClock(io.clock.asClock) {
+      (0 until nPorts) foreach { port_idx =>
+        val bank_o = banks.map(p => (p._1, p._2(port_idx)))
+        io.data_out(port_idx) := postStage(Cat(bank_o.sortBy(_._1).reverse.map(_._2)))
       }
     }
   }

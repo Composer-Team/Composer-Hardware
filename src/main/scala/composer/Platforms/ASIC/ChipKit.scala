@@ -35,6 +35,7 @@ class WithChipKitPlatform(synthesis: Boolean = false)
     case BuildSynthesisKey => synthesis
     case PlatformTypeKey => PlatformType.ASIC
     case FrontBusProtocolKey => FrontBusProtocol.AHB
+    case PlatformNumSLRs => 1
     case DefaultClockRateKey => 100
     case HasCoherence => None
 

@@ -144,7 +144,7 @@ abstract class LazyModuleWithSLRs()(implicit p: Parameters) extends LazyModule {
   val baseName: String
   private var gl_id = 0
 
-  def LazyModuleWithSLR[T <: LazyModule](mod: => T, annotations: Seq[AssignmentAnnotation] = Seq.empty, slr_id: Int, requestedName: Option[String] = None)(implicit valName: ValName): T = {
+  def LazyModuleWithFloorplan[T <: LazyModule](mod: => T, annotations: Seq[AssignmentAnnotation] = Seq.empty, slr_id: Int, requestedName: Option[String] = None)(implicit valName: ValName): T = {
     val lm = LazyModule(mod)
     if (!ConstraintGeneration.canDistributeOverSLRs()) return lm
     val name = requestedName.getOrElse(baseName + "_" + valName.name) + "_" + gl_id

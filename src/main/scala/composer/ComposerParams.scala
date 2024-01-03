@@ -5,7 +5,7 @@ import composer.ComposerConstraintHint.ComposerConstraintHint
 import composer.Generation.BuildMode
 import composer.MemoryStreams._
 import composer.Platforms.BuildModeKey
-import composer.Systems.{AccelCoreWrapper, AcceleratorCore}
+import composer.Systems._
 import composer.common.{AccelCommand, AccelResponse, AccelRoccCommand}
 import freechips.rocketchip.amba.axi4.{AXI4MasterParameters, AXI4MasterPortParameters}
 import freechips.rocketchip.devices.debug._
@@ -55,7 +55,7 @@ case class BlackboxBuilderCustom(coreCommand: AccelCommand, coreResponse: AccelR
 
 case class BlackboxBuilderRocc() extends ModuleConstructor
 
-case class ModuleBuilder(constructor: (AccelCoreWrapper, Parameters) => AcceleratorCore) extends ModuleConstructor
+case class ModuleBuilder(constructor: (ComposerSystem, Parameters) => AcceleratorCore) extends ModuleConstructor
 
 case class AcceleratorSystemConfig(
                                     nCores: Int,
@@ -145,7 +145,7 @@ class WithComposer(
     )
   case MonitorsEnabled => false
   case TileKey => RocketTileParams()
-  case MaxInFlightMemTxsPerSource => 4
+  case MaxInFlightMemTxsPerSource => 1
   case DRAMBankBytes => 4 * 1024
 })
 

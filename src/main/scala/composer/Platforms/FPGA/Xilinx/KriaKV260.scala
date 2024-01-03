@@ -44,16 +44,16 @@ class WithKriaPlatform(nMemoryChannels: Int = 1, clockRate_MHz: Int = 100)
     case PlatformSLRs => None
     case HasCoherence =>
       None
-//      Some(CoherenceConfiguration(MasterPortParams(
-//      base = 0,
-//      size = 1L << 44,
-//      beatBytes = 16,
-//      idBits = 6),
-//      64))
+    //      Some(CoherenceConfiguration(MasterPortParams(
+    //      base = 0,
+    //      size = 1L << 44,
+    //      beatBytes = 16,
+    //      idBits = 6),
+    //      64))
     case IsAWS => false
     case PostProcessorMacro => c: Config => {
       if (c(BuildModeKey) == BuildMode.Synthesis) {
-        os.write(os.Path(ComposerBuild.composerGenDir) / "synth.tcl",
+        os.write.over(os.Path(ComposerBuild.composerGenDir) / "synth.tcl",
           composer.Platforms.FPGA.Xilinx.SynthScript(
             "composer",
             "output",
