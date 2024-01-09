@@ -22,14 +22,17 @@ object SequentialReader {
 
 class SequentialReader(val dWidth: Int,
                        val tl_bundle: TLBundle,
-                       tl_edge: TLEdgeOut)(implicit p: Parameters) extends Module {
+                       tl_edge: TLEdgeOut,
+                       minSizeBytes: Option[Int] = None)(implicit p: Parameters) extends Module {
   val beatBytes = tl_edge.manager.beatBytes
   val beatBits = beatBytes * 8
   val addressBits = log2Up(tl_edge.manager.maxAddress)
   val maxBytes = dWidth / 8
   val largeTxNBeats = Math.max(p(PrefetchSourceMultiplicity), maxBytes / beatBytes)
   val nSources = tl_edge.client.endSourceId
-  val prefetchRows = nSources * p(PrefetchSourceMultiplicity)
+  val prefetchRows = Math.max(
+    nSources * p(PrefetchSourceMultiplicity),
+    minSizeBytes.getOrElse(0) / beatBytes)
   val hasOneSource = nSources == 1
   require(isPow2(maxBytes))
 

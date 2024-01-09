@@ -126,8 +126,8 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
           (pr(0), pr(1).toInt)
       }
     )
-
-    os.makeDir.all(gsrc_dir)
+    os.remove.all(targetDir)
+    os.makeDir.all(targetDir)
     val configWithBuildMode = new Config(config.alterPartial {
       case BuildModeKey => buildMode
     })

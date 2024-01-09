@@ -24,7 +24,8 @@ class SequentialWriteChannelIO(maxBytes: Int)(implicit p: Parameters) extends Bu
  */
 class SequentialWriter(nBytes: Int,
                        val tl_outer: TLBundle,
-                       edge: TLEdgeOut)
+                       edge: TLEdgeOut,
+                       minSizeBytes: Option[Int] = None)
                       (implicit p: Parameters) extends Module {
   require(isPow2(nBytes))
   private val beatBytes = tl_outer.params.dataBits / 8
@@ -40,8 +41,12 @@ class SequentialWriter(nBytes: Int,
 
   val burst_queue = Module(new Queue(
     UInt(tl_outer.params.dataBits.W),
-    p(PrefetchSourceMultiplicity) * nSources,
-    pipe = true))
+    Math.max(
+      minSizeBytes.getOrElse(0) / beatBytes,
+      p(PrefetchSourceMultiplicity) * nSources),
+    pipe = true,
+    useSyncReadMem = true // hopefully this gives us BRAM in FPGA. Worry about ASIC later ugh
+  ))
   burst_queue.io.deq.ready := tl_out.a.fire
 
   // keep two different counts so that we can keep enqueueing while bursting

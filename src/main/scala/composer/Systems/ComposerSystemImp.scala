@@ -2,19 +2,17 @@ package composer.Systems
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.experimental.hierarchy.{Definition, Instance, instantiable}
 import chisel3.util._
 import composer._
 import composer.ComposerParams._
 import composer.Generation.{ComposerBuild, LazyModuleImpWithSLRs}
-import composer.MemoryStreams.{CReadChannelParams, SequentialReader, SequentialWriter}
+import composer.MemoryStreams._
 import composer.RoccHelpers._
 import composer.TLManagement._
 import composer.common._
 import composer.Platforms.FPGA._
 import composer.Platforms.PlatformNumSLRs
 import freechips.rocketchip.subsystem.ExtMem
-import freechips.rocketchip.tilelink.TLBundleParameters
 
 import scala.annotation.tailrec
 

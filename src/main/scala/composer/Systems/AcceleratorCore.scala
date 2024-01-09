@@ -148,7 +148,7 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
     case mp: CReadChannelParams =>
       (mp.name,
         (0 until mp.nChannels).map { _ =>
-          (IO(Decoupled(new ChannelTransactionBundle)), IO(new DataChannelIO(mp.dataBytes * 8)))
+          (IO(Decoupled(new ChannelTransactionBundle)), IO(Flipped(new DataChannelIO(mp.dataBytes * 8))))
         })
   })
   val write_ios = Map.from(outer.memParams.filter(_.isInstanceOf[CWriteChannelParams]).map {
@@ -245,49 +245,7 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
           val q = write_ios(name)
           (List(q(id)._1), List(q(id)._2))
       }
-//      if (outer.memParams.count(_.name == name) == 0) {
-//        throw new Exception(s"getWriterModules failed. Tried to fetch a channel set with a name(\"$name\") that doesn't exist. Declared names: " +
-//          outer.writers.map(_._1))
-//      }
-//      val params = outer.memParams.filter(_.name == name)(0).asInstanceOf[CWriteChannelParams]
-//      val mod = idx match {
-//        case Some(id) =>
-//          val client = getTLClients(name, outer.writers)(id)
-//          List(Module(new SequentialWriter(
-//            nBytes = params.dataBytes,
-//            tl_outer = client.out(0)._1,
-//            edge = client.out(0)._2)))
-//        case None => getTLClients(name, outer.writers).map(tab_id =>
-//          Module(new SequentialWriter(nBytes = params.dataBytes,
-//            tl_outer = tab_id.out(0)._1,
-//            edge = tab_id.out(0)._2)))
-//      }
-//      //noinspection DuplicatedCode
-//      mod foreach { m =>
-//        m.tl_out <> m.tl_outer
-//        m.suggestName(name)
-//      }
-//
-//      val ret = (mod.map(_.io.req), mod.map(_.io.channel))
-//      ret._2.foreach { dat =>
-//        dat.data.valid := false.B
-//        dat.data.bits := DontCare
-//      }
-//      ret._1.foreach { req =>
-//        req.valid := false.B
-//        req.bits := DontCare
-//      }
-//      ret
     }
-  //
-  //  def getIntraCoreIO[Tcmd <: AccelCommand, Tresp <: AccelResponse](endpoint: String,
-  //                                                                   genCmd: Tcmd = new AccelRoccCommand,
-  //                                                                   genResp: Tresp = new AccelRoccUserResponse): CustomIOWithRouting[Tcmd, Tresp] = {
-  //    val converter = Module(new ComposerIntraCoreIOModule(endpoint, genCmd, genResp))
-  //    converter.respIO <> composer_response_ios_(endpoint)
-  //    converter.cmdIO <> composer_command_ios_(endpoint)
-  //    converter.out
-  //  }
 
   def ComposerIO[T1 <: AbstractAccelCommand](bundleIn: T1): CustomIO[T1, AccelRoccUserResponse] = {
     ComposerIO[T1, AccelRoccUserResponse](bundleIn, new AccelRoccUserResponse)
@@ -310,17 +268,6 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
     custom_rocc_cmd_nbeats = bundleIn.getNBeats
     composerCustomCommandManager.io
   }
-
-//  private def getTLClients(name: String, listList: List[(String, List[TLClientNode])]): List[TLClientNode] = {
-//    listList.filter(_._1 == name) match {
-//      case first :: rst =>
-//        require(rst.isEmpty)
-//        first._2
-//      case _ =>
-//        throw new Exception(s"getReaderModules failed. Tried to fetch a channel set with a name($name) that doesn't exist. Declared names: " +
-//          outer.readers.map(_._1))
-//    }
-//  }
 
   def ComposerIO(): ComposerCoreIO = {
     if (using_custom == CustomCommandUsage.custom) {

@@ -78,7 +78,8 @@ trait CChannelParams {
 case class CReadChannelParams(name: String,
                               dataBytes: Int,
                               nChannels: Int = 1,
-                              maxInFlightTxs: Int = 8) extends CChannelParams {
+                              maxInFlightTxs: Int = 8,
+                              bufferSizeBytesMin: Option[Int] = None) extends CChannelParams {
   require(maxInFlightTxs > 0, s"Max In Flight Transactions must be greater than 0. Got: $maxInFlightTxs")
 }
 
@@ -92,7 +93,8 @@ case class CReadChannelParams(name: String,
 case class CWriteChannelParams(name: String,
                                dataBytes: Int,
                                nChannels: Int = 1,
-                               maxInFlightTxs: Int = 8) extends CChannelParams {
+                               maxInFlightTxs: Int = 8,
+                               bufferSizeBytesMin: Option[Int] = None) extends CChannelParams {
 }
 
 /**

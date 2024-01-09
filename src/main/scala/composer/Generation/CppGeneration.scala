@@ -39,7 +39,7 @@ object CppGeneration {
   private var hook_defs: List[HookDef] = List()
 
   def addUserCppDefinition[t](ty: String, name: String, value: t,
-                              resolveConflicts: Option[(String, t) => t] = None): Unit = {
+                              resolveConflicts: Option[(String, t) => t]): Unit = {
     val ty_f = ty.trim
     val name_f = name.trim
     val existingDefs = user_defs.filter(_.name == name_f)
@@ -87,12 +87,12 @@ object CppGeneration {
     }
   }
 
-  def addPreprocessorDefinition(elems: Seq[(String, String)]): Unit = {
-    elems.foreach(a => addPreprocessorDefinition(a._1, a._2))
+  def addPreprocessorDefinition(elems: Seq[(String, Any)]): Unit = {
+    elems.foreach(a => addPreprocessorDefinition(a._1, a._2.toString))
   }
 
-  def addPreprocessorDefinition(name: String, value: String = ""): Unit = {
-    val ppd = PreprocessorDefinition(name, value)
+  def addPreprocessorDefinition(name: String, value: Any = ""): Unit = {
+    val ppd = PreprocessorDefinition(name, value.toString)
     if (!user_cpp_defs.contains(ppd)) {
       user_cpp_defs = ppd :: user_cpp_defs
     }
