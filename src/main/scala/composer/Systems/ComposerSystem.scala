@@ -25,7 +25,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
   val readers = (0 until nCores) map { core_id =>
     memParams.filter(_.isInstanceOf[CReadChannelParams]).map { para =>
       val param: CReadChannelParams = para.asInstanceOf[CReadChannelParams]
-      (param.name, List.tabulate(para.nChannels) { i =>
+      (param, List.tabulate(para.nChannels) { i =>
         TLClientNode(List(TLMasterPortParameters.v1(
           clients = List(TLMasterParameters.v1(
             name = s"ReadChannel_sys${system_id}_core${core_id}_${para.name}$i",
@@ -39,7 +39,8 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
   val writers = (0 until nCores) map { core_id =>
     memParams.filter(_.isInstanceOf[CWriteChannelParams]).map { mcp =>
       val para = mcp.asInstanceOf[CWriteChannelParams]
-      (para.name, List.tabulate(para.nChannels) { i =>
+      (para,
+        List.tabulate(para.nChannels) { i =>
         TLClientNode(List(TLMasterPortParameters.v1(
           List(TLMasterParameters.v1(
             name = s"WriteChannel_sys${system_id}_core${core_id}_${para.name}$i",
@@ -54,7 +55,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
     param =>
       lazy val mod = LazyModule(param.make)
       mod.suggestName(param.name)
-      (param.name, mod)
+      (param, mod)
   })
   val readerNodes = (0 until nCores).map(coreIdx =>
     (readers(coreIdx).map(_._2) :+ scratch_mod(coreIdx).map(_._2.mem_reader).filter(_.isDefined).map(_.get)).flatten)

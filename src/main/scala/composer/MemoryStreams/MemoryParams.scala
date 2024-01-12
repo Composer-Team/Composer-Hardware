@@ -86,15 +86,21 @@ case class CReadChannelParams(name: String,
 /**
  * Write channel group
  *
- * @param name           The name of the channel
- * @param nChannels      number of memory access channels of this type
- * @param maxInFlightTxs maximum number of AXI/TileLink memory transactions can be inflight per writer module at once
+ * @param name                The name of the channel
+ * @param nChannels           number of memory access channels of this type
+ * @param maxInFlightTxs      maximum number of AXI/TileLink memory transactions can be inflight per writer module at
+ *                            once
+ * @param bufferSizeBytesMin  The minimum size (in bytes) of the write buffer. This ensures that data can be enqueued
+ *                            without stalls until this limit
+ * @param supplyBackwards     Supply the datums in reverse order from how they will be oriented in memory.
+ *                            A "reverse" stream
  */
 case class CWriteChannelParams(name: String,
                                dataBytes: Int,
                                nChannels: Int = 1,
                                maxInFlightTxs: Int = 8,
-                               bufferSizeBytesMin: Option[Int] = None) extends CChannelParams {
+                               bufferSizeBytesMin: Option[Int] = None,
+                               supplyBackwards: Boolean = false) extends CChannelParams {
 }
 
 /**

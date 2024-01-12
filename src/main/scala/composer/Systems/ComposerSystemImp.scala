@@ -320,30 +320,35 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
 
   /* handle all memory */
   cores.zip(outer.readers) foreach { case (core, readSet) =>
-    readSet.foreach { case (nodeName, nodes) =>
-      val clients = core.read_ios(nodeName)
+    readSet.foreach { case (nodeParams, nodes) =>
+      val (cParams, clients) = core.read_ios(nodeParams.name)
       nodes zip clients foreach { case (node, client) =>
         val readerModule = Module(new SequentialReader(client._2.data.bits.getWidth,
-          node.out(0)._1, node.out(0)._2))
+          node.out(0)._1, node.out(0)._2,
+          cParams.bufferSizeBytesMin))
         readerModule.io.channel <> client._2
         readerModule.io.req <> client._1
         readerModule.tl_out <> node.out(0)._1
       }}}
   cores.zip(outer.writers) foreach { case (core, writeSet) =>
     writeSet foreach { case (nodeName, nodes) =>
-      val clients = core.write_ios(nodeName)
+      val (cParams, clients) = core.write_ios(nodeName.name)
       nodes zip clients foreach { case (node, client) =>
-      val writerModule = Module(new SequentialWriter(client._2.dWidth/8,
-        node.out(0)._1, node.out(0)._2))
+      val writerModule = Module(new SequentialWriter(
+        client._2.dWidth/8,
+        node.out(0)._1, node.out(0)._2,
+        cParams.bufferSizeBytesMin,
+        cParams.supplyBackwards))
         writerModule.io.channel <> client._2
         writerModule.io.req <> client._1
         writerModule.tl_out <> node.out(0)._1
       }
+
     }
   }
   cores.zip(outer.scratch_mod) foreach { case (core, smods) =>
     smods foreach { case (spad_name, smod) =>
-      val spi = core.sp_ios(spad_name)
+      val (sparams, spi) = core.sp_ios(spad_name.name)
       spi._1 <> smod.module.req
       spi._2 zip smod.module.IOs foreach { case (a, b) => a <> b }
     }

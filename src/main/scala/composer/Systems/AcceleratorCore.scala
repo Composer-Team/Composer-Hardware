@@ -147,25 +147,23 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
   val read_ios = Map.from(outer.memParams.filter(_.isInstanceOf[CReadChannelParams]).map {
     case mp: CReadChannelParams =>
       (mp.name,
-        (0 until mp.nChannels).map { _ =>
+        (mp, (0 until mp.nChannels).map { _ =>
           (IO(Decoupled(new ChannelTransactionBundle)), IO(Flipped(new DataChannelIO(mp.dataBytes * 8))))
-        })
+        }))
   })
   val write_ios = Map.from(outer.memParams.filter(_.isInstanceOf[CWriteChannelParams]).map {
     case mp: CWriteChannelParams =>
       (mp.name,
-        (0 until mp.nChannels).map{_ =>
-          val req = IO(Decoupled(new ChannelTransactionBundle))
-          val dat = IO(Flipped(new WriterDataChannelIO(mp.dataBytes * 8)))
-          (req, dat)
-        })
+        (mp, (0 until mp.nChannels).map{_ =>
+          (IO(Decoupled(new ChannelTransactionBundle)), IO(Flipped(new WriterDataChannelIO(mp.dataBytes * 8))))
+        }))
   })
   val sp_ios = Map.from(outer.memParams.filter(_.isInstanceOf[CScratchpadParams]).map {
     case mp: CScratchpadParams =>
       (mp.name,
-        (IO(new ScratchpadMemReqPort(addrBits, mp.nDatas.intValue())), (0 until mp.nPorts).map(_ =>
+        (mp, (IO(new ScratchpadMemReqPort(addrBits, mp.nDatas.intValue())), (0 until mp.nPorts).map(_ =>
           IO(Flipped(new ScratchpadDataPort(log2Up(mp.nDatas.intValue()), mp.dataWidthBits.intValue())))
-        )))
+        ))))
   })
 
 
@@ -182,10 +180,10 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
     idx match {
       case None =>
         val q = read_ios(name)
-        (q.map(_._1).toList, q.map(_._2).toList)
+        (q._2.map(_._1).toList, q._2.map(_._2).toList)
       case Some(id) =>
         val q = read_ios(name)
-        (List(q(id)._1), List(q(id)._2))
+        (List(q._2(id)._1), List(q._2(id)._2))
     }
 //    val params = outer.memParams.filter(_.name == name)(0).asInstanceOf[CReadChannelParams]
 //    val mod = idx match {
@@ -231,7 +229,7 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
 //      val mod = lm.module
 //
 //      ScratchpadModuleChannel(mod.req, mod.IOs)
-      val a = sp_ios(name)
+      val a = sp_ios(name)._2
       ScratchpadModuleChannel(a._1, a._2)
     }
 
@@ -240,10 +238,10 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
       idx match {
         case None =>
           val q = write_ios(name)
-          (q.map(_._1).toList, q.map(_._2).toList)
+          (q._2.map(_._1).toList, q._2.map(_._2).toList)
         case Some(id) =>
           val q = write_ios(name)
-          (List(q(id)._1), List(q(id)._2))
+          (List(q._2(id)._1), List(q._2(id)._2))
       }
     }
 

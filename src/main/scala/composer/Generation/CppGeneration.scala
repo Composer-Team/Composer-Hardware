@@ -175,6 +175,7 @@ object CppGeneration {
       s"$structName(${safe_join(structMembersWithType, ", ")}) : ${safe_join(resp.realElements.map(a => f"${a._1}(${a._1})"), ", ")} {}\n}"
 
     val template_sig = f"template<> $structName composer::response_handle<$structName>::get()"
+    val try_template_sig = f"template<> std::optional<$structName> composer::response_handle<$structName>::try_get()"
 
     def command_sig(is_dec: Boolean) = f"composer::response_handle<$structName> ${sysName}Command(uint16_t core_id, $signature," +
       f" const std::vector<composer::remote_ptr>& memory_operands${if (is_dec) " = {}" else ""})"
@@ -211,9 +212,14 @@ object CppGeneration {
          |$template_sig {
          |  auto r = rg.get();
          |  auto resp = r.data;
-         |
          |$template_decs
-         |
+         |  return $structName($template_def);
+         |}
+         |$try_template_sig {
+         |  auto r = rg.try_get();
+         |  if (!r.has_value()) return {};
+         |  auto resp = r->data;
+         |$template_decs
          |  return $structName($template_def);
          |}
          |
@@ -232,6 +238,7 @@ object CppGeneration {
       f"""
          |$response_struct;
          |$template_sig;
+         |$try_template_sig;
          |${command_sig(true)};
          |""".stripMargin
     (declaration, definition)
@@ -330,48 +337,38 @@ object CppGeneration {
          |#include <composer/alloc.h>
          |#include <composer/rocc_cmd.h>
          |#include <cinttypes>
+         |#include <optional>
          |#include <cassert>
          |
          |#ifndef COMPOSER_ALLOCATOR_GEN
          |#define COMPOSER_ALLOCATOR_GEN
          |#define AXIL_BUS_WIDTH ${p(FrontBusBeatBytes) * 8}
          |#define XLEN ${p(XLen)}
-         |
          |// allocator declarations backends that do not have discrete memory or for simulator
          |$allocator
-         |
          |// address bits used by FPGA
          |$addrBits
-         |
          |// const defines declared by user cores
          |$defines
-         |
          |// enums declared by user cores
          |$enums
-         |
          |// C Preprocessor definitions declared by user cores
          |$cpp_defs
-         |
          |// MMIO address + field offsets
          |static const uint8_t system_id_bits = $SystemIDLengthKey;
          |static const uint8_t core_id_bits = $CoreIDLengthKey;
          |static const composer::composer_pack_info pack_cfg(system_id_bits, core_id_bits);
          |$mmios
          |$mmio_addr
-         |
          |// IDs to access systems directly through RoCC interface
          |$system_ids
-         |
          |// Custom command interfaces
          |$commandDeclarations
-         |
          |// misc
          |$idLengths
          |$dma_def
-         |
          |// Verilator support
          |$mem_def
-         |
          |#endif
          |//
     """.stripMargin)
