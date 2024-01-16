@@ -242,7 +242,7 @@ class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
 
   // Generate C++ headers once all of the cores have been generated so that they have
   //   the opportunity to dictate which symbols they want exported
-  CppGeneration.genCPPHeader(outer.cmd_resp_axilhub.widget.module.crRegistry, acc.acc)(p.alterPartial {
+  CPP.Generation.genCPPHeader(outer.cmd_resp_axilhub.widget.module.crRegistry, acc.acc)(p.alterPartial {
     case ExtMem => if (outer.AXI_MEM.isDefined) p(ExtMem) else p(ExtMem).map(_.copy(nMemoryChannels = 0))
   })
   ConstraintGeneration.writeConstraints()
