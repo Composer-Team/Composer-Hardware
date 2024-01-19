@@ -121,20 +121,27 @@ class SequentialReader(val dWidth: Int,
 
   val (write_ready, read_ready, write_port_idx, read_port_idx) = if (hasDualPortMemory) {
     prefetch_buffers.clock := clock.asBool
-    val Ridx = prefetch_buffers.getReadPortIdx(0)
-    val Widx = prefetch_buffers.getWritePortIdx(0)
-    prefetch_buffers.addr(Ridx) := prefetch_readIdx
-    prefetch_buffers.data_in(Ridx) := DontCare
-    prefetch_buffers.write_enable(Ridx) := false.B
-    prefetch_buffers.read_enable(Ridx) := true.B
-    prefetch_buffers.chip_select(Ridx) := false.B
+    val (ridx, widx) = if (prefetch_buffers.nReadPorts == 0) {
+      // this may happen if the SRAM compiler only generally supports single and dual port memories and doesn't
+      // make a distinction between the functionalities of each port
+      (0, 1)
+    } else {
+      (prefetch_buffers.getReadPortIdx(0), prefetch_buffers.getWritePortIdx(0))
+    }
+//    val Ridx = prefetch_buffers.getReadPortIdx(0)
+//    val Widx = prefetch_buffers.getWritePortIdx(0)
+    prefetch_buffers.addr(ridx) := prefetch_readIdx
+    prefetch_buffers.data_in(ridx) := DontCare
+    prefetch_buffers.write_enable(ridx) := false.B
+    prefetch_buffers.read_enable(ridx) := true.B
+    prefetch_buffers.chip_select(ridx) := false.B
 
-    prefetch_buffers.chip_select(Widx) := false.B
-    prefetch_buffers.read_enable(Widx) := false.B
-    prefetch_buffers.write_enable(Widx) := true.B
-    prefetch_buffers.data_in(Widx) := DontCare
-    prefetch_buffers.addr(Widx) := DontCare
-    (true.B, true.B, Widx, Ridx)
+    prefetch_buffers.chip_select(widx) := false.B
+    prefetch_buffers.read_enable(widx) := false.B
+    prefetch_buffers.write_enable(widx) := true.B
+    prefetch_buffers.data_in(widx) := DontCare
+    prefetch_buffers.addr(widx) := DontCare
+    (true.B, true.B, widx, ridx)
   } else {
     prefetch_buffers.clock := clock.asBool
     val fillLevel = Reg(UInt(log2Up(prefetchRows).W))

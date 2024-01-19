@@ -179,7 +179,7 @@ object MemoryCompiler {
         }
         composer.Generation.CLogger.log(s"Failed to find suitable SRAM configuration for ${nPorts}x${nRows}x${dataWidth} at L=${Latency}" +
           s" Falling back to Register-based memory")
-        (Latency, (x: Data) => x, (x: Data) => x)
+        return
       }
     }
     val memoryStructure = p(ASICMemoryCompilerKey).getMemoryCascade(nRows, dataWidth, nPorts, memory_chain_latency, p(DefaultClockRateKey)).get
