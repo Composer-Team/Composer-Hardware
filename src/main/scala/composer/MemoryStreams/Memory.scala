@@ -122,8 +122,8 @@ object Memory {
                 cmem.io.A_read := mio.addr(0)
                 cmem.io.A_write := mio.addr(0)
                 cmem.io.OEB := mio.read_enable(0)
-                cmem.io.CSB_read := mio.chip_select(0)
-                cmem.io.CSB_write := mio.chip_select(0)
+                cmem.io.CSB_read := mio.chip_select(0) && mio.read_enable(0)
+                cmem.io.CSB_write := mio.chip_select(0) && mio.write_enable(0)
                 cmem.io.WEB := mio.write_enable(0)
                 mio.data_out(0) := cmem.io.O
                 cmem

@@ -1,7 +1,7 @@
 package composer.Platforms
 
 import chipsalliance.rocketchip.config.Config
-import composer.{CoreCommandLatency, CXbarMaxDegree, PlatformPhysicalMemoryBytes}
+import composer.{CXbarMaxDegree, CoreCommandLatency, HasCoherence, PlatformPhysicalMemoryBytes, PrefetchSourceMultiplicity}
 import composer.Platforms.FPGA.PlatformSLRs
 import composer.Platforms.FrontBusProtocol.FrontBusProtocol
 import composer.Platforms.PlatformType.PlatformType
@@ -11,6 +11,7 @@ class WithSimulationPlatform(nMemoryChannels: Int = 1,
                              platformType: PlatformType = PlatformType.FPGA,
                              frontBusProtocol: FrontBusProtocol = FrontBusProtocol.AXI4,
                              clockRateMHz: Int = 100,
+                             prefetchMult: Int = 16
                             ) extends Config((_, _, _) => {
   case ExtMem =>
     Some(
@@ -34,6 +35,9 @@ class WithSimulationPlatform(nMemoryChannels: Int = 1,
   case HasDiscreteMemory => false
   case FrontBusBeatBytes => 4
   case CoreCommandLatency => 0
+  case PrefetchSourceMultiplicity => prefetchMult
+  case HasCoherence => None
+  case FrontBusAddressBits => 16
 
   case PlatformTypeKey => platformType
   case FrontBusProtocolKey => frontBusProtocol

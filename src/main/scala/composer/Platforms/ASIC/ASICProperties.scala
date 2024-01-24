@@ -26,5 +26,3 @@ object ProcessOperatingConditions extends Enumeration {
   type ProcessOperatingConditions = Value
   val NormalVoltage, LowVoltage = Value
 }
-
-case object BuildSynthesisKey extends Field[Boolean]

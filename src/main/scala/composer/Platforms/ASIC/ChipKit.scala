@@ -6,7 +6,7 @@ import composer.Platforms._
 import freechips.rocketchip.subsystem._
 
 
-class WithChipKitPlatform(synthesis: Boolean = false)
+class WithChipKitPlatform()
   extends Config((_, _, _) => {
     case ExtMem =>
       Some(
@@ -31,8 +31,6 @@ class WithChipKitPlatform(synthesis: Boolean = false)
     case HasDiscreteMemory => false
     case FrontBusBeatBytes => 4
     case CoreCommandLatency => 0
-
-    case BuildSynthesisKey => synthesis
     case PlatformTypeKey => PlatformType.ASIC
     case FrontBusProtocolKey => FrontBusProtocol.AHB
     case PlatformNumSLRs => 1
