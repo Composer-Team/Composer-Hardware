@@ -6,6 +6,7 @@ import composer.Platforms.FPGA.PlatformSLRs
 import composer.Platforms.FrontBusProtocol.FrontBusProtocol
 import composer.Platforms.PlatformType.PlatformType
 import freechips.rocketchip.subsystem.{ExtMem, MasterPortParams, MemoryPortParams}
+import os.Path
 
 class WithSimulationPlatform(nMemoryChannels: Int = 1,
                              platformType: PlatformType = PlatformType.FPGA,
@@ -48,6 +49,6 @@ class WithSimulationPlatform(nMemoryChannels: Int = 1,
   case PlatformSLRs => None
 
   case IsAWS => false
-  case PostProcessorMacro => _: Config => ;
+  case PostProcessorMacro => (_: Config, _: Seq[Path]) => ;
   case HasDisjointMemoryControllers => false
 })

@@ -14,8 +14,8 @@ object ResponseParsing {
       return ComposerResponseDeclarations("composer::rocc_response", "", "")
 
     // otherwise we have a custom type
-    val structName = f"${sysName}Response_t"
-    val structMembersWithType = resp.realElements.map(a => f"${getCType(a._1, a._2.getWidth, a._2.isInstanceOf[SInt])} ${a._1}")
+    val structName = f"${sysName}_${resp.responseName}"
+    val structMembersWithType = resp.realElements.map(a => f"${getCType(resp.elements(a._1), a._1, a._2.getWidth, a._2.isInstanceOf[SInt])} ${a._1}")
     val response_struct = f"struct $structName {\n // struct members \n" +
       safe_join(structMembersWithType.map(_ + ";")) + "\n" +
       "// constructor\n" +

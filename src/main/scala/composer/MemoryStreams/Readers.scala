@@ -24,6 +24,8 @@ class SequentialReader(val dWidth: Int,
                        val tl_bundle: TLBundle,
                        tl_edge: TLEdgeOut,
                        minSizeBytes: Option[Int] = None)(implicit p: Parameters) extends Module {
+  override val desiredName = "SequentialReader_w" + dWidth.toString
+  ComposerBuild.requestModulePartition(this.desiredName)
   val beatBytes = tl_edge.manager.beatBytes
   val beatBits = beatBytes * 8
   val addressBits = log2Up(tl_edge.manager.maxAddress)

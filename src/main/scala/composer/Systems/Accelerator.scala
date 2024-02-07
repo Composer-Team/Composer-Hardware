@@ -83,27 +83,11 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
 
   val cmd = Queue(io.cmd)
 
-  val cmdArb = Module(new RRArbiter(new RoCCCommand, 1))
-  cmdArb.io.in(0) <> cmd
-
   // route cmds between:
-  //  custom0: control opcodes (used for WAIT commands)
-  //  custom3: accelerator commands
-  val cmdRouter = Module(new RoccCommandRouter(Seq(OpcodeSet.custom0, OpcodeSet.custom3)))
-  cmdRouter.io.in <> cmdArb.io.out
-
   val accCmd = Wire(Decoupled(new AccelRoccCommand)) //CUSTOM3, used for everything else
-  accCmd.valid := cmdRouter.io.out(1).valid
-  cmdRouter.io.out(1).ready := accCmd.ready
-  accCmd <> cmdRouter.io.out(1).map(AccelRoccCommand.fromRoccCommand)
+  accCmd <> cmd.map(AccelRoccCommand.fromRoccCommand)
   val system_id = accCmd.bits.inst.system_id
   accCmd.ready := false.B //base case
-
-  val waitingToFlush = RegInit(false.B)
-  cmdRouter.io.out(0).ready := !waitingToFlush
-  when(cmdRouter.io.out(0).fire) {
-    waitingToFlush := true.B
-  }
 
   val systemSoftwareResps = outer.system_tups.filter(_._3.canReceiveSoftwareCommands) map { sys_tup =>
     val sys_queue = Module(new Queue(new AccelRoccCommand, entries = 2))
@@ -122,10 +106,6 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
     sys_tup._1.module.sw_io.get.cmd <> sys_queue.io.deq
 
     // while we're flushing don't let anything get in
-    when(waitingToFlush) {
-      sys_queue.io.deq.ready := false.B
-      sys_tup._1.module.sw_io.get.cmd.valid := false.B
-    }
     sys_tup._1.module.sw_io.get.resp
   }
 

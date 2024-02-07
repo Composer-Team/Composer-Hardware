@@ -5,6 +5,7 @@ import composer.Generation.{BuildMode, ComposerBuild}
 import composer.Platforms.ASIC.{CanCompileMemories, MemoryCompiler}
 import composer.Platforms.FrontBusProtocol.FrontBusProtocol
 import composer.Platforms.PlatformType.PlatformType
+import os.Path
 
 object PlatformType extends Enumeration {
   val FPGA, ASIC = Value
@@ -51,7 +52,7 @@ case object PlatformPreferedSLRCmdRespRoutingPath extends Field[Option[Seq[Strin
 
 case object IsAWS extends Field[Boolean]
 
-case object PostProcessorMacro extends Field[Config => Unit]
+case object PostProcessorMacro extends Field[(Config, Seq[Path])=> Unit]
 
 case object ASICMemoryCompilerKey extends Field[MemoryCompiler with CanCompileMemories]
 

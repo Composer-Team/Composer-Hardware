@@ -5,12 +5,15 @@ import composer.common._
 import chisel3._
 import composer.AcceleratorSystems
 import composer.Generation.CPP.TypeParsing.getCType
+import composer.Generation.CppGeneration.HookDef
+import composer.Systems.AcceleratorCore.Address
 
 object BundleParsing {
-  def customCommandToCpp(sysName: String, cc: AbstractAccelCommand, resp: AccelResponse)(implicit p: Parameters): (String, String) = {
+  def customCommandToCpp(hookDef: HookDef)(implicit p: Parameters): (String, String) = {
+    val HookDef(sysName, cc, resp, opCode) = hookDef
     val sub_signature = cc.realElements.sortBy(_._1).map { pa =>
       val isSigned = pa._2.isInstanceOf[SInt]
-      getCType(pa._1, pa._2.getWidth, !isSigned) + " " + pa._1
+      getCType(cc.elements(pa._1), pa._1, pa._2.getWidth, !isSigned) + " " + pa._1
     }
     val signature = if (sub_signature.isEmpty) "" else {
       sub_signature.reduce(_ + ", " + _)
@@ -28,7 +31,7 @@ object BundleParsing {
       val payloadId = low / 64
       val payloadLocalOffset = low % 64
       val bitsLeftInPayload = 64 - payloadLocalOffset
-      val access = if (name.endsWith("_ADDR")) f"$name.getFpgaAddr()" else name
+      val access = if (cc.elements(name).isInstanceOf[Address]) f"$name.getFpgaAddr()" else name
       if (bitsLeftInPayload < width) {
         // we're going to roll over!
         Seq((payloadId, f"((uint64_t)($access & ${intToHexFlag((1L << bitsLeftInPayload) - 1)}L) << $payloadLocalOffset)"),
@@ -50,7 +53,9 @@ object BundleParsing {
     val responseInfo = ResponseParsing.getResponseDeclaration(resp, sysName)
     val typeConversion = if (responseInfo.name.equals("composer::rocc_response")) "" else f".to<${responseInfo.name}>()";
 
-    def command_sig(is_dec: Boolean) = f"composer::response_handle<${responseInfo.name}> ${sysName}Command(uint16_t core_id, $signature)"
+    def command_sig(is_dec: Boolean) = (if (is_dec) f"namespace $sysName {\n\t" else "" ) +
+      f"composer::response_handle<${responseInfo.name}> ${if (is_dec) "" else f"$sysName::"}${cc.commandName}(uint16_t core_id, $signature)" +
+      (if (is_dec) ";\n}" else "")
 
 
     val definition =
@@ -62,16 +67,14 @@ object BundleParsing {
          |""".stripMargin + (if (assignments.length == 1) assignments(0) + "\n" else assignments.reduce(_ + "\n" + _)) +
         f"""
            |  for (int i = 0; i < ${numCommands - 1}; ++i) {
-           |    composer::rocc_cmd::start_cmd(${sysName}_ID, false, 0, false, false, core_id, payloads[i*2+1], payloads[i*2]).send();
+           |    composer::rocc_cmd::start_cmd(${sysName}_ID, false, 0, false, false, core_id, payloads[i*2+1], payloads[i*2], $opCode).send();
            |  }
-           |  return composer::rocc_cmd::start_cmd(${sysName}_ID, true, 0, false, false, core_id, payloads[${(numCommands - 1) * 2 + 1}], payloads[${(numCommands - 1) * 2}]).send()$typeConversion;
-           |}
-           |""".stripMargin
+           |  return composer::rocc_cmd::start_cmd(${sysName}_ID, true, 0, false, false, core_id, payloads[${(numCommands - 1) * 2 + 1}], payloads[${(numCommands - 1) * 2}], $opCode).send()$typeConversion;
+           |}""".stripMargin
     val declaration =
       f"""
          |${responseInfo.dec}
-         |${command_sig(true)};
-         |""".stripMargin
+         |${command_sig(true)};""".stripMargin
     (declaration, definition)
   }
 

@@ -132,8 +132,6 @@ private class C_ASIC_MemoryCascade(rows: Int,
 }
 
 object MemoryCompiler {
-  case class MemoryArrayDescriptor(name: String, rows: Int, cols: Int, modPath: String, cells: Seq[String])
-
   /**
    * Build a large SRAM structure from the provided SRAM cells in the library. This function is expected to be
    * called from a module that will implement the required size and width of the memory with a given latency.
@@ -208,7 +206,7 @@ object MemoryCompiler {
             nPorts
           )
         )
-        m.suggestName(s"mem_${nRows}x${dataWidth}x${nPorts}_l${memory_chain_latency}_bank${bank_idx}_stage${idx}}")
+        m.suggestName(s"mem_${nRows}x${dataWidth}x${nPorts}_l${memory_chain_latency}_c${bank_idx}_r${idx}}")
         m
       }
       cascade zip cascade.tail foreach { case (front, back) =>

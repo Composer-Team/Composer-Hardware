@@ -7,7 +7,6 @@ import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
 import freechips.rocketchip.tile.{RoCCCommand, XLen}
 
 sealed abstract class AbstractAccelCommand extends Bundle with hasAccessibleUserSubRegions {
-
   def getCoreID: UInt
   def getSystemID: UInt
 
@@ -40,7 +39,7 @@ sealed abstract class AbstractAccelCommand extends Bundle with hasAccessibleUser
   }
 }
 
-class AccelCommand extends AbstractAccelCommand {
+class AccelCommand(val commandName: String) extends AbstractAccelCommand {
   override val reservedNames = Seq("__core_id", "__system_id")
   private[composer] val __core_id = UInt(CoreIDLengthKey.W)
   private[composer] val __system_id = UInt(SystemIDLengthKey.W)
@@ -50,6 +49,7 @@ class AccelCommand extends AbstractAccelCommand {
   def getCoreID: UInt = __core_id
 
   def getSystemID: UInt = __system_id
+
 
   private[composer] def getRoccPayload(idx: UInt): (UInt, UInt)  = {
     val beats = VecInit(this.getRoccBeats)

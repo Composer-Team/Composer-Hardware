@@ -35,7 +35,7 @@ trait hasRDField {
   val rd: UInt
 }
 
-class AccelResponse extends Bundle with hasAccessibleUserSubRegions with hasDataField with hasRDField {
+class AccelResponse(val responseName: String) extends Bundle with hasAccessibleUserSubRegions with hasDataField with hasRDField {
   override def sortedElements: Seq[(String, Data)] = elements.toSeq.sortBy(_._1)
   override val reservedNames: Seq[String] = Seq("rd")
   val rd = UInt(5.W)
@@ -63,7 +63,7 @@ trait hasRoccResponseFields extends hasAccessibleUserSubRegions with hasDataFiel
   }
 }
 
-class AccelRoccUserResponse(implicit p: Parameters) extends AccelResponse {
+class AccelRoccUserResponse(implicit p: Parameters) extends AccelResponse("rocc_response") {
   override val reservedNames: Seq[String] = Seq("rd")
   val data = UInt(p(XLen).W)
 

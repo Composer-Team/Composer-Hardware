@@ -3,8 +3,9 @@ package composer.MemoryStreams
 import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config._
+import composer.Generation.ComposerBuild
 import composer.PrefetchSourceMultiplicity
-import composer.common.Stack
+import composer.common.{Stack, splitIntoChunks}
 import freechips.rocketchip.tilelink._
 
 class WriterDataChannelIO(val dWidth: Int) extends Bundle {
@@ -26,9 +27,10 @@ class SequentialWriteChannelIO(maxBytes: Int)(implicit p: Parameters) extends Bu
 class SequentialWriter(nBytes: Int,
                        val tl_outer: TLBundle,
                        edge: TLEdgeOut,
-                       minSizeBytes: Option[Int] = None,
-                       backwards: Boolean = false)
+                       minSizeBytes: Option[Int] = None)
                       (implicit p: Parameters) extends Module {
+  override val desiredName = s"SequentialWriter_w${nBytes * 8}"
+  ComposerBuild.requestModulePartition(this.desiredName)
   require(isPow2(nBytes))
   private val beatBytes = tl_outer.params.dataBits / 8
   private val addressBits = tl_outer.params.addressBits
@@ -48,22 +50,70 @@ class SequentialWriter(nBytes: Int,
     minSizeBytes.getOrElse(0) / beatBytes,
     pfsm * nSources)
 
-  val burst_storage_io = if (backwards) {
-    Module(new Stack[UInt](UInt(tl_outer.params.dataBits.W), q_size)).io
-  } else {
-    Module(new Queue(
-      UInt(tl_outer.params.dataBits.W),
-      q_size,
-      pipe = true,
-      useSyncReadMem = true // hopefully this gives us BRAM in FPGA. Worry about ASIC later ugh
-    )).io
+  val burst_storage_io = Module(new Queue(
+    UInt(tl_outer.params.dataBits.W),
+    p(PrefetchSourceMultiplicity),
+    pipe = true,
+    useSyncReadMem = true // hopefully this gives us BRAM in FPGA. Worry about ASIC later ugh
+  )).io
+
+  // logical operation "a -> b"
+  def implies(a: Bool, b: Bool): Bool = (a && b) || !a
+
+  val memory_latency = 3
+  val write_buffer_io = Wire(Output(Decoupled(UInt(tl_outer.params.dataBits.W))))
+  val write_buffer = Memory(memory_latency, tl_outer.params.dataBits, q_size, 1, 1, 0, None)
+  val write_buffer_occupancy = RegInit(0.U(log2Up(q_size + 1).W))
+  val write_buffer_read_shift = RegInit(0.U(memory_latency.W))
+  val burst_storage_occupancy = RegInit(0.U(log2Up(p(PrefetchSourceMultiplicity) + 1).W))
+  val raddr = RegInit(0.U(log2Up(q_size).W))
+  val waddr = RegInit(0.U(log2Up(q_size).W))
+  val (wb_widx, wb_ridx) = if (write_buffer.nWritePorts == 0) (0, 1) else (write_buffer.getWritePortIdx(0), write_buffer.getReadPortIdx(0))
+
+  write_buffer_read_shift := Cat(write_buffer.chip_select(wb_ridx), write_buffer_read_shift >> 1)
+  write_buffer_io.valid := false.B
+  write_buffer_io.bits := DontCare
+  write_buffer_io.ready := write_buffer_occupancy < q_size.U
+
+  write_buffer.initLow(clock)
+  write_buffer.addr(wb_widx) := waddr
+  write_buffer.write_enable(wb_widx) := true.B
+  write_buffer.data_in(wb_widx) := write_buffer_io.bits
+  write_buffer.chip_select(wb_widx) := write_buffer_io.fire
+  waddr := waddr + write_buffer.chip_select(wb_widx)
+
+  write_buffer.addr(wb_ridx) := raddr
+  write_buffer.read_enable(wb_ridx) := true.B
+  write_buffer.chip_select(wb_ridx) := burst_storage_occupancy < p(PrefetchSourceMultiplicity).U && write_buffer_occupancy > 0.U
+  burst_storage_io.enq.valid := write_buffer_read_shift(0)
+  burst_storage_io.enq.bits := write_buffer.data_out(wb_ridx)
+  assert(implies(burst_storage_io.enq.valid, burst_storage_io.enq.ready))
+  raddr := raddr + write_buffer.chip_select(wb_ridx)
+
+  when (write_buffer_io.fire) {
+    when (!write_buffer.chip_select(wb_ridx)) {
+      write_buffer_occupancy := write_buffer_occupancy + 1.U
+    }
+  }.otherwise {
+    when(write_buffer.chip_select(wb_ridx)) {
+      write_buffer_occupancy := write_buffer_occupancy - 1.U
+    }
+  }
+
+  when (write_buffer.chip_select(wb_ridx)) {
+    when (!burst_storage_io.deq.fire) {
+      burst_storage_occupancy := burst_storage_occupancy + 1.U
+    }
+  }.otherwise {
+    when (burst_storage_io.deq.fire) {
+      burst_storage_occupancy := burst_storage_occupancy - 1.U
+    }
   }
 
   burst_storage_io.deq.ready := tl_out.a.fire
 
   // keep two different counts so that we can keep enqueueing while bursting
   val burst_progress_count = RegInit(0.U(log2Up(pfsm).W))
-  val burst_occupancy = RegInit(0.U(log2Up(q_size + 1).W))
 
   val req_len, req_addr = RegInit(0.U(addressBitsChop.W))
 
@@ -79,8 +129,6 @@ class SequentialWriter(nBytes: Int,
   val sourceInProgress = Reg(UInt(tl_out.params.sourceBits.W))
   val addrInProgress = Reg(UInt(addressBits.W))
 
-  val blockage = WireInit(false.B)
-
   io.busy := true.B
   io.channel.isFlushed := sourceBusyBits.asUInt === 0.U
   when(req_len === 0.U) {
@@ -91,11 +139,7 @@ class SequentialWriter(nBytes: Int,
         val l = (io.req.bits.len >> log2Up(beatBytes)).asUInt
         req_len := l
         val choppedAddr = (io.req.bits.addr >> log2Up(beatBytes)).asUInt
-        if (backwards) {
-          req_addr := choppedAddr + l
-        } else {
-          req_addr := choppedAddr
-        }
+        req_addr := choppedAddr
       }
     }
   }
@@ -117,32 +161,15 @@ class SequentialWriter(nBytes: Int,
   }.otherwise {
     val isSmall = req_len < pfsm.U
     val burstSize = Mux(isSmall, 1.U, pfsm.U)
-    if (backwards) {
-      // we drain the enqueue buffer under 3 circumstances
-      // 1. We have a short transaction that needs to proceed immediately in order to reach alignment
-      // 2. We have all of the data that we need to complete the rest of the transaction
-      // 3. The enqueue buffer is full
-      // do not drain under any other circumstance
-      val isTransactionComplete = req_len === burst_occupancy
-      val enqueueBufferFull = burst_occupancy === q_size.U
-      val ongoingDrain = RegInit(false.B)
-      blockage := ongoingDrain
-      val total_increment = Reg(burst_storage_io.count.cloneType)
-      when(((isSmall && burst_occupancy > 0.U && req_len > q_size.U) || isTransactionComplete || enqueueBufferFull) && req_len > 0.U && !ongoingDrain) {
-        ongoingDrain := true.B
-        total_increment := burst_storage_io.count
-      }
-      when(ongoingDrain) {
-        when(burst_storage_io.count === 1.U && burst_storage_io.deq.fire) {
-          ongoingDrain := false.B
-          req_addr := req_addr - total_increment
-        }
-      }
-      tl_out.a.valid := hasAvailableSource && ongoingDrain
-    } else {
-      tl_out.a.valid := hasAvailableSource && burst_occupancy >= burstSize && req_len > 0.U
-    }
-    val nextAddr = Cat(if (backwards) req_addr - burst_storage_io.count else req_addr,
+    tl_out.a.valid := hasAvailableSource && burst_storage_occupancy >= burstSize && req_len > 0.U && burst_storage_io.deq.valid
+    require(p(PrefetchSourceMultiplicity) >= memory_latency,
+    """
+        |If the valid signal is high, there is _at least_ one thing in the burst queue. For burst storage
+        |occupancy = bso and memory latency = ml and bso >= ml, we know that bso can be greater than the real
+        |occupancy of the queue. However, if bso >= burst length, then within ml cycles, there will have been
+        |at least bso elements within the queue, guaranteed by bso >= ml.
+        |""".stripMargin)
+    val nextAddr = Cat(req_addr,
       0.U(log2Up(beatBytes).W))
 
     tl_out.a.bits := edge.Put(
@@ -155,9 +182,7 @@ class SequentialWriter(nBytes: Int,
       sourceInProgress := nextSource
       addrInProgress := nextAddr
       burst_progress_count := burst_progress_count + 1.U
-      if (!backwards) {
-        req_addr := req_addr + burstSize
-      }
+      req_addr := req_addr + burstSize
       req_len := req_len - burstSize
       when(!isSmall) {
         burst_inProgress := true.B
@@ -165,37 +190,52 @@ class SequentialWriter(nBytes: Int,
     }
   }
 
-  when(burst_storage_io.enq.fire) {
-    when(!burst_storage_io.deq.fire) {
-      burst_occupancy := burst_occupancy + 1.U
-    }
-  }.otherwise {
-    when(burst_storage_io.deq.fire) {
-      burst_occupancy := burst_occupancy - 1.U
-    }
-  }
-
   if (nBytes == beatBytes) {
-    io.channel.data <> burst_storage_io.enq
+    io.channel.data <> write_buffer_io
   } else if (nBytes < beatBytes) {
     val beatLim = beatBytes / nBytes
     val beatBuffer = Reg(Vec(beatLim - 1, UInt((nBytes * 8).W)))
     val beatCounter = RegInit(0.U(log2Up(beatLim).W))
-    io.channel.data.ready := burst_storage_io.enq.ready && req_len > 0.U && !blockage
-    burst_storage_io.enq.valid := false.B
-    burst_storage_io.enq.bits := DontCare
+    io.channel.data.ready := write_buffer_io.ready && req_len > 0.U
+    write_buffer_io.valid := false.B
+    write_buffer_io.bits := DontCare
     when(io.channel.data.fire) {
       val bytesGrouped = (0 until nBytes).map(i => io.channel.data.bits((i + 1) * 8 - 1, i * 8))
       beatBuffer(beatCounter) := Cat(bytesGrouped.reverse)
       beatCounter := beatCounter + 1.U
       when(beatCounter === (beatLim - 1).U) {
-        burst_storage_io.enq.valid := true.B
+        write_buffer_io.valid := true.B
         val bgc = Cat(bytesGrouped.reverse)
-        burst_storage_io.enq.bits := (if (backwards) Cat(Cat(beatBuffer), bgc) else Cat(bgc, Cat(beatBuffer.reverse)))
+        write_buffer_io.bits := Cat(bgc, Cat(beatBuffer.reverse))
         beatCounter := 0.U
       }
     }
   } else {
+    val dsplit = splitIntoChunks(io.channel.data.bits, beatBytes*8).reverse
+    val inProgressPushing = RegInit(false.B)
+    val channelReg = Reg(Vec(nBytes / beatBytes, UInt(beatBytes.W))) // bottom chunk will get optimized away
+    val dsplitCount = Reg(UInt(log2Up(nBytes / beatBytes + 1).W))
+    when (!inProgressPushing) {
+      io.channel.data.ready := req_len > 0.U && write_buffer_io.ready
+      io.channel.data.bits := dsplit(0)
+      write_buffer_io.valid := req_len > 0.U && io.channel.data.valid
+      when (io.channel.data.fire) {
+        inProgressPushing := true.B
+        channelReg := dsplit
+        dsplitCount := 1.U
+      }
+    }.otherwise {
+      io.channel.data.ready := false.B
+      write_buffer_io.valid := true.B
+      write_buffer_io.bits := channelReg(dsplitCount)
+      when (write_buffer_io.fire) {
+        dsplitCount := dsplitCount + 1.U
+        when (dsplitCount === (nBytes / beatBytes - 1).U) {
+          inProgressPushing := false.B
+        }
+      }
+    }
+
     require(requirement = false, "Unexpected")
   }
 

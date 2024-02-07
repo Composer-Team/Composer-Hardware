@@ -4,7 +4,7 @@ import chipsalliance.rocketchip.config._
 import chisel3.stage._
 import composer.Generation.Annotators.AnnotateXilinxInterface.XilinxInterface
 import composer.{Generation, HasCoherence}
-import composer.Generation.Annotators.{CrossBoundaryDisable, KeepHierarchy}
+import composer.Generation.Annotators.{CrossBoundaryDisable, KeepHierarchy, WalkPath}
 import composer.Generation.ComposerBuild._
 import composer.Platforms.{BuildModeKey, FrontBusProtocol, FrontBusProtocolKey, IsAWS, PlatformType, PlatformTypeKey, PostProcessorMacro}
 import firrtl._
@@ -147,10 +147,12 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
       )
     )
 
+    val chiselGeneratedSrcs = WalkPath(targetDir)
+
     // --------------- Verilog Annotators ---------------
 //    KeepHierarchy(targetDir / "ComposerTop.v")
     partitionModules foreach println
-    composer.Generation.Annotators.UniqueMv(sourceList, targetDir)
+    val movedSrcs = composer.Generation.Annotators.UniqueMv(sourceList, targetDir)
 
     ConstraintGeneration.slrMappings.foreach { slrMapping =>
       crossBoundaryDisableList = crossBoundaryDisableList :+ slrMapping._1
@@ -182,13 +184,8 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
         targetDir / "ComposerTop.v"
       )
     }
-//    os.walk(targetDir).foreach { file =>
-//      val extension = file.ext
-//      os.copy(file, gsrc_dir / ("composer." + extension), replaceExisting = true)
-//    }
-    // -------------------------------------------------
 
-    config(PostProcessorMacro)(configWithBuildMode) // do post-processing per backend
+    config(PostProcessorMacro)(configWithBuildMode, movedSrcs ++ chiselGeneratedSrcs.toSeq) // do post-processing per backend
 
     buildMode match {
       case bm: BuildMode.Tuning if !args.contains("--notune") =>

@@ -5,21 +5,21 @@ import chisel3._
 import chisel3.experimental.{FixedPoint, Interval}
 import chisel3.util._
 import composer.Generation.CppGeneration
+import composer.Systems.AcceleratorCore.Address
 import composer.common._
 
-class ComposerCommandBundler[T1 <: AbstractAccelCommand, T2 <: AccelResponse](bundleIn: T1, bundleOut: T2, outer: ComposerSystem, nSources: Int)(implicit p: Parameters) extends Module {
+class ComposerCommandBundler[T1 <: AccelCommand, T2 <: AccelResponse](bundleIn: T1, bundleOut: T2, outer: ComposerSystem, nSources: Int, opCode: Int)(implicit p: Parameters) extends Module {
   if (outer.systemParams.canReceiveSoftwareCommands)
-    CppGeneration.addUserCppFunctionDefinition(outer.systemParams.name, bundleIn, bundleOut)
+    CppGeneration.addUserCppFunctionDefinition(outer.systemParams.name, bundleIn, bundleOut, opCode)
 
   val cio = IO(new Bundle() {
     val cmd = Flipped(new ComposerCoreIO)
     val cmd_in_source = Input(UInt(log2Up(nSources).W))
   })
-  val io = IO(new CustomIO[T1, T2](bundleIn.cloneType, bundleOut.cloneType))
+  val io = IO(new CustomIO[T1, T2](bundleIn.cloneType, bundleOut.cloneType, opCode))
 
   io.req.bits.elements.foreach { case (_, data) => data := DontCare }
   io.req.bits.getSystemID := outer.system_id.U
-//  require(false, "FIX CORE ID OVERWRITE DONT FORGET")
   io.req.bits.getCoreID := DontCare
 
   cio.cmd.resp.valid := io.resp.valid
@@ -65,7 +65,12 @@ class ComposerCommandBundler[T1 <: AbstractAccelCommand, T2 <: AccelResponse](bu
     val range = sr._2
     val flat = whole(range._1, range._2)
     val field = io.req.bits.elements(sr._1)
-    field := typedFlat(field, flat)
+    field match {
+      case address: Address =>
+        address.address := typedFlat(field, flat)
+      case _ =>
+        field := typedFlat(field, flat)
+    }
   }
 
   def typedFlat(field: Data, flat: UInt): Data = {

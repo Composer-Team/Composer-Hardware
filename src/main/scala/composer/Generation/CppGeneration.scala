@@ -9,7 +9,7 @@ object CppGeneration {
 
   private[composer] case class PreprocessorDefinition(ty: String, value: String)
 
-  private[composer] case class HookDef(sysName: String, cc: AbstractAccelCommand, resp: AccelResponse) {
+  private[composer] case class HookDef(sysName: String, cc: AccelCommand, resp: AccelResponse, opCode: Int) {
     cc.elements.foreach { p =>
       val data = p._2
       val paramName = p._1
@@ -42,11 +42,9 @@ object CppGeneration {
     }
   }
 
-  private[composer] def addUserCppFunctionDefinition(systemName: String, cc: AbstractAccelCommand, resp: AccelResponse): Unit = {
-    val h = HookDef(systemName, cc, resp)
-    if (!hook_defs.exists(_.sysName == systemName)) {
-      hook_defs = h :: hook_defs
-    }
+  private[composer] def addUserCppFunctionDefinition(systemName: String, cc: AccelCommand, resp: AccelResponse, opCode: Int): Unit = {
+    if (!hook_defs.exists( q => q.sysName == systemName && q.opCode == opCode))
+      hook_defs = HookDef(systemName, cc, resp, opCode) :: hook_defs
   }
 
   def addPreprocessorDefinition(elems: Seq[(String, Any)]): Unit = {

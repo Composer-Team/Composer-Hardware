@@ -19,8 +19,8 @@ import java.io.FileWriter
 
 
 object Generation {
-  def genCPPHeader(cr: MCRFileMap, acc: ComposerAcc)(implicit p: Parameters): Unit = {
-
+  def genCPPHeader(cr: MCRFileMap, top: ComposerTop)(implicit p: Parameters): Unit = {
+    val acc = top.accelerator_system.acc
     // we might have multiple address spaces...
     val path = Path(ComposerBuild.composerGenDir)
     os.makeDir.all(path)
@@ -49,12 +49,12 @@ object Generation {
     }
     val defines = safe_join(user_defs map { deff => s"const ${deff.ty} ${deff.name} = ${deff.value};" })
     val enums = safe_join(user_enums map enumToCpp)
-    val cpp_defs = safe_join(user_cpp_defs map { ppd => s"#define ${ppd.ty} ${ppd.value}\n" })
+    val cpp_defs = safe_join(user_cpp_defs map { ppd => s"#define ${ppd.ty} ${ppd.value}" })
     val mmios = safe_join(cr.getCRdef)
     val system_ids = safe_join(acc.system_tups.filter(_._3.canReceiveSoftwareCommands) map { tup =>
       s"const uint8_t ${tup._3.name}_ID = ${tup._2};"
     })
-    val hooks_dec_def = hook_defs map (a => customCommandToCpp(a.sysName, a.cc, a.resp))
+    val hooks_dec_def = hook_defs map customCommandToCpp _
     val commandDeclarations = safe_join(hooks_dec_def.map(_._1))
     val commandDefinitions = safe_join(hooks_dec_def.map(_._2))
     val (idLengths, dma_def, mem_def) = p(ExtMem) match {
@@ -82,7 +82,7 @@ object Generation {
               val strobeDtype = getVerilatorDtype(p(ExtMem).get.master.beatBytes)
               val addrWid = log2Up(a.master.size)
               val addrDtype = getVerilatorDtype(addrWid)
-              val idDtype = getVerilatorDtype(p(ExtMem).get.master.idBits)
+              val idDtype = getVerilatorDtype(top.AXI_MEM.get(0).in(0)._1.ar.bits.id.getWidth)
               s"#ifdef SIM\n" +
                 s"#include <verilated.h>\n" +
                 s"using ComposerMemAddressSimDtype=$addrDtype;\n" +

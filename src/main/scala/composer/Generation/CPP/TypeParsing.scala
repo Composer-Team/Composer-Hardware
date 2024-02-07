@@ -1,9 +1,12 @@
 package composer.Generation.CPP
 
+import chisel3.Data
+import composer.Systems.AcceleratorCore.Address
+
 object TypeParsing {
-  def getCType(name: String, width: Int, unsigned: Boolean): String = {
+  def getCType(dat: Data, name: String, width: Int, unsigned: Boolean): String = {
     val isFloatingPoint = name.contains("FP")
-    val isFpgaAddress = name.endsWith("_ADDR")
+    val isFpgaAddress = dat.isInstanceOf[Address]
     if (isFloatingPoint) {
       width match {
         case 32 => "float"

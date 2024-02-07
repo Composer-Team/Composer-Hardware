@@ -12,6 +12,7 @@ import composer.RoccHelpers._
 import composer.TLManagement.{ComposerIntraCoreIOModule, TLClientModule, TLClientModuleIO}
 import composer.common._
 import composer.Generation.Tune.Tunable
+import composer.Systems.AcceleratorCore.Address
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
@@ -19,8 +20,9 @@ import freechips.rocketchip.util.BundleField
 
 import java.io.File
 import scala.collection.immutable.Seq
+import scala.language.implicitConversions
 
-class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2) extends Bundle {
+class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2, val functionID: Int) extends Bundle {
   val req: DecoupledIO[T1] = DecoupledIO(bundleIn)
   val resp: DecoupledIO[T2] = Flipped(DecoupledIO(bundleOut))
 }
@@ -36,11 +38,21 @@ class CustomIOWithRouting[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T
   val resp: DecoupledIO[T2] = Flipped(DecoupledIO(bundleOut))
 }
 
-class ComposerCoreIO(implicit p: Parameters) extends CustomIO[AccelRoccCommand, AccelRoccUserResponse](new AccelRoccCommand, new AccelRoccUserResponse)
+class ComposerCoreIO(implicit p: Parameters) extends CustomIO[AccelRoccCommand, AccelRoccUserResponse](new AccelRoccCommand, new AccelRoccUserResponse, -1)
 
 class DataChannelIO(dWidth: Int) extends Bundle {
   val data = Decoupled(UInt(dWidth.W))
   val in_progress = Output(Bool())
+}
+
+object AcceleratorCore {
+  class Address(addrBits: Int) extends Bundle {
+    val address = UInt(addrBits.W)
+
+    def :=(other: Data): Unit = {
+      address := other
+    }
+  }
 }
 
 class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends Module {
@@ -57,9 +69,11 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
   })
 
   val io_declaration = IO(Flipped(new ComposerCoreIO()))
+  io_declaration.resp.valid := false.B
+  io_declaration.resp.bits := DontCare
+  io_declaration.req.ready := false.B
   val io_source = IO(Input(UInt(log2Up(outer.acc.sysNCmdSourceLookup(outer.systemParams.name)).W)))
   private[composer] var using_custom = CustomCommandUsage.unused
-  private[composer] var custom_rocc_cmd_nbeats = -1
 
   //  def getCoreID: Int = composerConstructor.composerCoreWrapper.core_id
 
@@ -133,16 +147,10 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
   //    outer.memParams.filter(_.name == name)(0).asInstanceOf[CReadChannelParams].dataBytes * 8
   //  }
   //
-  //  def getReaderModule(name: String, idx: Int = 0): ReaderModuleChannel = {
-  //    val a = getReaderModules(name, Some(idx))
-  //    ReaderModuleChannel(a._1(0), a._2(0))
-  //  }
-
-  //  def getReaderModule(name: String, idx: Int = 0): ReaderModuleChannel[UInt] = {
-  //    val params = outer.memParams.filter(_.name == name)(0).asInstanceOf[CReadChannelParams]
-  //    val a = getReaderModules(name, UInt((params.dataBytes * 8).W), Some(idx))
-  //    ReaderModuleChannel(a._1(0), a._2(0))
-  //  }
+  def getReaderModule(name: String, idx: Int = 0): ReaderModuleChannel = {
+    val a = getReaderModules(name, Some(idx))
+    ReaderModuleChannel(a._1(0), a._2(0))
+  }
 
   val read_ios = Map.from(outer.memParams.filter(_.isInstanceOf[CReadChannelParams]).map {
     case mp: CReadChannelParams =>
@@ -154,14 +162,14 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
   val write_ios = Map.from(outer.memParams.filter(_.isInstanceOf[CWriteChannelParams]).map {
     case mp: CWriteChannelParams =>
       (mp.name,
-        (mp, (0 until mp.nChannels).map{_ =>
+        (mp, (0 until mp.nChannels).map { _ =>
           (IO(Decoupled(new ChannelTransactionBundle)), IO(Flipped(new WriterDataChannelIO(mp.dataBytes * 8))))
         }))
   })
   val sp_ios = Map.from(outer.memParams.filter(_.isInstanceOf[CScratchpadParams]).map {
     case mp: CScratchpadParams =>
       (mp.name,
-        (mp, (IO(new ScratchpadMemReqPort(addrBits, mp.nDatas.intValue())), (0 until mp.nPorts).map(_ =>
+        (mp, (IO(new ScratchpadMemReqPort(_addrBits, mp.nDatas.intValue())), (0 until mp.nPorts).map(_ =>
           IO(Flipped(new ScratchpadDataPort(log2Up(mp.nDatas.intValue()), mp.dataWidthBits.intValue())))
         ))))
   })
@@ -185,85 +193,113 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
         val q = read_ios(name)
         (List(q._2(id)._1), List(q._2(id)._2))
     }
-//    val params = outer.memParams.filter(_.name == name)(0).asInstanceOf[CReadChannelParams]
-//    val mod = idx match {
-//      case Some(id_unpack) =>
-//        val clients = getTLClients(name, outer.readers)
-//        List(Module(new SequentialReader(
-//          params.dataBytes * 8,
-//          tl_bundle = clients(id_unpack).out(0)._1,
-//          tl_edge = clients(id_unpack).out(0)._2)))
-//      case None =>
-//        getTLClients(name, outer.readers).map(tab_id =>
-//          Module(new SequentialReader(
-//            params.dataBytes * 8,
-//            tl_bundle = tab_id.out(0)._1,
-//            tl_edge = tab_id.out(0)._2)))
-//    }
-//    //noinspection DuplicatedCode
-//    mod foreach { m =>
-//      m.tl_out <> m.tl_bundle
-//      m.suggestName(name)
-//    }
-//    val ret = (mod.map(_.io.req), mod.map(_.io.channel))
-//    // initially tie off everything to false and DontCare. Saves some pain down the line
-//    ret._2.foreach { dat =>
-//      dat.data.ready := false.B
-//    }
-//    ret._1.foreach { dat =>
-//      dat.bits := DontCare
-//      dat.valid := false.B
-//    }
-//    ret
+    //    val params = outer.memParams.filter(_.name == name)(0).asInstanceOf[CReadChannelParams]
+    //    val mod = idx match {
+    //      case Some(id_unpack) =>
+    //        val clients = getTLClients(name, outer.readers)
+    //        List(Module(new SequentialReader(
+    //          params.dataBytes * 8,
+    //          tl_bundle = clients(id_unpack).out(0)._1,
+    //          tl_edge = clients(id_unpack).out(0)._2)))
+    //      case None =>
+    //        getTLClients(name, outer.readers).map(tab_id =>
+    //          Module(new SequentialReader(
+    //            params.dataBytes * 8,
+    //            tl_bundle = tab_id.out(0)._1,
+    //            tl_edge = tab_id.out(0)._2)))
+    //    }
+    //    //noinspection DuplicatedCode
+    //    mod foreach { m =>
+    //      m.tl_out <> m.tl_bundle
+    //      m.suggestName(name)
+    //    }
+    //    val ret = (mod.map(_.io.req), mod.map(_.io.channel))
+    //    // initially tie off everything to false and DontCare. Saves some pain down the line
+    //    ret._2.foreach { dat =>
+    //      dat.data.ready := false.B
+    //    }
+    //    ret._1.foreach { dat =>
+    //      dat.bits := DontCare
+    //      dat.valid := false.B
+    //    }
+    //    ret
   }
 
-    def getWriterModule(name: String,
-                        idx: Int = 0): WriterModuleChannel = {
-      val a = getWriterModules(name, Some(idx))
-      WriterModuleChannel(a._1(0), a._2(0))
-    }
+  def getWriterModule(name: String,
+                      idx: Int = 0): WriterModuleChannel = {
+    val a = getWriterModules(name, Some(idx))
+    WriterModuleChannel(a._1(0), a._2(0))
+  }
 
-    def getScratchpad(name: String): ScratchpadModuleChannel = {
-//      val lm = outer.scratch_mod.filter(_._1 == name)(0)._2
-//      lm.suggestName(name)
-//      val mod = lm.module
-//
-//      ScratchpadModuleChannel(mod.req, mod.IOs)
-      val a = sp_ios(name)._2
-      ScratchpadModuleChannel(a._1, a._2)
-    }
+  def getScratchpad(name: String): ScratchpadModuleChannel = {
+    //      val lm = outer.scratch_mod.filter(_._1 == name)(0)._2
+    //      lm.suggestName(name)
+    //      val mod = lm.module
+    //
+    //      ScratchpadModuleChannel(mod.req, mod.IOs)
+    val a = sp_ios(name)._2
+    ScratchpadModuleChannel(a._1, a._2)
+  }
 
-    def getWriterModules(name: String,
-                         idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[WriterDataChannelIO]) = {
-      idx match {
-        case None =>
-          val q = write_ios(name)
-          (q._2.map(_._1).toList, q._2.map(_._2).toList)
-        case Some(id) =>
-          val q = write_ios(name)
-          (List(q._2(id)._1), List(q._2(id)._2))
-      }
+  def getWriterModules(name: String,
+                       idx: Option[Int] = None): (List[DecoupledIO[ChannelTransactionBundle]], List[WriterDataChannelIO]) = {
+    idx match {
+      case None =>
+        val q = write_ios(name)
+        (q._2.map(_._1).toList, q._2.map(_._2).toList)
+      case Some(id) =>
+        val q = write_ios(name)
+        (List(q._2(id)._1), List(q._2(id)._2))
     }
+  }
 
-  def ComposerIO[T1 <: AbstractAccelCommand](bundleIn: T1): CustomIO[T1, AccelRoccUserResponse] = {
+  def ComposerIO[T1 <: AccelCommand](bundleIn: T1): CustomIO[T1, AccelRoccUserResponse] = {
     ComposerIO[T1, AccelRoccUserResponse](bundleIn, new AccelRoccUserResponse)
   }
 
   def getSystemID(name: String): UInt = p(SystemName2IdMapKey)(name).U
 
-  def addrBits: Int = log2Up(p(ExtMem).get.master.size)
+  implicit def _addrBits: Int = log2Up(p(ExtMem).get.master.size)
 
-  def ComposerIO[T1 <: AbstractAccelCommand, T2 <: AccelResponse](bundleIn: T1, bundleOut: T2): CustomIO[T1, T2] = {
+  private var nCommands = 0
+
+  def Address(): Address = {
+    new Address(_addrBits)
+  }
+
+  implicit def addrToUInt(address: Address): UInt = address.address
+
+  def ComposerIO[T1 <: AccelCommand, T2 <: AccelResponse](bundleIn: T1, bundleOut: T2): CustomIO[T1, T2] = {
     if (using_custom == CustomCommandUsage.default) {
       throw new Exception("Cannot use custom io after using the default io")
     }
     using_custom = CustomCommandUsage.custom
-    val composerCustomCommandManager = Module(new ComposerCommandBundler[T1, T2](bundleIn, bundleOut, outer, outer.acc.sysNCmdSourceLookup(outer.systemParams.name)))
-    composerCustomCommandManager.suggestName(outer.systemParams.name + "CustomCommand")
-    composerCustomCommandManager.cio.cmd <> io_declaration
+    val composerCustomCommandManager = Module(new ComposerCommandBundler[T1, T2](
+      bundleIn, bundleOut, outer, outer.acc.sysNCmdSourceLookup(outer.systemParams.name), nCommands))
+    composerCustomCommandManager.cio.cmd.req.bits := DontCare
+    composerCustomCommandManager.cio.cmd.req.valid := false.B
     composerCustomCommandManager.cio.cmd_in_source := io_source
-    composerCustomCommandManager.io.resp.bits.rd := 0.U
-    custom_rocc_cmd_nbeats = bundleIn.getNBeats
+
+    composerCustomCommandManager.suggestName(outer.systemParams.name + "CustomCommand")
+    val thisCommandInFlight = RegInit(false.B)
+    when(io_declaration.req.bits.inst.funct === nCommands.U) {
+      composerCustomCommandManager.cio.cmd.req <> io_declaration.req
+      composerCustomCommandManager.io.resp.bits.rd := 0.U
+      when (io_declaration.req.fire) {
+        thisCommandInFlight := io_declaration.req.bits.inst.xd
+      }
+    }
+
+    when(thisCommandInFlight) {
+      io_declaration.resp <> composerCustomCommandManager.cio.cmd.resp
+      when (io_declaration.resp.fire) {
+        thisCommandInFlight := false.B
+      }
+    }.otherwise {
+      composerCustomCommandManager.cio.cmd.resp.ready := false.B
+    }
+
+    nCommands = nCommands + 1
     composerCustomCommandManager.io
   }
 

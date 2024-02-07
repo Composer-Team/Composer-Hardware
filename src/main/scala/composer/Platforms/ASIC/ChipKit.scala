@@ -14,7 +14,7 @@ class WithChipKitPlatform()
           MasterPortParams(
             base = 0,
             size = 1L << 34,
-            beatBytes = 16,
+            beatBytes = 4,
             idBits = 6
           ),
           1

@@ -66,7 +66,7 @@ class MCRFileMap() {
     (regList.zipWithIndex map { case (entry, i) =>
       val addr = i << log2Up(p(FrontBusBeatBytes))
       require(i < 1024)
-      s"#define ${entry.name.toUpperCase()} ($addr)\n"
+      s"#define ${entry.name.toUpperCase()} ($addr)"
     }).toSeq
   }
 }

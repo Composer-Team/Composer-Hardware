@@ -337,8 +337,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
       val writerModule = Module(new SequentialWriter(
         client._2.dWidth/8,
         node.out(0)._1, node.out(0)._2,
-        cParams.bufferSizeBytesMin,
-        cParams.supplyBackwards))
+        cParams.bufferSizeBytesMin))
         writerModule.io.channel <> client._2
         writerModule.io.req <> client._1
         writerModule.tl_out <> node.out(0)._1
