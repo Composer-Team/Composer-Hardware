@@ -3,7 +3,7 @@ package composer.Generation.CPP
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
 import composer.ComposerParams._
-import composer.Generation.CPP.BundleParsing.customCommandToCpp
+import composer.Generation.CPP.CommandParsing.customCommandToCpp
 import composer.Generation.CPP.TypeParsing.enumToCpp
 import composer.Generation.ComposerBuild
 import composer.Generation.CppGeneration._

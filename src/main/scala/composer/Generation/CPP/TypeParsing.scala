@@ -1,29 +1,38 @@
 package composer.Generation.CPP
 
-import chisel3.Data
+import chisel3._
 import composer.Systems.AcceleratorCore.Address
 
 object TypeParsing {
-  def getCType(dat: Data, name: String, width: Int, unsigned: Boolean): String = {
-    val isFloatingPoint = name.contains("FP")
-    val isFpgaAddress = dat.isInstanceOf[Address]
-    if (isFloatingPoint) {
-      width match {
-        case 32 => "float"
-        case 64 => "double"
-        case _ => throw new Exception(s"Trying to export a float type but has width $width. Expecting either 32 or 64")
+  def getCType(dat: Data, name: String): String = {
+    def getBaseType(d: Data): String = {
+      val isFloatingPoint = name.contains("FP")
+      val isFpgaAddress = dat.isInstanceOf[Address]
+      if (isFloatingPoint) {
+        dat.getWidth match {
+          case 32 => "float"
+          case 64 => "double"
+          case _ => throw new Exception(s"Trying to export a float type but has width ${dat.getWidth}. Expecting either 32 or 64")
+        }
+      } else if (isFpgaAddress) {
+        "composer::remote_ptr"
+      } else {
+        val prefix = if (d.isInstanceOf[SInt]) "" else "u"
+        d.getWidth match {
+          case x if x <= 8 => f"${prefix}int8_t"
+          case x if x <= 16 => f"${prefix}int16_t"
+          case x if x <= 32 => f"${prefix}int32_t"
+          case x if x <= 64 => f"${prefix}int64_t"
+          case _ => "void*" // should this ever happen?
+        }
       }
-    } else if (isFpgaAddress) {
-      "composer::remote_ptr"
-    } else {
-      val prefix = if (unsigned) "u" else ""
-      width match {
-        case x if x <= 8 => f"${prefix}int8_t"
-        case x if x <= 16 => f"${prefix}int16_t"
-        case x if x <= 32 => f"${prefix}int32_t"
-        case x if x <= 64 => f"${prefix}int64_t"
-        case _ => "void*"
-      }
+    }
+
+    dat match {
+      case v: Vec[Data] =>
+        val btype = getBaseType(v.head)
+        f"std::vector<$btype>"
+      case _ => getBaseType(dat)
     }
   }
 
@@ -41,5 +50,4 @@ object TypeParsing {
         s"\t$name = $value ,\n"
       }.reduce(_ + "\n" + _) + "\n};"
   }
-
 }

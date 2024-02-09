@@ -52,6 +52,8 @@ object AcceleratorCore {
     def :=(other: Data): Unit = {
       address := other
     }
+
+    implicit def toUInt: UInt = address
   }
 }
 
@@ -282,9 +284,10 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
 
     composerCustomCommandManager.suggestName(outer.systemParams.name + "CustomCommand")
     val thisCommandInFlight = RegInit(false.B)
+    composerCustomCommandManager.io.resp.bits.rd := 0.U
+
     when(io_declaration.req.bits.inst.funct === nCommands.U) {
       composerCustomCommandManager.cio.cmd.req <> io_declaration.req
-      composerCustomCommandManager.io.resp.bits.rd := 0.U
       when (io_declaration.req.fire) {
         thisCommandInFlight := io_declaration.req.bits.inst.xd
       }

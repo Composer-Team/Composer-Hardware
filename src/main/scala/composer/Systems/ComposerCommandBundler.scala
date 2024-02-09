@@ -31,46 +31,52 @@ class ComposerCommandBundler[T1 <: AccelCommand, T2 <: AccelResponse](bundleIn: 
   val s_req_idle :: s_done :: Nil = Enum(2)
   val req_state = RegInit(s_req_idle)
   var reqCounter = Reg(Vec(nSources, UInt(log2Up(bundleIn.getNBeats + 1).W)))
-  when (reset.asBool) {
+  when(reset.asBool) {
     reqCounter.foreach(_ := 0.U)
   }
 
   val nReqBeatsRequired = bundleIn.getNBeats
 
-  val reqPayload = Reg(Vec(nSources, Vec(nReqBeatsRequired, UInt(128.W))))
+  if (nReqBeatsRequired > 0) {
+    val reqPayload = Reg(Vec(nSources, Vec(nReqBeatsRequired, UInt(128.W))))
 
-  io.req.valid := req_state === s_done
-  cio.cmd.req.ready := req_state =/= s_done
-  val succeedingSource = Reg(UInt(log2Up(nSources).W))
-  when(req_state === s_req_idle) {
-    val source = cio.cmd_in_source
-    when(cio.cmd.req.fire) {
-      val reqsRecieved = reqCounter(source)
-      reqCounter(source) := reqCounter(source) + 1.U
-      reqPayload(source)(reqsRecieved) := Cat(cio.cmd.req.bits.payload1, cio.cmd.req.bits.payload2)
-      when(reqsRecieved === (nReqBeatsRequired - 1).U) {
-        req_state := s_done
-        succeedingSource := source
+    io.req.valid := req_state === s_done
+    cio.cmd.req.ready := req_state =/= s_done
+    val succeedingSource = Reg(UInt(log2Up(nSources).W))
+    when(req_state === s_req_idle) {
+      val source = cio.cmd_in_source
+      when(cio.cmd.req.fire) {
+        val reqsRecieved = reqCounter(source)
+        reqCounter(source) := reqCounter(source) + 1.U
+        reqPayload(source)(reqsRecieved) := Cat(cio.cmd.req.bits.payload1, cio.cmd.req.bits.payload2)
+        when(reqsRecieved === (nReqBeatsRequired - 1).U) {
+          req_state := s_done
+          succeedingSource := source
+        }
+      }
+    }.elsewhen(req_state === s_done) {
+      io.req.valid := true.B
+      when(io.req.fire) {
+        reqCounter(succeedingSource) := 0.U
+        req_state := s_req_idle
       }
     }
-  }.elsewhen(req_state === s_done) {
-    io.req.valid := true.B
-    when(io.req.fire) {
-      reqCounter(succeedingSource) := 0.U
-      req_state := s_req_idle
+    val whole = Cat(reqPayload(succeedingSource).reverse)
+    io.req.bits.fieldSubranges foreach { sr =>
+      val range = sr._2
+      val flat = whole(range._1, range._2)
+      val field = io.req.bits.elements(sr._1)
+      field match {
+        case address: Address =>
+          address.address := typedFlat(field, flat)
+        case _ =>
+          field := typedFlat(field, flat)
+      }
     }
-  }
-  val whole = Cat(reqPayload(succeedingSource).reverse)
-  io.req.bits.fieldSubranges foreach { sr =>
-    val range = sr._2
-    val flat = whole(range._1, range._2)
-    val field = io.req.bits.elements(sr._1)
-    field match {
-      case address: Address =>
-        address.address := typedFlat(field, flat)
-      case _ =>
-        field := typedFlat(field, flat)
-    }
+  } else {
+    io.req.valid := cio.cmd.req.valid
+    io.req.bits := DontCare
+    cio.cmd.req.ready := io.req.ready
   }
 
   def typedFlat(field: Data, flat: UInt): Data = {
@@ -79,7 +85,7 @@ class ComposerCommandBundler[T1 <: AccelCommand, T2 <: AccelResponse](bundleIn: 
         val subField = vector.getElements.head
         val divs = vector.length
         val divSize = flat.getWidth / divs
-        VecInit(Seq.tabulate(divs) { idx => flat((idx+1) * divSize - 1, idx * divSize)}.map(subFlat => typedFlat(subField, subFlat)))
+        VecInit(Seq.tabulate(divs) { idx => flat((idx + 1) * divSize - 1, idx * divSize) }.map(subFlat => typedFlat(subField, subFlat)))
       case _: Bool =>
         flat.asBool
       case _: UInt =>

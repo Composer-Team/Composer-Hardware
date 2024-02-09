@@ -68,3 +68,7 @@ object splitIntoChunks {
     myVec
   }
 }
+
+object Misc {
+  def left_assign[T <: Data](tup: (T, T)): Unit = tup._1 := tup._2
+}
