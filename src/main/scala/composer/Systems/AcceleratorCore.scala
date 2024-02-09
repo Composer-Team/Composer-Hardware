@@ -157,15 +157,21 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
   val read_ios = Map.from(outer.memParams.filter(_.isInstanceOf[CReadChannelParams]).map {
     case mp: CReadChannelParams =>
       (mp.name,
-        (mp, (0 until mp.nChannels).map { _ =>
-          (IO(Decoupled(new ChannelTransactionBundle)), IO(Flipped(new DataChannelIO(mp.dataBytes * 8))))
+        (mp, (0 until mp.nChannels).map { channelIdx =>
+          val io_pair = (IO(Decoupled(new ChannelTransactionBundle)), IO(Flipped(new DataChannelIO(mp.dataBytes * 8))))
+          io_pair._1.suggestName(s"readRequest_${mp.name}_channel${channelIdx}")
+          io_pair._2.suggestName(s"readData_${mp.name}_channel${channelIdx}")
+          io_pair
         }))
   })
   val write_ios = Map.from(outer.memParams.filter(_.isInstanceOf[CWriteChannelParams]).map {
     case mp: CWriteChannelParams =>
       (mp.name,
-        (mp, (0 until mp.nChannels).map { _ =>
-          (IO(Decoupled(new ChannelTransactionBundle)), IO(Flipped(new WriterDataChannelIO(mp.dataBytes * 8))))
+        (mp, (0 until mp.nChannels).map { channelIdx =>
+          val io_pair = (IO(Decoupled(new ChannelTransactionBundle)), IO(Flipped(new WriterDataChannelIO(mp.dataBytes * 8))))
+          io_pair._1.suggestName(s"writeRequest_${mp.name}_channel${channelIdx}")
+          io_pair._2.suggestName(s"writeData_${mp.name}_channel${channelIdx}")
+          io_pair
         }))
   })
   val sp_ios = Map.from(outer.memParams.filter(_.isInstanceOf[CScratchpadParams]).map {

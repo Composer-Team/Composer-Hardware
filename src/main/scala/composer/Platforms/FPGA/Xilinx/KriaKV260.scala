@@ -5,9 +5,25 @@ import composer.Generation._
 import composer._
 import composer.Platforms._
 import composer.Platforms.FPGA.PlatformSLRs
+import composer.Platforms.FPGA.Xilinx.WithKriaPlatform.postProcess
 import freechips.rocketchip.amba.axi4.{AXI4MasterParameters, AXI4MasterPortParameters}
 import freechips.rocketchip.subsystem._
+import os.Path
 
+object WithKriaPlatform {
+  def postProcess(c: Config, paths: Seq[Path]): Unit = {
+    if (c(BuildModeKey) == BuildMode.Synthesis) {
+      os.write.over(os.Path(ComposerBuild.composerGenDir) / "synth.tcl",
+        composer.Platforms.FPGA.Xilinx.SynthScript(
+          "composer",
+          "output",
+          "xck26-sfvc784-2LV-c",
+          "xilinx.com:kv260_som:part0:1.4",
+          c(DefaultClockRateKey).toString
+        ))
+    }
+  }
+}
 class WithKriaPlatform(nMemoryChannels: Int = 1, clockRate_MHz: Int = 100)
   extends Config((_, _, _) => {
     case ExtMem =>
@@ -51,17 +67,6 @@ class WithKriaPlatform(nMemoryChannels: Int = 1, clockRate_MHz: Int = 100)
     //      idBits = 6),
     //      64))
     case IsAWS => false
-    case PostProcessorMacro => c: Config => {
-      if (c(BuildModeKey) == BuildMode.Synthesis) {
-        os.write.over(os.Path(ComposerBuild.composerGenDir) / "synth.tcl",
-          composer.Platforms.FPGA.Xilinx.SynthScript(
-            "composer",
-            "output",
-            "xck26-sfvc784-2LV-c",
-            "xilinx.com:kv260_som:part0:1.4",
-            clockRate_MHz.toString
-          ))
-      }
-    }
+    case PostProcessorMacro => postProcess _
     case HasDisjointMemoryControllers => false
   })
