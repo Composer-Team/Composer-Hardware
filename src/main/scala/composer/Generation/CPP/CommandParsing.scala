@@ -105,7 +105,7 @@ object CommandParsing {
          |${responseInfo.definition}
          |${command_sig(false)} {
          |  assert(core_id < ${p(AcceleratorSystems).filter(_.name == sysName)(0).nCores});
-         |  uint64_t payloads[${Math.min(numCommands * 2, 2)}];
+         |  uint64_t payloads[${Math.max(numCommands * 2, 2)}];
          |""".stripMargin + (if (assignments.length == 1) assignments(0) + "\n" else assignments.fold("")(_ + "\n" + _)) +
         f"""
            |  for (int i = 0; i < ${numCommands - 1}; ++i) {
