@@ -16,7 +16,7 @@ object CommandParsing {
     val sub_signature = cc.realElements.sortBy(_._1).map { pa =>
       getCType(cc.elements(pa._1), pa._1) + " " + pa._1
     }
-    val signature = if (sub_signature.isEmpty) "" else {
+    val signature = if (sub_signature.isEmpty) "" else { ", " +
       sub_signature.reduce(_ + ", " + _)
     }
 
@@ -96,7 +96,7 @@ object CommandParsing {
 
     def command_sig(is_dec: Boolean) = (if (is_dec) f"namespace $sysName {\n\t" else "") +
       f"composer::response_handle<${responseInfo.name}> " +
-      f"${if (is_dec) "" else f"$sysName::"}${cc.commandName}(uint16_t core_id, $signature)" +
+      f"${if (is_dec) "" else f"$sysName::"}${cc.commandName}(uint16_t core_id$signature)" +
       (if (is_dec) ";\n}" else "")
 
 

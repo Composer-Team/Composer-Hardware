@@ -146,7 +146,8 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
   case class ScratchpadModuleChannel(requestChannel: ScratchpadMemReqPort, dataChannels: Seq[ScratchpadDataPort])
 
   //  private def getMemPWidth(name: String): Int = {
-  //    outer.memParams.filter(_.name == name)(0).asInstanceOf[CReadChannelParams].dataBytes * 8
+  //    outer.memParams.filter(_.name == name)(0).asInstanceOf[CReadChannelParams].d
+  //    ataBytes * 8
   //  }
   //
   def getReaderModule(name: String, idx: Int = 0): ReaderModuleChannel = {

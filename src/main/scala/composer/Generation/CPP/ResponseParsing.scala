@@ -14,22 +14,22 @@ object ResponseParsing {
       return ComposerResponseDeclarations("composer::rocc_response", "", "")
 
     // otherwise we have a custom type
-    val structName = f"${resp.responseName}"
+    val structName = f"$sysName::${resp.responseName}"
     val structMembersWithType = resp.realElements.map(a => f"${getCType(resp.elements(a._1), a._1)} ${a._1}")
     val response_struct =
       f"""
          |namespace $sysName {
-         |  struct $structName {
-         |    ${safe_join(structMembersWithType.map(_ + ";\n    "))}
-         |    $structName(${safe_join(structMembersWithType, ", ")}) :
+         |  struct ${resp.responseName} {
+         |    ${safe_join(structMembersWithType.map(_ + ";"), "\n    ")}
+         |    ${resp.responseName}(${safe_join(structMembersWithType, ", ")}) :
          |      ${safe_join(resp.realElements.map(a => f"${a._1}(${a._1})"), ", ")}
          |      {}
-         |  }
+         |  };
          |}
          |""".stripMargin
 
-    val template_sig = f"template<> $sysName::$structName composer::response_handle<$sysName::$structName>::get()"
-    val try_template_sig = f"template<> std::optional<$sysName::$structName> composer::response_handle<$sysName::$structName>::try_get()"
+    val template_sig = f"template<> $structName composer::response_handle<$structName>::get()"
+    val try_template_sig = f"template<> std::optional<$structName> composer::response_handle<$structName>::try_get()"
     val dec =
       f"""
          |$response_struct;
