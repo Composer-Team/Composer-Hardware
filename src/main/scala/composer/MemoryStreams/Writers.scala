@@ -140,6 +140,7 @@ class SequentialWriter(nBytes: Int,
         req_len := l
         val choppedAddr = (io.req.bits.addr >> log2Up(beatBytes)).asUInt
         req_addr := choppedAddr
+        burst_progress_count := 0.U
       }
     }
   }
@@ -181,11 +182,11 @@ class SequentialWriter(nBytes: Int,
       sourceBusyBits(nextSource) := true.B
       sourceInProgress := nextSource
       addrInProgress := nextAddr
-      burst_progress_count := burst_progress_count + 1.U
       req_addr := req_addr + burstSize
       req_len := req_len - burstSize
       when(!isSmall) {
         burst_inProgress := true.B
+        burst_progress_count := 1.U
       }
     }
   }
