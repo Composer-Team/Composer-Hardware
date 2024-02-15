@@ -3,14 +3,13 @@ package composer.Platforms
 import chipsalliance.rocketchip.config.Config
 import composer.{CXbarMaxDegree, CoreCommandLatency, HasCoherence, PlatformPhysicalMemoryBytes, PrefetchSourceMultiplicity}
 import composer.Platforms.FPGA.PlatformSLRs
-import composer.Platforms.FrontBusProtocol.FrontBusProtocol
 import composer.Platforms.PlatformType.PlatformType
 import freechips.rocketchip.subsystem.{ExtMem, MasterPortParams, MemoryPortParams}
 import os.Path
 
 class WithSimulationPlatform(nMemoryChannels: Int = 1,
                              platformType: PlatformType = PlatformType.FPGA,
-                             frontBusProtocol: FrontBusProtocol = FrontBusProtocol.AXI4,
+                             frontBusProtocol: FrontBusProtocol = new AXIFrontBusProtocol,
                              clockRateMHz: Int = 100,
                              prefetchMult: Int = 16
                             ) extends Config((_, _, _) => {

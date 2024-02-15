@@ -218,7 +218,7 @@ class SequentialWriter(nBytes: Int,
     val dsplitCount = Reg(UInt(log2Up(nBytes / beatBytes + 1).W))
     when (!inProgressPushing) {
       io.channel.data.ready := req_len > 0.U && write_buffer_io.ready
-      io.channel.data.bits := dsplit(0)
+      write_buffer_io.bits := dsplit(0)
       write_buffer_io.valid := req_len > 0.U && io.channel.data.valid
       when (io.channel.data.fire) {
         inProgressPushing := true.B
@@ -236,8 +236,6 @@ class SequentialWriter(nBytes: Int,
         }
       }
     }
-
-    require(requirement = false, "Unexpected")
   }
 
   tl_out.d.ready := true.B

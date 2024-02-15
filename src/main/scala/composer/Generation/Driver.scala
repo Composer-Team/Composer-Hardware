@@ -185,8 +185,6 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
       )
     }
 
-    config(PostProcessorMacro)(configWithBuildMode, movedSrcs ++ chiselGeneratedSrcs.toSeq) // do post-processing per backend
-
     buildMode match {
       case bm: BuildMode.Tuning if !args.contains("--notune") =>
         val opts = if (bm.cmakeOpts.length == 1) bm.cmakeOpts(0) else {
@@ -199,7 +197,9 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
           bm.execCMAKEDir + "." + bm.execName + "." + opts)).call(
           stdout = os.Inherit
         )
-      case _ =>
+      case BuildMode.Synthesis =>
+        config(PostProcessorMacro)(configWithBuildMode, movedSrcs ++ chiselGeneratedSrcs.toSeq) // do post-processing per backend
+      case _ => ;
     }
   }
 }

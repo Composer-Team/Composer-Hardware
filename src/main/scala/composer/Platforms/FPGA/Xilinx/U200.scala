@@ -31,7 +31,7 @@ private[composer] class U200Base(nMemoryChannels: Int)
     case HasDiscreteMemory => true
 
     case PlatformTypeKey => PlatformType.FPGA
-    case FrontBusProtocolKey => FrontBusProtocol.AXIL
+    case FrontBusProtocolKey => new AXIFrontBusProtocol
     case FrontBusAddressMask => 0xffffL
     case FrontBusBaseAddress => 0L
     case FrontBusAddressBits => 16

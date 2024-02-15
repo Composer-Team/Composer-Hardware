@@ -17,8 +17,7 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
-import freechips.rocketchip.tilelink._
-
+import chipkit._
 import scala.annotation.tailrec
 import scala.language.implicitConversions
 
@@ -63,28 +62,9 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   val cmd_resp_axilhub = LazyModule(new FrontBusHub())
 
   // AXI-L Port - commands come through here
-  val COMM_IN = (p(FrontBusProtocolKey), p(BuildModeKey)) match {
-    case (FrontBusProtocol.AXI4, _) | (FrontBusProtocol.AXIL, _) | (_, BuildMode.Simulation) =>
-      val axi_master = AXI4MasterNode(Seq(AXI4MasterPortParameters(
-        masters = Seq(AXI4MasterParameters(
-          name = "S00_AXI",
-          aligned = true,
-          maxFlight = Some(1),
-          id = IdRange(0, 1 << 16)
-        )),
-      )))
-      cmd_resp_axilhub.node.asInstanceOf[AXI4IdentityNode] := axi_master
-      axi_master
-    case (FrontBusProtocol.AHB, _) =>
-      val ahb_master = AHBSlaveSourceNode(
-        portParams = Seq(AHBMasterPortParameters(
-          masters = Seq(AHBMasterParameters(
-            "S00_AHB"
-          ))
-        )))
-      cmd_resp_axilhub.node.asInstanceOf[AHBSlaveIdentityNode] := ahb_master
-      ahb_master
-  }
+  val (comm_node, frontSource, _) = p(FrontBusProtocolKey).deriveTLSources(p)
+  cmd_resp_axilhub.tl_head := frontSource
+
   val dummyTL = p.alterPartial({ case TileVisibilityNodeKey => cmd_resp_axilhub.widget.node })
 
   // Generate accelerator SoC
@@ -175,8 +155,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       mem_tops zip mems foreach { case (mt, endpoint) =>
         endpoint :=
           AXI4Buffer() := mt
-//          AXI4UserYanker(None) :=
-//          AXI4Buffer() := mt
       }
     case None => ;
   }
@@ -184,31 +162,14 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   lazy val module = new TopImpl(this)
 }
 
-class TopImpl(outer: ComposerTop) extends LazyModuleImp(outer) {
+class TopImpl(outer: ComposerTop)(implicit p: Parameters) extends LazyModuleImp(outer) {
   val acc = outer.accelerator_system
   val axil_hub = outer.cmd_resp_axilhub
-  val ocl_port = outer.COMM_IN
+  val ocl_port = outer.comm_node
   acc.module.io.cmd <> axil_hub.module.io.rocc_in
   axil_hub.module.io.rocc_out <> acc.module.io.resp
 
-  val S00_AXI = (p(FrontBusProtocolKey), p(BuildModeKey)) match {
-    case (FrontBusProtocol.AXI4, _) | (FrontBusProtocol.AXIL, _) | (_, BuildMode.Simulation) =>
-      val port_cast = ocl_port.asInstanceOf[AXI4MasterNode]
-      val ap = port_cast.out(0)._1.params
-      val S00_AXI = IO(Flipped(new AXI4Compat(MasterPortParams(
-        base = 0,
-        size = 1L << p(FrontBusAddressBits),
-        beatBytes = ap.dataBits / 8,
-        idBits = ap.idBits))))
-      AXI4Compat.connectCompatSlave(S00_AXI, port_cast.out(0)._1)
-      S00_AXI
-    case (FrontBusProtocol.AHB, _) =>
-      val port_cast = ocl_port.asInstanceOf[AHBSlaveSourceNode]
-      val S00_AHB = IO(Flipped(AHBSlaveBundle(port_cast.out(0)._1.params)))
-      S00_AHB.suggestName("S00_AHB")
-      S00_AHB <> port_cast.out(0)._1
-      S00_AHB
-  }
+  p(FrontBusProtocolKey).deriveTopIOs(ocl_port)
 
   if (outer.AXI_MEM.isDefined) {
     val dram_ports = outer.AXI_MEM.get

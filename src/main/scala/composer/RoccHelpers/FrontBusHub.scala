@@ -21,20 +21,7 @@ class FrontBusHub(implicit p: Parameters) extends LazyModule {
   val widget = LazyModule(new FrontBusWidget())
 
   val tl_head = TLIdentityNode()
-
-  val node = (p(FrontBusProtocolKey), p(BuildModeKey)) match {
-    case (FrontBusProtocol.AXI4, _) | (FrontBusProtocol.AXIL, _) | (_, BuildMode.Simulation) =>
-      val node = AXI4IdentityNode()
-      // NOTE: need fragmenter because AXI4_2_TL requires a very restrictive AXI format
-      // NOTE2: NEED fragmenter because other platforms (e.g., Kria) can emit unpredictable transaction lengths
-      //        for MMIO peeks. We witnessed 64b reads on a 32b pointer dereference. Fragmenter splits it up
-      widget.node := tl_head := AXI4ToTL() :=  AXI4UserYanker(capMaxFlight = Some(4)) := AXI4Fragmenter() := AXI4IdIndexer(1) := node
-      node
-    case (FrontBusProtocol.AHB, _) =>
-      val node = AHBSlaveIdentityNode()
-      widget.node := tl_head :=  AHBToTL() := node
-      node
-  }
+  widget.node := tl_head
 
   lazy val module = new AXILHubModule(this)(p.alterPartial {
     case TileVisibilityNodeKey => tl_head

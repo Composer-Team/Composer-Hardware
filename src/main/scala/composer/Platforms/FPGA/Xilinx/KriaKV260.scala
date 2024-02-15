@@ -52,7 +52,7 @@ class WithKriaPlatform(nMemoryChannels: Int = 1, clockRate_MHz: Int = 100)
     case PrefetchSourceMultiplicity => 16
 
     case PlatformTypeKey => PlatformType.FPGA
-    case FrontBusProtocolKey => FrontBusProtocol.AXI4
+    case FrontBusProtocolKey => new AXIFrontBusProtocol
     case PlatformNBRAM => 144
     case PlatformNURAM => 64
     case DefaultClockRateKey => 100

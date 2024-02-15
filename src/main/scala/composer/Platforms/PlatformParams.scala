@@ -1,9 +1,9 @@
 package composer.Platforms
 
+import Chisel.Data
 import chipsalliance.rocketchip.config._
-import composer.Generation.{BuildMode, ComposerBuild}
+import composer.Generation.BuildMode
 import composer.Platforms.ASIC.{CanCompileMemories, MemoryCompiler}
-import composer.Platforms.FrontBusProtocol.FrontBusProtocol
 import composer.Platforms.PlatformType.PlatformType
 import os.Path
 
@@ -13,11 +13,6 @@ object PlatformType extends Enumeration {
 }
 
 case object PlatformTypeKey extends Field[PlatformType]
-
-object FrontBusProtocol extends Enumeration {
-  val AHB, AXIL, AXI4 = Value
-  type FrontBusProtocol = Value
-}
 
 /** **** MEMORY *****
  */
@@ -40,6 +35,7 @@ case object FrontBusAddressBits extends Field[Int]
 case object FrontBusAddressMask extends Field[Long]
 
 case object FrontBusBeatBytes extends Field[Int]
+
 
 case object FrontBusProtocolKey extends Field[FrontBusProtocol]
 
