@@ -35,6 +35,7 @@ private[composer] class U200Base(nMemoryChannels: Int)
     case FrontBusAddressMask => 0xffffL
     case FrontBusBaseAddress => 0L
     case FrontBusAddressBits => 16
+    case FrontBusCanDriveMemory => false
     case FrontBusBeatBytes => 4
     case PlatformNURAM => 960
     case PlatformNBRAM => 2160

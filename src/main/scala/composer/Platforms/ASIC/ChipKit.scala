@@ -3,6 +3,7 @@ package composer.Platforms.ASIC
 import chipkit.{LazyComm, PROM_UART}
 import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3._
+import composer.Generation.ComposerBuild
 import composer.Platforms.FPGA.PlatformSLRs
 import composer._
 import composer.Platforms._
@@ -10,6 +11,7 @@ import freechips.rocketchip.amba.ahb._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink.TLIdentityNode
+import os.Path
 import protocol.COMMTopIO
 
 trait HasM0BasicInterfaces {
@@ -28,12 +30,14 @@ abstract class M0Abstract(implicit p: Parameters) extends LazyModule {
 
 
 class ChipkitFrontBusProtocol(generator: Parameters => M0Abstract) extends FrontBusProtocol {
-  override def deriveTopIOs(tlChainObj: Any)(implicit p: Parameters): Bundle = {
+  override def deriveTopIOs(tlChainObj: Any, withClock: Clock, withActiveHighReset: Reset)(implicit p: Parameters): Bundle = {
+    chipkit.sources foreach ComposerBuild.addSource
     val CHIP = IO(new COMMTopIO)
     val STDUART = IO(new PROM_UART)
     val (moa, lzc) = tlChainObj.asInstanceOf[(M0Abstract, LazyComm)]
     lzc.module.top <> CHIP
     STDUART <> moa.module.uart
+    moa.module.reset := !withActiveHighReset.asBool
     CHIP
   }
   override def deriveTLSources(implicit p: Parameters): (Any, TLIdentityNode, Option[TLIdentityNode]) = {
@@ -55,16 +59,17 @@ class WithChipKitPlatform(m0generator: Parameters => M0Abstract,
       MemoryPortParams(
         MasterPortParams(
           base = 0,
-          size = 1L << 34,
+          size = 1L << 22,
           beatBytes = 4,
           idBits = 6
         ), 1
       )
     )
   // 4GB total physical memory
-  case PlatformPhysicalMemoryBytes => 1L << 34
-  case FrontBusBaseAddress => 0x2000000000L
-  case FrontBusAddressMask => 0xffffL
+  case PlatformPhysicalMemoryBytes => 1L << 22
+  case FrontBusBaseAddress => 0x400000L
+  case FrontBusAddressMask => 0x1fL
+  case FrontBusCanDriveMemory => true
   case FrontBusAddressBits => 16
   case PrefetchSourceMultiplicity => 16
   case HasDMA => None

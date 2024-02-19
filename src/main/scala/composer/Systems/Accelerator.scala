@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import composer.common._
 import composer._
-import composer.Platforms.HasDisjointMemoryControllers
+import composer.Platforms.{FrontBusCanDriveMemory, HasDisjointMemoryControllers}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem.ExtMem
 import freechips.rocketchip.tile._
@@ -126,6 +126,8 @@ class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
   val nMemChannels = p(ExtMem).get.nMemoryChannels
 
   val acc = LazyModule(new ComposerAcc())
+
+  val optionalFrontBusAccess = if (p(FrontBusCanDriveMemory)) Some(TLIdentityNode()) else None
 
   val Seq(r_mem, w_mem) = Seq(acc.reads, acc.writes).map { mems =>
     if (mems.nonEmpty) {

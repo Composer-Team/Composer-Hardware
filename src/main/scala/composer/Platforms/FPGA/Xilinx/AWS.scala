@@ -10,9 +10,13 @@ object AWS_sole {
   def apply(c: Config, pths: Seq[Path]): Unit = {
     if (c(BuildModeKey) == BuildMode.Synthesis) {
       // rename composer.v to composer.sv
-      val composer_sv = os.Path(ComposerBuild.composerGenDir) / "composer.sv"
-      val composer_v = os.Path(ComposerBuild.composerGenDir) / "composer.v"
-      os.copy.over(composer_v, composer_sv)
+      val top_file = os.Path(ComposerBuild.composerGenDir) / "aws" / "composer.sv"
+      os.makeDir.all(os.Path(ComposerBuild.composerGenDir) / "aws")
+      os.remove.all(top_file)
+      os.proc("touch", top_file.toString()).call()
+      os.walk(os.Path(ComposerBuild.composerGenDir) / "composer.build") foreach { f =>
+        os.write.append(top_file, os.read(f))
+      }
     }
   }
 }

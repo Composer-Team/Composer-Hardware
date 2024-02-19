@@ -54,6 +54,8 @@ case object ASICMemoryCompilerKey extends Field[MemoryCompiler with CanCompileMe
 
 case object BuildModeKey extends Field[BuildMode]
 
+case object FrontBusCanDriveMemory extends Field[Boolean]
+
 
 
 

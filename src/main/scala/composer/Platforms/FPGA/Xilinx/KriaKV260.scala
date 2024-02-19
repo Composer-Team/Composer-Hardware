@@ -43,6 +43,7 @@ class WithKriaPlatform(nMemoryChannels: Int = 1, clockRate_MHz: Int = 100)
     case FrontBusBaseAddress => 0x2000000000L
     case FrontBusAddressMask => 0xffffL
     case FrontBusAddressBits => 40
+    case FrontBusCanDriveMemory => false
     case HasDMA => None
     // TODO this can be tuned
     case CXbarMaxDegree => 8

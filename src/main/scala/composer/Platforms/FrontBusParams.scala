@@ -18,7 +18,7 @@ abstract class FrontBusProtocol {
    * tlChainObj provides the diplomacy objects generated in `deriveTLSources` so that you, from a non-lazy context
    * can generate the physical IOs and tie them to the diplomacy object bundle IOs
    */
-  def deriveTopIOs(tlChainObj: Any)(implicit p: Parameters): Bundle
+  def deriveTopIOs(tlChainObj: Any, withClock: Clock, withActiveHighReset: Reset)(implicit p: Parameters): Bundle
 
   /**
    * This function is executed from the lazy context. Generate the following:
@@ -34,7 +34,7 @@ abstract class FrontBusProtocol {
 }
 
 class AXIFrontBusProtocol extends FrontBusProtocol {
-  override def deriveTopIOs(tlChainObj: Any)(implicit p: Parameters): Bundle = {
+  override def deriveTopIOs(tlChainObj: Any, withClock: Clock, withActiveHighReset: Reset)(implicit p: Parameters): Bundle = {
     val port_cast = tlChainObj.asInstanceOf[AXI4MasterNode]
     val ap = port_cast.out(0)._1.params
     val S00_AXI = IO(Flipped(new AXI4Compat(MasterPortParams(

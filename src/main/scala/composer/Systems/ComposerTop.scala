@@ -12,12 +12,12 @@ import composer.Generation.Tune.Tunable
 import composer.Platforms._
 import composer.Protocol._
 import composer.TLManagement._
-import freechips.rocketchip.amba.ahb._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
-import chipkit._
+import freechips.rocketchip.tilelink.{TLIdentityNode, TLMasterParameters, TLMasterPortParameters, TLNode, TLSlaveParameters, TLSlavePortParameters, TLXbar}
+
 import scala.annotation.tailrec
 import scala.language.implicitConversions
 
@@ -50,6 +50,7 @@ object ComposerTop {
     val continuity = p(ExtMem).get.master.size
     val baseTotal = (nMemChannels - 1) * continuity
     val amask = getAddressMask(log2Up(p(ExtMem).get.master.size), baseTotal.toLong)
+
     AddressSet(continuity * ddrChannel, amask)
   }
 }
@@ -63,7 +64,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   // AXI-L Port - commands come through here
   val (comm_node, frontSource, _) = p(FrontBusProtocolKey).deriveTLSources(p)
-  cmd_resp_axilhub.tl_head := frontSource
+
 
   val dummyTL = p.alterPartial({ case TileVisibilityNodeKey => cmd_resp_axilhub.widget.node })
 
@@ -72,7 +73,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
 
   // Rocketchip AXI Nodes
 
-  val has_memory_endpoints = accelerator_system.r_mem.nonEmpty || accelerator_system.w_mem.nonEmpty
+  val has_memory_endpoints = accelerator_system.r_mem.nonEmpty || accelerator_system.w_mem.nonEmpty || p(FrontBusCanDriveMemory)
   val AXI_MEM = if (has_memory_endpoints) Some(Seq.tabulate(nMemChannels) { channel_idx =>
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
@@ -108,13 +109,53 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
   val DMASourceBits = if (p(HasDMA).isDefined) CLog2Up(p(HasDMA).get) else 0
   val availableComposerSources = 1 << (p(ExtMem).get.master.idBits - DMASourceBits)
 
+  def tieFBandShrink(tl: TLNode, fb: Option[TLNode], name: Option[String]): TLNode = {
+    val total = fb match {
+      case Some(q) =>
+        val xbar = TLXbar()
+        xbar := q
+        xbar := tl
+        xbar
+      case None => tl
+    }
+    val shrinker = TLSourceShrinkerDynamicBlocking(availableComposerSources, name)
+    shrinker := total
+    shrinker
+  }
+
+  val (front_r, front_w) = if (p(FrontBusCanDriveMemory)) {
+    val front_mem_xbar = TLXbar()
+    front_mem_xbar := frontSource
+    cmd_resp_axilhub.tl_head := front_mem_xbar
+    val filter = LazyModule(new TLRWFilter(
+      TLSlavePortParameters.v1(
+        managers = Seq(TLSlaveParameters.v1(
+          address = (0 until nMemChannels).map(ComposerTop.getAddressSet(_)),
+          supportsGet = TransferSizes(p(FrontBusBeatBytes)),
+          supportsPutFull = TransferSizes(p(FrontBusBeatBytes)),
+          supportsAcquireB = TransferSizes.none,
+          resources = device.reg,
+          regionType = RegionType.UNCACHED,
+        )), p(FrontBusBeatBytes), 0
+      ),
+      TLMasterPortParameters.v1(
+        clients = Seq(TLMasterParameters.v1(
+          "Splitter",
+          IdRange(0, 1))))))
+    filter.in_node := front_mem_xbar
+    (Some(filter.read_out), Some(filter.write_out))
+  } else {
+    cmd_resp_axilhub.tl_head := frontSource
+    (None, None)
+  }
+
   // Connect accelerators to memory
   val composer_mems = if (accelerator_system.w_mem.isEmpty) {
     accelerator_system.w_mem.map { src =>
       val tl2axi = LazyModule(new TLToAXI4R(
         addressSet = ComposerTop.getAddressSet(0),
         idMax = availableComposerSources))
-      tl2axi.tlReader := src
+      tl2axi.tlReader := tieFBandShrink(src, front_r, Some("read_shrink"))
       tl2axi.axi_client
     }
   } else if (accelerator_system.r_mem.isEmpty) {
@@ -122,18 +163,19 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
       val tl2axi = LazyModule(new TLToAXI4W(
         addressSet = ComposerTop.getAddressSet(0),
         idMax = availableComposerSources))
-      tl2axi.tlWriter := src
+      tl2axi.tlWriter := tieFBandShrink(src, front_w, Some("write_shrink"))
       tl2axi.axi_client
     }
   } else {
     accelerator_system.r_mem.zip(accelerator_system.w_mem).zipWithIndex map { case ((r, w), idx) =>
       val Seq(rss, wss) = Seq(r, w).zip(Seq("readIDShrinker", "writeIDShrinker")).map {
-        case (m, nm) => TLSourceShrinkerDynamicBlocking(availableComposerSources, Some(nm)) := m }
+        case (m, nm) => TLSourceShrinkerDynamicBlocking(availableComposerSources, Some(nm)) := m
+      }
       val tl2axi = LazyModule(new TLToAXI4SRW(
         addressSet = ComposerTop.getAddressSet(idx),
         idMax = availableComposerSources))
-      tl2axi.tlReader := rss
-      tl2axi.tlWriter := wss
+      tl2axi.tlReader := tieFBandShrink(rss, front_r, Some("read_shrink"))
+      tl2axi.tlWriter := tieFBandShrink(wss, front_w, Some("write_shrink"))
       // readers and writers are separated into separate systems and re-unified for the AXI bus. In reality though,
       // the read and write busses are logically unrelated so this unification is only symbolic
       tl2axi.axi_client
@@ -169,7 +211,7 @@ class TopImpl(outer: ComposerTop)(implicit p: Parameters) extends LazyModuleImp(
   acc.module.io.cmd <> axil_hub.module.io.rocc_in
   axil_hub.module.io.rocc_out <> acc.module.io.resp
 
-  p(FrontBusProtocolKey).deriveTopIOs(ocl_port)
+  p(FrontBusProtocolKey).deriveTopIOs(ocl_port, clock, reset)
 
   if (outer.AXI_MEM.isDefined) {
     val dram_ports = outer.AXI_MEM.get
