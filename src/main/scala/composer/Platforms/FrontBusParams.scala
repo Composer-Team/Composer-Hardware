@@ -5,7 +5,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import composer.Platforms.ASIC.M0Abstract
 import composer.Protocol.AXI4Compat
-import freechips.rocketchip.amba.ahb.{AHBMasterSourceNode, AHBToTL}
+import freechips.rocketchip.amba.ahb.AHBToTL
 import freechips.rocketchip.amba.axi4.{AXI4Fragmenter, AXI4IdIndexer, AXI4MasterNode, AXI4MasterParameters, AXI4MasterPortParameters, AXI4ToTL, AXI4UserYanker}
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule}
 import freechips.rocketchip.subsystem.MasterPortParams

@@ -9,6 +9,7 @@ import composer.RoccHelpers.FrontBusHub
 import composer.Systems.ComposerTop._
 import composer.common.CLog2Up
 import composer.Generation.Tune.Tunable
+import composer.Platforms.FPGA.SLRHelper
 import composer.Platforms._
 import composer.Protocol._
 import composer.TLManagement._
@@ -40,7 +41,6 @@ object ComposerTop {
   }
 
   def getAddressSet(ddrChannel: Int)(implicit p: Parameters): AddressSet = {
-
     val nMemChannels = p(ExtMem).get.nMemoryChannels
     // this one is the defuault for rocket chip. Each new cache line (size def by CacheBlockBytes) is on another
     // DIMM. This makes fetching 4 contiguous cache blocks completely parallelized. Should be way faster...
@@ -51,11 +51,20 @@ object ComposerTop {
     val baseTotal = (nMemChannels - 1) * continuity
     val amask = getAddressMask(log2Up(p(ExtMem).get.master.size), baseTotal.toLong)
 
-    AddressSet(continuity * ddrChannel, amask)
+    if (p(ExtMem).get.master.base > 0) {
+      assert(ddrChannel == 0)
+      require(isPow2(p(ExtMem).get.master.base))
+      val em = p(ExtMem).get.master
+      AddressSet(em.base, em.base-1)
+    } else {
+
+      AddressSet(continuity * ddrChannel, amask)
+    }
   }
 }
 
-class ComposerTop(implicit p: Parameters) extends LazyModule() {
+class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
+  override val baseName: String = "TopModule"
   private val externalMemParams: MemoryPortParams = p(ExtMem).get
   private val nMemChannels = externalMemParams.nMemoryChannels
   private val device = new MemoryDevice
@@ -182,14 +191,39 @@ class ComposerTop(implicit p: Parameters) extends LazyModule() {
     }
   }
   val mem_tops = if (p(HasDMA).isDefined) {
-    val dma_mem_xbar = Seq.fill(nMemChannels)(AXI4Xbar(maxFlightPerId = p(MaxInFlightMemTxsPerSource)))
-    val dma = AXI4Xbar()
-    dma := AXI4Buffer() := dma_port.get
-    dma_mem_xbar zip composer_mems foreach { case (xb, cm) =>
-      xb := cm
-      xb := dma
+    if (p(ConstraintHintsKey).contains(ComposerConstraintHint.DistributeCoresAcrossSLRs)) {
+      val full_mem_xbar = Seq.tabulate(nMemChannels)(idx =>
+        LazyModuleWithFloorplan(new AXI4Xbar(maxFlightPerId = p(MaxInFlightMemTxsPerSource)),
+          slr_id = SLRHelper.getMemoryBusSLR,
+          requestedName = Some(s"dma_xbar_front_channel$idx")))
+      val dma_front = LazyModuleWithFloorplan(new AXI4Buffer(),
+        slr_id = SLRHelper.getFrontBusSLR,
+        requestedName = Some(s"dma_buff_front"))
+      val dma_side = LazyModuleWithFloorplan(new AXI4Buffer(),
+        slr_id = SLRHelper.getMemoryBusSLR,
+        requestedName = Some("dma_buff_mbus"))
+      val dma_fanout = LazyModuleWithFloorplan(new AXI4Xbar(),
+        slr_id = SLRHelper.getFrontBusSLR,
+        requestedName = Some(s"dma_xbar_front"))
+      require(nMemChannels == 1, "slr needs to be improved to support multiple slrs")
+      dma_front.node := dma_port.get
+      dma_side.node := dma_front.node
+      dma_fanout.node := dma_side.node
+      full_mem_xbar zip composer_mems foreach { case (xb, cm) =>
+        xb.node := cm
+        xb.node := dma_fanout.node
+      }
+      full_mem_xbar.map(_.node)
+    } else {
+      val dma_mem_xbar = Seq.fill(nMemChannels)(AXI4Xbar(maxFlightPerId = p(MaxInFlightMemTxsPerSource)))
+      val dma = AXI4Xbar()
+      dma := AXI4Buffer() := dma_port.get
+      dma_mem_xbar zip composer_mems foreach { case (xb, cm) =>
+        xb := cm
+        xb := dma
+      }
+      dma_mem_xbar
     }
-    dma_mem_xbar
   } else composer_mems
 
   AXI_MEM match {

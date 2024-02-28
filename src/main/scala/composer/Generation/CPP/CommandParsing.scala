@@ -37,9 +37,9 @@ object CommandParsing {
         if (bitsLeftInPayload < aw) {
           val pl = Seq(
             (basePayload,
-              f"((uint64_t)($acc & ${intToHexFlag((1L << bitsLeftInPayload) - 1)}L) << $payloadLocalOffset)"),
+              f"((uint64_t)($acc & ${intToHexFlag((1L << bitsLeftInPayload) - 1)}LL) << $payloadLocalOffset)"),
             (basePayload + 1,
-              f"(((uint64_t)$acc >> $bitsLeftInPayload) & ${intToHexFlag((1L << (aw - bitsLeftInPayload)) - 1)}L)"))
+              f"(((uint64_t)$acc >> $bitsLeftInPayload) & ${intToHexFlag((1L << (aw - bitsLeftInPayload)) - 1)}LL)"))
           unrollPayload(basePayload + 1,
             64 - (aw - bitsLeftInPayload),
             accessStrs.tail,
@@ -104,7 +104,9 @@ object CommandParsing {
       f"""
          |${responseInfo.definition}
          |${command_sig(false)} {
+         |#ifndef BAREMETAL
          |  assert(core_id < ${p(AcceleratorSystems).filter(_.name == sysName)(0).nCores});
+         |#endif
          |  uint64_t payloads[${Math.max(numCommands * 2, 2)}];
          |""".stripMargin + (if (assignments.length == 1) assignments(0) + "\n" else assignments.fold("")(_ + "\n" + _)) +
         f"""

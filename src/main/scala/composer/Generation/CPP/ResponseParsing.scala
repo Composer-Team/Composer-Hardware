@@ -34,7 +34,9 @@ object ResponseParsing {
       f"""
          |$response_struct;
          |$template_sig;
+         |#ifndef BAREMETAL
          |$try_template_sig;
+         |#endif
          |""".stripMargin
 
     val template_decs = resp.fieldSubranges.filter(_._1.endsWith("_FP")).map { ele =>
@@ -73,6 +75,7 @@ object ResponseParsing {
          |$template_decs
          |  return $structName($template_def);
          |}
+         |#ifndef BAREMETAL
          |$try_template_sig {
          |  auto r = rg.try_get();
          |  if (!r.has_value()) return {};
@@ -80,6 +83,7 @@ object ResponseParsing {
          |$template_decs
          |  return $structName($template_def);
          |}
+         |#endif
          |
          |""".stripMargin
     ComposerResponseDeclarations(structName, dec, definition)

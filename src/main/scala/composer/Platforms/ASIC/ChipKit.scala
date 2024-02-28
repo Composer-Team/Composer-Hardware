@@ -19,7 +19,7 @@ trait HasM0BasicInterfaces {
 }
 
 abstract class M0Abstract(implicit p: Parameters) extends LazyModule {
-  val node = AHBSlaveSourceNode(
+  val node = AHBMasterSourceNode(
     portParams = Seq(AHBMasterPortParameters(
       masters = Seq(AHBMasterParameters(
         name = "M0_AHB"
@@ -37,7 +37,7 @@ class ChipkitFrontBusProtocol(generator: Parameters => M0Abstract) extends Front
     val (moa, lzc) = tlChainObj.asInstanceOf[(M0Abstract, LazyComm)]
     lzc.module.top <> CHIP
     STDUART <> moa.module.uart
-    moa.module.reset := !withActiveHighReset.asBool
+    moa.module.reset := withActiveHighReset.asBool
     CHIP
   }
   override def deriveTLSources(implicit p: Parameters): (Any, TLIdentityNode, Option[TLIdentityNode]) = {
@@ -58,8 +58,9 @@ class WithChipKitPlatform(m0generator: Parameters => M0Abstract,
     Some(
       MemoryPortParams(
         MasterPortParams(
-          base = 0,
-          size = 1L << 22,
+          // although we only have 400MB of DRAM, these addresses are stored
+          base = 0x40000000L,
+          size = (1L << 20) * 400,
           beatBytes = 4,
           idBits = 6
         ), 1

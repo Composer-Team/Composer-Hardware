@@ -112,8 +112,10 @@ object Generation {
          |#include <composer/alloc.h>
          |#include <composer/rocc_cmd.h>
          |#include <cinttypes>
+         |#ifndef BAREMETAL
          |#include <optional>
          |#include <cassert>
+         |#endif
          |
          |#ifndef COMPOSER_ALLOCATOR_GEN
          |#define COMPOSER_ALLOCATOR_GEN
