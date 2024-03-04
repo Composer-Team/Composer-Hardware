@@ -5,11 +5,10 @@ package composer.TLManagement
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
-import composer.PrefetchSourceMultiplicity
 import composer.common.CLog2Up
+import composer.platform
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.subsystem.ExtMem
 import freechips.rocketchip.tilelink._
 
 class TLToAXI4W(val addressSet: AddressSet, idMax: Int)(implicit p: Parameters) extends LazyModule {
@@ -28,8 +27,8 @@ class TLToAXI4W(val addressSet: AddressSet, idMax: Int)(implicit p: Parameters) 
         maxFlight = Some(1)
       )))))
   val defaultTransferSizes = TransferSizes(
-    p(ExtMem).get.master.beatBytes,
-    p(ExtMem).get.master.beatBytes * p(PrefetchSourceMultiplicity))
+    platform.extMem.master.beatBytes,
+    platform.extMem.master.beatBytes * platform.prefetchSourceMultiplicity)
 
   val tlWriter = TLManagerNode(
     portParams = Seq(TLSlavePortParameters.v1(
@@ -39,7 +38,7 @@ class TLToAXI4W(val addressSet: AddressSet, idMax: Int)(implicit p: Parameters) 
         supportsPutFull = defaultTransferSizes,
         supportsPutPartial = TransferSizes.none,
       )),
-      beatBytes = p(ExtMem).get.master.beatBytes)))
+      beatBytes = platform.extMem.master.beatBytes)))
 
   lazy val module = new TLToAXI4WImpl(this)
 }

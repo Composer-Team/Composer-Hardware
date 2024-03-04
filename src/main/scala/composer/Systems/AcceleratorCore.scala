@@ -268,7 +268,7 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
 
   def getSystemID(name: String): UInt = p(SystemName2IdMapKey)(name).U
 
-  implicit def _addrBits: Int = log2Up(p(ExtMem).get.master.size)
+  implicit def _addrBits: Int = log2Up(platform.extMem.master.size)
 
   private var nCommands = 0
 

@@ -11,13 +11,13 @@ import composer.Platforms.ASIC.ProcessCorner.ProcessCorner
 import composer.Platforms.ASIC.ProcessOperatingConditions.ProcessOperatingConditions
 import composer.Platforms.ASIC.ProcessTemp.ProcessTemp
 import composer.Platforms.ASIC.ProcessVoltageThreshold.ProcessVoltageThreshold
+import os.Path
 
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
-class SAEDMemoryCompiler extends MemoryCompiler with CannotCompileMemories {
 
-  // TODO Fixme
+class SAEDMemoryCompiler extends MemoryCompiler with CannotCompileMemories {
   override val supportedCorners: Seq[(ProcessCorner, ProcessTemp)] = Seq.empty
 
   override val availableMems: Map[Int, Seq[SD]] = Map.from(Seq(
@@ -51,13 +51,15 @@ class SAEDMemoryCompiler extends MemoryCompiler with CannotCompileMemories {
   }
 }
 
-class WithSAED(corner: ProcessCorner = ProcessCorner.Typical,
-               temp: ProcessTemp = ProcessTemp.C25,
-               threshold: ProcessVoltageThreshold = ProcessVoltageThreshold.Regular,
-               voltage: ProcessOperatingConditions = ProcessOperatingConditions.NormalVoltage,
-               clockRateMHz: Float = 1000) extends Config((_, _, _) => {
-  case ASICMemoryCompilerKey => new SAEDMemoryCompiler()
-  case PostProcessorMacro => (_: Parameters) => {
+class SAEDTechLib(corner: ProcessCorner = ProcessCorner.Typical,
+                  temp: ProcessTemp = ProcessTemp.C25,
+                  threshold: ProcessVoltageThreshold = ProcessVoltageThreshold.Regular,
+                  voltage: ProcessOperatingConditions = ProcessOperatingConditions.NormalVoltage,
+                  clockRateMHz: Float = 1000) extends TechLib {
+
+  override val memoryCompiler: MemoryCompiler = new SAEDMemoryCompiler
+
+  override def postProcessorMacro(c: Config, paths: Seq[Path]): Unit = {
     val cwd = os.Path(ComposerBuild.composerGenDir)
     val timestamp = LocalDateTime.now()
     val synwd = cwd / ("asic_build_" + DateTimeFormatter.ofPattern("yy-MM-dd_HHMMSS").format(timestamp))
@@ -107,9 +109,9 @@ class WithSAED(corner: ProcessCorner = ProcessCorner.Typical,
     //      val memoryPaths: Seq[Path] = ComposerBuild.symbolicMemoryResources.distinct.map(p => p / "db_nldm" / s"saed14sram_$cornerString$voltageString$tempString.db")
     //    val memoryDBs = List("dual", "single").map(p => f"$baseMemories/logic_synth/$p/saed14sram_$cornerString$voltageString$tempString.db").fold("")(_ + " " + _)
     val memoryDBs = List("dual").map(p => f"$baseMemories/logic_synth/$p/saed14sram_$cornerString$voltageString$tempString.db").fold("")(_ + " " + _)
-//    val mem_pnrs = List("1rw", "2rw").map { mem =>
-//      f"$baseMemories/ndm/saed14_sram_${mem}_frame_only.ndm"
-//    }.fold("")(_ + " " + _)
+    //    val mem_pnrs = List("1rw", "2rw").map { mem =>
+    //      f"$baseMemories/ndm/saed14_sram_${mem}_frame_only.ndm"
+    //    }.fold("")(_ + " " + _)
 
     os.write(synwd / "synth.ssp",
       f"""set project_path $synwd
@@ -274,5 +276,4 @@ class WithSAED(corner: ProcessCorner = ProcessCorner.Typical,
          |
          |""".stripMargin)
   }
-
-})
+}

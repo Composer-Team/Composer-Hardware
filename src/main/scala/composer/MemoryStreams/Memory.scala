@@ -6,7 +6,7 @@ import chisel3.util._
 import composer.MemoryStreams.RAM.SyncReadMemMem
 import composer.Platforms.ASIC.MemoryCompiler
 import composer.Platforms.FPGA.Xilinx.Templates.{BRAMSDP, BRAMTDP}
-import composer.Platforms.{ASICMemoryCompilerKey, PlatformType, PlatformTypeKey}
+import composer.Platforms._
 import freechips.rocketchip.diplomacy.ValName
 
 object Memory {
@@ -29,9 +29,9 @@ object Memory {
       debugName: Option[String] = None
   )(implicit p: Parameters, valName: ValName): CMemoryIOBundle = {
 //    println(s"Creating CMemory with $nReadPorts read ports, $nWritePorts write ports, $nReadWritePorts read/write ports: $debugName, $valName")
-    val mostPortsSupported = p(PlatformTypeKey) match {
-      case PlatformType.FPGA => 2
-      case PlatformType.ASIC => p(ASICMemoryCompilerKey).mostPortsSupported
+    val mostPortsSupported = p(PlatformKey) match {
+      case mc: Platform with HasMemoryCompiler => mc.memoryCompiler.mostPortsSupported
+      case _ => 2
     }
     val nPorts = nReadPorts + nWritePorts + nReadWritePorts
 
@@ -92,9 +92,8 @@ object Memory {
       mio
     }
     else {
-      p(PlatformTypeKey) match {
+      p(PlatformKey).platformType match {
         case PlatformType.FPGA =>
-          println("FPGA Mem")
           require(latency >= 1)
           val mio = Wire(Output(new CMemoryIOBundle(nReadPorts, nWritePorts, nReadWritePorts, log2Up(nRows), dataWidth)))
           if (latency >= 3 && nPorts <= 2) {

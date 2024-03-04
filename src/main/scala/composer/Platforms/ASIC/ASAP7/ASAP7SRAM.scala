@@ -4,10 +4,11 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
 import chisel3._
 import composer.MemoryStreams.HasMemoryInterface
-import composer.Platforms.ASICMemoryCompilerKey
+import composer.Platforms.{HasMemoryCompiler, Platform, PlatformKey}
 
 class ASAP7SRAM(rows: Int, dataBits: Int)(implicit p: Parameters) extends BlackBox with HasMemoryInterface {
-  override val desiredName = p(ASICMemoryCompilerKey).asInstanceOf[ASAP7MemoryCompiler].getMemoryName(nPorts = 1, rows, dataBits)
+  override val desiredName =
+    p(PlatformKey).asInstanceOf[Platform with HasMemoryCompiler].memoryCompiler.asInstanceOf[ASAP7MemoryCompiler].getMemoryName(nPorts = 1, rows, dataBits)
   val addrBits = log2Up(rows)
   val io = IO(new Bundle() {
     val clk = Input(Bool())

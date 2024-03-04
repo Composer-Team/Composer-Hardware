@@ -2,6 +2,7 @@ package composer.Generation
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import composer.Platforms.FPGA.Xilinx.AWSF1Platform
 import composer._
 import composer.common.BUFG
 import composer.Platforms._
@@ -45,12 +46,14 @@ object ConstraintGeneration {
     slrMappings = (moduleName, slr) :: slrMappings
   }
 
-  def canDistributeOverSLRs()(implicit p: Parameters): Boolean = p(ConstraintHintsKey).contains(ComposerConstraintHint.DistributeCoresAcrossSLRs) && p(PlatformNumSLRs) > 1
+  def canDistributeOverSLRs()(implicit p: Parameters): Boolean =
+    p(ConstraintHintsKey).contains(ComposerConstraintHint.DistributeCoresAcrossSLRs) &&
+      p(PlatformKey).isInstanceOf[MultiDiePlatform]
 
   def writeConstraints()(implicit p: Parameters): Unit = {
-    p(PlatformTypeKey) match {
+    p(PlatformKey).platformType match {
       case PlatformType.FPGA =>
-
+        val mdplat = p(PlatformKey).asInstanceOf[Platform with MultiDiePlatform]
         val path = Path(ComposerBuild.composerGenDir)
         val outPath = path / "user_constraints.xdc"
         if (!canDistributeOverSLRs()) {
@@ -61,11 +64,12 @@ object ConstraintGeneration {
         os.makeDir.all(path)
         val f = new FileWriter(outPath.toString())
 
-        val slrs = p(PlatformSLRs).get
-        val id2Name = if (p(IsAWS)) {
-          Map.from((0 until p(PlatformNumSLRs)).map(i => (i, slrs(i).name)))
-        } else Map.from((0 until p(PlatformNumSLRs)).map(i => (i, "composer_slr" + slrs(i).name)))
-        if (!p(IsAWS)) {
+        val slrs = mdplat.platformDies
+        val id2Name = if (mdplat.isInstanceOf[AWSF1Platform])
+          Map.from(slrs.zipWithIndex.map(q => q.copy(_1=q._2, _2 = q._1.name)))
+        else
+          Map.from(slrs.zipWithIndex.map(q => q.copy(_1=q._2, _2 = "composer_slr_" + q._1.name)))
+        if (mdplat.isInstanceOf[AWSF1Platform]) {
           // AWS constraints are appended to existing constraint file which already defines pblock names, no need to
           // redefine
           slrs.indices.foreach { i =>
@@ -74,7 +78,7 @@ object ConstraintGeneration {
           }
         }
 
-        (0 until p(PlatformNumSLRs)).foreach { slrID =>
+        mdplat.platformDies.zipWithIndex.foreach { case (_, slrID) =>
           val cells = slrMappings.filter(_._2 == slrID)
           val plist = cells.map(c => f"*${c._1}*").fold("")(_ + " " + _)
           f.write(f"add_cells_to_pblock ${id2Name(slrID)} [get_cells -hierarchical [list " + plist + " ] ]\n")
@@ -113,25 +117,25 @@ class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters)
   def tieClocks(): Unit = {
     if (!ConstraintGeneration.canDistributeOverSLRs()) return
 
-//    val slr_ctrls: Map[Int, Clock] = Map.from((0 until p(PlatformNumSLRs)).filter(_ != SLRHelper.DEFAULT_SLR).map { slr =>
-//      val CLmodName = f"${wrapper.baseName}_SLRClockCrossing_${slr}_clock"
-//      val cl_mod = Module(new BUFG)
-//      cl_mod.suggestName(CLmodName)
-//      cl_mod.io.I := clock.asBool
-//      ConstraintGeneration.addToSLR(CLmodName, slr)
-//      (slr, cl_mod.io.O.asClock)
-//    } ++ Seq((SLRHelper.DEFAULT_SLR, clock)))
-//
-//
-//    wrapper.lazyClockMap.foreach { case (lm, slr) =>
-//      val imp = lm.module.asInstanceOf[LazyModuleImp]
-//      imp.clock := slr_ctrls(slr)
-//
-//    }
-//
-//    clockMap.foreach { case (m, slr) =>
-//      m.clock := slr_ctrls(slr)
-//    }
+    //    val slr_ctrls: Map[Int, Clock] = Map.from((0 until p(PlatformNumSLRs)).filter(_ != DieName.DEFAULT_SLR).map { slr =>
+    //      val CLmodName = f"${wrapper.baseName}_SLRClockCrossing_${slr}_clock"
+    //      val cl_mod = Module(new BUFG)
+    //      cl_mod.suggestName(CLmodName)
+    //      cl_mod.io.I := clock.asBool
+    //      ConstraintGeneration.addToSLR(CLmodName, slr)
+    //      (slr, cl_mod.io.O.asClock)
+    //    } ++ Seq((DieName.DEFAULT_SLR, clock)))
+    //
+    //
+    //    wrapper.lazyClockMap.foreach { case (lm, slr) =>
+    //      val imp = lm.module.asInstanceOf[LazyModuleImp]
+    //      imp.clock := slr_ctrls(slr)
+    //
+    //    }
+    //
+    //    clockMap.foreach { case (m, slr) =>
+    //      m.clock := slr_ctrls(slr)
+    //    }
   }
 }
 

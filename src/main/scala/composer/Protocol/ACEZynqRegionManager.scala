@@ -1,13 +1,9 @@
 package composer.Protocol
 
-import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import composer.Generation.CppGeneration
-import composer.HasCoherence
-import freechips.rocketchip.amba.axi4.AXI4BundleParameters
-import composer.MemoryStreams.{CMemoryIOBundle, Memory}
-import composer.MemoryStreams.RAM.{RegMem, SyncReadMemMem}
+import composer.MemoryStreams.CMemoryIOBundle
 import composer.Protocol.ACEZynqRegionManager.ace_cmd_clean_invalidate
 import composer.common.CLog2Up
 import freechips.rocketchip.subsystem.MasterPortParams

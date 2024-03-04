@@ -3,10 +3,12 @@ package composer.Generation
 import chipsalliance.rocketchip.config._
 import chisel3.stage._
 import composer.Generation.Annotators.AnnotateXilinxInterface.XilinxInterface
-import composer.{Generation, HasCoherence}
-import composer.Generation.Annotators.{CrossBoundaryDisable, KeepHierarchy, WalkPath}
+import composer.Generation
+import composer.Generation.Annotators.{CrossBoundaryDisable, WalkPath}
 import composer.Generation.ComposerBuild._
-import composer.Platforms.{BuildModeKey, FrontBusProtocol, FrontBusProtocolKey, IsAWS, PlatformType, PlatformTypeKey, PostProcessorMacro}
+import composer.Platforms.FPGA.Xilinx.AWSF1Platform
+import composer.Platforms._
+import composer.Protocol.FrontBus.FrontBusProtocol
 import firrtl._
 import firrtl.options._
 import firrtl.options.PhaseManager.PhaseDependency
@@ -115,14 +117,13 @@ object BuildMode {
 class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesis) {
 
 
-
   final def main(args: Array[String]): Unit = {
-//    args.foreach(println(_))
+    //    args.foreach(println(_))
     BuildArgs.args = Map.from(
       args.filter(str => str.length >= 2 && str.substring(0, 2) == "-D").map {
         opt =>
           val pr = opt.substring(2).split("=")
-//          println(pr(0) + " " + pr(1))
+          //          println(pr(0) + " " + pr(1))
           (pr(0), pr(1).toInt)
       }
     )
@@ -137,7 +138,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
           // if you want to get annotation output for debugging, uncomment the following line
           new EmitAllModulesAnnotation(classOf[VerilogEmitter]),
           new TargetDirAnnotation(targetDir.toString()),
-//          new OutputAnnotationFileAnnotation(targetDir.toString()),
+          //          new OutputAnnotationFileAnnotation(targetDir.toString()),
           new TopModuleAnnotation(Class.forName("composer.Systems.ComposerTop")),
           Generation.Stage.ConfigsAnnotation(configWithBuildMode),
           CustomDefaultMemoryEmission(MemoryNoInit),
@@ -150,7 +151,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
     val chiselGeneratedSrcs = WalkPath(targetDir)
 
     // --------------- Verilog Annotators ---------------
-//    KeepHierarchy(targetDir / "ComposerTop.v")
+    //    KeepHierarchy(targetDir / "ComposerTop.v")
     partitionModules foreach println
     val movedSrcs = composer.Generation.Annotators.UniqueMv(sourceList, targetDir)
 
@@ -160,13 +161,9 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
     if (crossBoundaryDisableList.nonEmpty && !buildMode.isInstanceOf[BuildMode.Training.type]) {
       CrossBoundaryDisable(crossBoundaryDisableList, targetDir)
     }
-    if (configWithBuildMode(PlatformTypeKey) == PlatformType.FPGA && !configWithBuildMode(IsAWS)) {
-      val tc_ace = if (configWithBuildMode(HasCoherence).isDefined) {
-        composer.Generation.Annotators.AnnotateXilinxInterface(
-          "M_ACE", (targetDir / "ComposerTop.v").toString(), XilinxInterface.ACE)
-        Some("M_ACE")
-      } else None
-      val tc_axi = (0 until configWithBuildMode(ExtMem).get.nMemoryChannels) map { idx =>
+    if (configWithBuildMode(PlatformKey).platformType == PlatformType.FPGA &&
+      !configWithBuildMode(PlatformKey).isInstanceOf[AWSF1Platform]) {
+      val tc_axi = (0 until config(PlatformKey).extMem.nMemoryChannels) map { idx =>
         composer.Generation.Annotators.AnnotateXilinxInterface(
           f"M0${idx}_AXI", (targetDir / "ComposerTop.v").toString(), XilinxInterface.AXI4)
         Some(f"M0${idx}_AXI")
@@ -178,7 +175,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
         Some("S00_AXI")
       }
 
-      val tcs = ((Seq(tc_ace, tc_front) ++ tc_axi) filter (_.isDefined) map (_.get)).mkString(":")
+      val tcs = ((Seq(tc_front) ++ tc_axi) filter (_.isDefined) map (_.get)).mkString(":")
       Annotators.AnnotateTopClock(
         f"\\(\\* X_INTERFACE_PARAMETER = \"ASSOCIATED_BUSIF $tcs \" \\*\\)",
         targetDir / "ComposerTop.v"
@@ -198,8 +195,11 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
           stdout = os.Inherit
         )
       case BuildMode.Synthesis =>
-        config(PostProcessorMacro)(configWithBuildMode, movedSrcs ++ chiselGeneratedSrcs.toSeq) // do post-processing per backend
-      case _ => ;
+        config(PlatformKey) match {
+          case pwpp: Platform with HasPostProccessorScript =>
+            pwpp.postProcessorMacro(configWithBuildMode, movedSrcs ++ chiselGeneratedSrcs)
+          case _ => ;
+        }
     }
   }
 }

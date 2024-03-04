@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config._
 import composer.Generation.ComposerBuild
-import composer.PrefetchSourceMultiplicity
+import composer.platform
 import composer.common.{Stack, splitIntoChunks}
 import freechips.rocketchip.tilelink._
 
@@ -36,7 +36,7 @@ class SequentialWriter(nBytes: Int,
   private val addressBits = tl_outer.params.addressBits
   private val addressBitsChop = addressBits - log2Up(beatBytes)
   private val nSources = edge.master.endSourceId
-  val pfsm = p(PrefetchSourceMultiplicity)
+  val pfsm = platform.prefetchSourceMultiplicity
   require(isPow2(pfsm) && pfsm > 1)
 
   val io = IO(new SequentialWriteChannelIO(nBytes))
@@ -52,7 +52,7 @@ class SequentialWriter(nBytes: Int,
 
   val burst_storage_io = Module(new Queue(
     UInt(tl_outer.params.dataBits.W),
-    p(PrefetchSourceMultiplicity),
+    platform.prefetchSourceMultiplicity,
     pipe = true,
     useSyncReadMem = true // hopefully this gives us BRAM in FPGA. Worry about ASIC later ugh
   )).io
@@ -65,7 +65,7 @@ class SequentialWriter(nBytes: Int,
   val write_buffer = Memory(memory_latency, tl_outer.params.dataBits, q_size, 1, 1, 0, None)
   val write_buffer_occupancy = RegInit(0.U(log2Up(q_size + 1).W))
   val write_buffer_read_shift = RegInit(0.U(memory_latency.W))
-  val burst_storage_occupancy = RegInit(0.U(log2Up(p(PrefetchSourceMultiplicity) + 1).W))
+  val burst_storage_occupancy = RegInit(0.U(log2Up(platform.prefetchSourceMultiplicity + 1).W))
   val raddr = RegInit(0.U(log2Up(q_size).W))
   val waddr = RegInit(0.U(log2Up(q_size).W))
   val (wb_widx, wb_ridx) = if (write_buffer.nWritePorts == 0) (0, 1) else (write_buffer.getWritePortIdx(0), write_buffer.getReadPortIdx(0))
@@ -84,7 +84,7 @@ class SequentialWriter(nBytes: Int,
 
   write_buffer.addr(wb_ridx) := raddr
   write_buffer.read_enable(wb_ridx) := true.B
-  write_buffer.chip_select(wb_ridx) := burst_storage_occupancy < p(PrefetchSourceMultiplicity).U && write_buffer_occupancy > 0.U
+  write_buffer.chip_select(wb_ridx) := burst_storage_occupancy < platform.prefetchSourceMultiplicity.U && write_buffer_occupancy > 0.U
   burst_storage_io.enq.valid := write_buffer_read_shift(0)
   burst_storage_io.enq.bits := write_buffer.data_out(wb_ridx)
   assert(implies(burst_storage_io.enq.valid, burst_storage_io.enq.ready))
@@ -150,7 +150,7 @@ class SequentialWriter(nBytes: Int,
     tl_out.a.bits := edge.Put(
       sourceInProgress,
       addrInProgress,
-      log2Up(p(PrefetchSourceMultiplicity) * beatBytes).U,
+      log2Up(platform.prefetchSourceMultiplicity * beatBytes).U,
       burst_storage_io.deq.bits)._2
     when(tl_out.a.fire) {
       burst_progress_count := burst_progress_count + 1.U
@@ -163,7 +163,7 @@ class SequentialWriter(nBytes: Int,
     val isSmall = req_len < pfsm.U
     val burstSize = Mux(isSmall, 1.U, pfsm.U)
     tl_out.a.valid := hasAvailableSource && burst_storage_occupancy >= burstSize && req_len > 0.U && burst_storage_io.deq.valid
-    require(p(PrefetchSourceMultiplicity) >= memory_latency,
+    require(platform.prefetchSourceMultiplicity >= memory_latency,
     """
         |If the valid signal is high, there is _at least_ one thing in the burst queue. For burst storage
         |occupancy = bso and memory latency = ml and bso >= ml, we know that bso can be greater than the real

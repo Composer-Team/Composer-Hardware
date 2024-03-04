@@ -55,11 +55,12 @@ class ASAP7MemoryCompiler extends MemoryCompiler with CannotCompileMemories {
 
 }
 
-class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
-                threshold: ProcessVoltageThreshold = ProcessVoltageThreshold.Regular,
-                clockRateMHz: Float = 1000) extends Config((_, _, _) => {
-  case ASICMemoryCompilerKey => new ASAP7MemoryCompiler
-  case PostProcessorMacro => c: Config => {
+class ASAP7TechLib(corner: ProcessCorner = ProcessCorner.Typical,
+                   threshold: ProcessVoltageThreshold = ProcessVoltageThreshold.Regular,
+                   clockRateMHz: Float = 1000) extends TechLib {
+  override val memoryCompiler: MemoryCompiler = new ASAP7MemoryCompiler
+
+  override def postProcessorMacro(c: Config, paths: Seq[Path]): Unit = {
     if (c(BuildModeKey) == BuildMode.Synthesis) {
       val cwd = os.Path(ComposerBuild.composerGenDir)
       val timestamp = LocalDateTime.now()
@@ -67,7 +68,7 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
       Seq("src", "syn_out", "imp_out") foreach (p => os.makeDir.all(synwd / p))
 
       os.copy.over(ComposerBuild.targetDir, synwd / "src")
-      val allSynPaths = WalkPath(synwd / "src", depth=0).map(_.toString()).toList
+      val allSynPaths = WalkPath(synwd / "src", depth = 0).map(_.toString()).toList
 
       val cornerString = corner match {
         case ProcessCorner.Typical => "TT"
@@ -117,10 +118,11 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
         val work_dir = script_dir / "work"
         val srcList = {
           val fileEnding = if (os.exists(synwd / "src" / f"$pMod.v")) ".v" else ".sv"
-          nonTopSources :+ (synwd/"src"/ f"$pMod$fileEnding").toString()
-        }.map{p =>
+          nonTopSources :+ (synwd / "src" / f"$pMod$fileEnding").toString()
+        }.map { p =>
           println(p)
-          os.Path(p).relativeTo(synwd / "src")}
+          os.Path(p).relativeTo(synwd / "src")
+        }
 
         Seq(script_dir, save_path, work_dir).foreach(p => os.makeDir.all(p))
 
@@ -157,7 +159,7 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
              |compile_ultra -retime -no_autoungroup
              |# enable this if timing is really tight
              |# optimize_registers -delay_threshold=$$peri -minimum_period_only"""
-        .stripMargin)
+            .stripMargin)
         os.write(script_dir / "3_save.tcl",
           f"""link
              |check_design
@@ -262,4 +264,4 @@ class WithASAP7(corner: ProcessCorner = ProcessCorner.Typical,
       }
     }
   }
-})
+}

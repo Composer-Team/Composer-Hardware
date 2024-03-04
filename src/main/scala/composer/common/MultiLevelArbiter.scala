@@ -1,10 +1,8 @@
 package composer.common
 import chipsalliance.rocketchip.config._
-
-
 import chisel3._
 import chisel3.util._
-import composer.CXbarMaxDegree
+import composer.Platforms.PlatformKey
 
 class MultiLevelArbiter[T <: Data](gen: T, nIn: Int)(implicit p: Parameters) extends Module {
   val io = IO(new Bundle() {
@@ -13,7 +11,7 @@ class MultiLevelArbiter[T <: Data](gen: T, nIn: Int)(implicit p: Parameters) ext
     val chosen = Output(UInt(log2Up(nIn).W))
   })
 
-  val width = p(CXbarMaxDegree)
+  val width = p(PlatformKey).xbarMaxDegree
   require(isPow2(width), "Using this arbiter implementation requires the max XBar degree to be a power of 2")
 
 

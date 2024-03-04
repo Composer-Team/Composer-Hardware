@@ -5,19 +5,19 @@ import chisel3.util._
 import chisel3._
 import composer.Generation.ComposerBuild
 import composer.MemoryStreams.HasMemoryInterface
-import composer.Platforms.FPGA.Xilinx.FPGAMemoryPrimitiveConsumer
-import composer.Platforms._
+import composer.Platforms.{HasXilinxMem, Platform, PlatformKey}
 import composer._
 
 import java.io.FileWriter
 import scala.annotation.tailrec
 
+case class FPGAMemoryPrimitiveConsumer(brams: Int, urams: Int, verilogAnnotations: String, fileNameAnnotation: String)
 
 private[composer] class BRAMTDP(latency: Int,
                                 dataWidth: Int,
                                 nRows: Int,
                                 debugName: String,
-                                     )(implicit p: Parameters) extends BlackBox with HasMemoryInterface {
+                               )(implicit p: Parameters) extends BlackBox with HasMemoryInterface {
   val io = IO(new Bundle {
     val CE = Input(Bool())
     val WEB1 = Input(Bool())
@@ -77,74 +77,74 @@ private[composer] class BRAMTDP(latency: Int,
 
   val mvR = if (latency > 1) {
     f"""for (i = 0; i < $latency-1; i = i+1) begin
-      |      mem_pipe_reg1[i+1] <= mem_pipe_reg1[i];
-      |      mem_pipe_reg2[i+1] <= mem_pipe_reg2[i];
-      |  end
-      |""".stripMargin
+       |      mem_pipe_reg1[i+1] <= mem_pipe_reg1[i];
+       |      mem_pipe_reg2[i+1] <= mem_pipe_reg2[i];
+       |  end
+       |""".stripMargin
   } else ""
 
   // We need keep hirarchy because in some rare circumstances, cross boundary optimization
   // prevents the memory from being inferred, and further, the memory is completely unrecongized,
   // mapped to a black box, and causes unrecoverable errors during logic synthesis... (Vivado 2022.1)
   val src =
-  f"""
-     |(* keep_hierarchy = "yes" *)
-     |module $desiredName (
-     |  input CE,
-     |  input WEB1,
-     |  input WEB2,
-     |  input OEB1,
-     |  input OEB2,
-     |  output reg [${dataWidth - 1}:0] O1,
-     |  input [${dataWidth - 1}:0] I1,
-     |  input [${addrWidth - 1}:0] A1,
-     |  output reg [${dataWidth - 1}:0] O2,
-     |  input [${dataWidth - 1}:0] I2,
-     |  input [${addrWidth - 1}:0] A2,
-     |  input CSB1,
-     |  input CSB2);
-     |
-     |$memoryAnnotations
-     |reg [${dataWidth - 1}:0] mem [${nRows - 1}:0];        // Memory Declaration
-     |reg [${dataWidth - 1}:0] memreg1;
-     |reg [${dataWidth - 1}:0] memreg2;
-     |reg [${dataWidth - 1}:0] mem_pipe_reg1 [${latency - 1}:0];    // Pipelines for memory
-     |reg [${dataWidth - 1}:0] mem_pipe_reg2 [${latency - 1}:0];    // Pipelines for memory
-     |
-     |integer          i;
-     |always @ (posedge CE)
-     |begin
-     |  if(CSB1) begin
-     |    if (WEB1) begin
-     |      mem[A1] <= I1;
-     |    end else begin
-     |      memreg1 <= mem[A1];
-     |    end
-     |  end
-     |end
-     |
-     |always @ (posedge CE)
-     |begin
-     |  if(CSB2) begin
-     |    if (WEB2) begin
-     |      mem[A2] <= I2;
-     |    end else begin
-     |      memreg2 <= mem[A2];
-     |    end
-     |  end
-     |end
-     |
-     |always @ (posedge CE)
-     |begin
-     |  mem_pipe_reg1[0] <= memreg1;
-     |  mem_pipe_reg2[0] <= memreg2;
-     |  $mvR
-     |  O1 <= mem_pipe_reg1[$latency-1];
-     |  O2 <= mem_pipe_reg2[$latency-1];
-     |end
-     |endmodule
-     |
-     |""".stripMargin
+    f"""
+       |(* keep_hierarchy = "yes" *)
+       |module $desiredName (
+       |  input CE,
+       |  input WEB1,
+       |  input WEB2,
+       |  input OEB1,
+       |  input OEB2,
+       |  output reg [${dataWidth - 1}:0] O1,
+       |  input [${dataWidth - 1}:0] I1,
+       |  input [${addrWidth - 1}:0] A1,
+       |  output reg [${dataWidth - 1}:0] O2,
+       |  input [${dataWidth - 1}:0] I2,
+       |  input [${addrWidth - 1}:0] A2,
+       |  input CSB1,
+       |  input CSB2);
+       |
+       |$memoryAnnotations
+       |reg [${dataWidth - 1}:0] mem [${nRows - 1}:0];        // Memory Declaration
+       |reg [${dataWidth - 1}:0] memreg1;
+       |reg [${dataWidth - 1}:0] memreg2;
+       |reg [${dataWidth - 1}:0] mem_pipe_reg1 [${latency - 1}:0];    // Pipelines for memory
+       |reg [${dataWidth - 1}:0] mem_pipe_reg2 [${latency - 1}:0];    // Pipelines for memory
+       |
+       |integer          i;
+       |always @ (posedge CE)
+       |begin
+       |  if(CSB1) begin
+       |    if (WEB1) begin
+       |      mem[A1] <= I1;
+       |    end else begin
+       |      memreg1 <= mem[A1];
+       |    end
+       |  end
+       |end
+       |
+       |always @ (posedge CE)
+       |begin
+       |  if(CSB2) begin
+       |    if (WEB2) begin
+       |      mem[A2] <= I2;
+       |    end else begin
+       |      memreg2 <= mem[A2];
+       |    end
+       |  end
+       |end
+       |
+       |always @ (posedge CE)
+       |begin
+       |  mem_pipe_reg1[0] <= memreg1;
+       |  mem_pipe_reg2[0] <= memreg2;
+       |  $mvR
+       |  O1 <= mem_pipe_reg1[$latency-1];
+       |  O2 <= mem_pipe_reg2[$latency-1];
+       |end
+       |endmodule
+       |
+       |""".stripMargin
 
   val fw = new FileWriter(component.toString())
   fw.write(src)
@@ -204,26 +204,34 @@ object BRAMTDP {
       }
     }
 
-    // appropriate data width and at least 90% capacity
     val uram_consumption = get_n_urams(dwidth, nRows)
     val bram_consumption = get_n_brams(dwidth, nRows)
-    val have_enough_uram = uram_used + uram_consumption <= p(PlatformNURAM)
-    val have_enough_bram = bram_used + bram_consumption <= p(PlatformNBRAM)
+    // appropriate data width and at least 90% capacity
+    val (have_enough_uram, have_enough_bram) = p(PlatformKey) match {
+      case pxm: Platform with HasXilinxMem =>
+        (uram_used + uram_consumption <= pxm.nURAMs,
+          bram_used + bram_consumption <= pxm.nBRAMs)
+      case _ => (true, true)
+    }
     val usage = if (useURAM && have_enough_uram) FPGAMemoryPrimitiveConsumer(0, uram_consumption, "(* ram_style = \"ultra\" *)", "_URAM")
     else if (have_enough_bram) FPGAMemoryPrimitiveConsumer(bram_consumption, 0, "(* ram_style = \"block\" *)", "_BRAM")
     else if (have_enough_uram) FPGAMemoryPrimitiveConsumer(0, uram_consumption, "(* ram_style = \"ultra\" *)", "_URAM")
-    else {
+    else FPGAMemoryPrimitiveConsumer(0, 0, "", "")
+
+    if (p.isInstanceOf[HasXilinxMem]){
+      val pxm = p(PlatformKey).asInstanceOf[HasXilinxMem]
+      if (!have_enough_bram && !have_enough_uram)
       System.err.println(
         s"Memory module $debugName requires $bram_consumption BRAMs and $uram_consumption URAMs,\n" +
-          s" but only ${p(PlatformNBRAM) - bram_used} BRAMs and ${p(PlatformNURAM) - uram_used} URAMs\n" +
+          s" but only ${pxm.nBRAMs - bram_used} BRAMs and ${pxm.nURAMs - uram_used} URAMs\n" +
           s"are available.")
-      FPGAMemoryPrimitiveConsumer(0, 0, "", "")
+      if (!p(ComposerQuiet)) {
+        System.err.println(s"Using ${usage.brams} BRAMs and ${usage.urams} URAMs for $debugName: $nRows x $dwidth")
+        System.err.println(s"Total Usage - BRAM(${BRAMTDP.bram_used + usage.brams}/${pxm.nBRAMs}) URAM(${BRAMTDP.uram_used + usage.urams}/${pxm.nURAMs})")
+      }
+
     }
 
-    if (!p(ComposerQuiet)) {
-      System.err.println(s"Using ${usage.brams} BRAMs and ${usage.urams} URAMs for $debugName: $nRows x $dwidth")
-      System.err.println(s"Total Usage - BRAM(${BRAMTDP.bram_used + usage.brams}/${p(PlatformNBRAM)}) URAM(${BRAMTDP.uram_used + usage.urams}/${p(PlatformNURAM)})")
-    }
     usage
   }
 

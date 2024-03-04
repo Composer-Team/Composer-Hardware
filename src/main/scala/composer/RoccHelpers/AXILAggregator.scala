@@ -1,12 +1,10 @@
 package composer.RoccHelpers
 
 import chipsalliance.rocketchip.config._
-
-
 import chisel3._
 import chisel3.util._
 import composer.CmdRespBusWidthBytes
-import composer.Platforms.FrontBusBeatBytes
+import composer.Platforms.PlatformKey
 import freechips.rocketchip.amba.axi4.{AXI4MasterNode, AXI4MasterParameters, AXI4MasterPortParameters}
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.subsystem.CacheBlockBytes
@@ -51,7 +49,7 @@ class AXILAggregatorModule(outer: AXILAggregator)(implicit p: Parameters) extend
   val sIdle :: sWriteHasAddrHigh :: sWriteNeedData :: sWriteSend :: sReadHasAddrHigh :: sReadSendAddr :: Nil = Enum(6)
   val state = RegInit(sIdle)
   val writeAddr = RegInit(0.U(nastiXAddrBits.W))
-  val writeCounter = RegInit(0.U(log2Ceil(tlBlockBytes/p(FrontBusBeatBytes)).W))
+  val writeCounter = RegInit(0.U(log2Ceil(tlBlockBytes/p(PlatformKey).frontBusBeatBytes).W))
   val writeData = RegInit(0.U(slaveBits.W))
   val writeID_low = OHToUInt(writes_onehot)
   val reads = RegInit(0.U(outer.numInFlight.W))

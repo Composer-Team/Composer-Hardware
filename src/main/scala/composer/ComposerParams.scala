@@ -4,7 +4,7 @@ import chipsalliance.rocketchip.config._
 import composer.ComposerConstraintHint.ComposerConstraintHint
 import composer.Generation.BuildMode
 import composer.MemoryStreams._
-import composer.Platforms.BuildModeKey
+import composer.Platforms.{BuildModeKey, Platform, PlatformKey}
 import composer.Systems._
 import composer.common.{AccelCommand, AccelResponse, AccelRoccCommand}
 import freechips.rocketchip.amba.axi4.{AXI4MasterParameters, AXI4MasterPortParameters}
@@ -24,30 +24,23 @@ case object DRAMBankBytes extends Field[Int]
 
 case object ComposerQuiet extends Field[Boolean]
 
-case object PrefetchSourceMultiplicity extends Field[Int]
-
 case object UseConfigAsOutputNameKey extends Field[Boolean]
 
 // Architecture parameters
 //case object MaxChannelTransactionLenKey extends Field[Int]
 case object TLInterconnectWidthBytes extends Field[Int]
 
-// if we support a dedicated DMA port, provide the number of ID bits
-case object CXbarMaxDegree extends Field[Int]
-
 case object CmdRespBusWidthBytes extends Field[Int]
 
-case object PlatformPhysicalMemoryBytes extends Field[Long]
 
 case object MaxInFlightMemTxsPerSource extends Field[Int]
 
 // Platforms that require full bi-directional IO coherence must set this to true
-case class CoherenceConfiguration(memParams: MasterPortParams, maxMemorySegments: Int)
+//case class CoherenceConfiguration(memParams: MasterPortParams, maxMemorySegments: Int)
 
-case object HasCoherence extends Field[Option[CoherenceConfiguration]]
+//case object HasCoherence extends Field[Option[CoherenceConfiguration]]
 
 // this might need to be high to expand beyond one slr
-case object CoreCommandLatency extends Field[Int]
 
 trait ModuleConstructor {}
 
@@ -77,11 +70,12 @@ object ComposerConstraintHint extends Enumeration {
 
 case object ConstraintHintsKey extends Field[List[ComposerConstraintHint.type]]
 
-class WithComposer(
-                    constraintHints: List[ComposerConstraintHint] = List.empty,
-                    quiet: Boolean = false,
-                    useConfigAsOutputName: Boolean = false) extends Config((site, _, _) => {
+class WithComposer(platform: Platform,
+                   constraintHints: List[ComposerConstraintHint] = List.empty,
+                   quiet: Boolean = false,
+                   useConfigAsOutputName: Boolean = false) extends Config((site, _, _) => {
   case ComposerQuiet => quiet
+  case PlatformKey => platform
   case AcceleratorSystems => Seq()
   case TLInterconnectWidthBytes => 16
   case PgLevels => 5

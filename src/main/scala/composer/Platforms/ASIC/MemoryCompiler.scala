@@ -4,13 +4,11 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.experimental.BaseModule
 import chisel3.util._
-import composer.Generation.BuildMode
-import composer.MemoryStreams.RAM.{RegMem, SyncReadMemMem}
+import composer.MemoryStreams.RAM.SyncReadMemMem
 import composer.MemoryStreams._
 import composer.Platforms.ASIC.ProcessCorner.ProcessCorner
 import composer.Platforms.ASIC.ProcessTemp.ProcessTemp
-import composer.Platforms.{ASICMemoryCompilerKey, BuildModeKey, DefaultClockRateKey}
-import os.Path
+import composer.Platforms._
 
 import scala.annotation.tailrec
 
@@ -104,17 +102,18 @@ private class C_ASIC_MemoryCascade(rows: Int,
                                    nPorts: Int)(implicit p: Parameters) extends RawModule {
   val totalAddr = log2Up(rows) + cascadeBits
   val io = IO(new CMemoryIOBundle(0, 0, nPorts, totalAddr, dataBits) with withMemoryIOForwarding)
+  val mc = p(PlatformKey).asInstanceOf[Platform with HasMemoryCompiler].memoryCompiler
   withClockAndReset(io.clock.asClock, false.B.asAsyncReset) {
-    val mem = p(ASICMemoryCompilerKey).generateMemoryFactory(nPorts, rows, dataBits)(p)()
+    val mem = mc.generateMemoryFactory(nPorts, rows, dataBits)(p)()
     mem.clocks.foreach(_ := io.clock)
     (0 until nPorts) foreach { port_idx =>
       val cascade_select = if (cascadeBits == 0) true.B else idx.U === io.addr(port_idx).head(cascadeBits)
       io.data_out(port_idx) := mem.data_out(port_idx)
       mem.data_in(port_idx) := io.data_in(port_idx)
       mem.read_enable(port_idx) := io.read_enable(port_idx)
-      val CSActiveHigh = if (p(ASICMemoryCompilerKey).isActiveHighSignals) io.chip_select(port_idx) else !io.chip_select(port_idx)
+      val CSActiveHigh = if (mc.isActiveHighSignals) io.chip_select(port_idx) else !io.chip_select(port_idx)
       val selectMe_activeHigh = CSActiveHigh && cascade_select
-      val selectMe = if (p(ASICMemoryCompilerKey).isActiveHighSignals) selectMe_activeHigh else !selectMe_activeHigh
+      val selectMe = if (mc.isActiveHighSignals) selectMe_activeHigh else !selectMe_activeHigh
       mem.chip_select(port_idx) := selectMe
       mem.write_enable(port_idx) := io.write_enable(port_idx)
       mem.addr(port_idx) := io.addr(port_idx).tail(cascadeBits)
@@ -132,6 +131,9 @@ private class C_ASIC_MemoryCascade(rows: Int,
 }
 
 object MemoryCompiler {
+
+  def mc(implicit p: Parameters) = p(PlatformKey).asInstanceOf[Platform with HasMemoryCompiler].memoryCompiler.asInstanceOf[MemoryCompiler with CanCompileMemories]
+
   /**
    * Build a large SRAM structure from the provided SRAM cells in the library. This function is expected to be
    * called from a module that will implement the required size and width of the memory with a given latency.
@@ -149,7 +151,7 @@ object MemoryCompiler {
   def buildSRAM(Latency: Int, dataWidth: Int, nRows: Int, nPorts: Int)(implicit io: CMemoryIOBundle, p: Parameters): Unit = {
     val (memory_chain_latency, preStage, postStage) = {
       def works(latency: Int): Boolean = {
-        p(ASICMemoryCompilerKey).getMemoryCascade(nRows, dataWidth, nPorts, latency, p(DefaultClockRateKey)).isDefined
+        mc.getMemoryCascade(nRows, dataWidth, nPorts, latency, p(PlatformKey).clockRateMHz).isDefined
       }
 
       def rn[T <: Data](x: T): T = {
@@ -180,7 +182,7 @@ object MemoryCompiler {
         return
       }
     }
-    val memoryStructure = p(ASICMemoryCompilerKey).getMemoryCascade(nRows, dataWidth, nPorts, memory_chain_latency, p(DefaultClockRateKey)).get
+    val memoryStructure = mc.getMemoryCascade(nRows, dataWidth, nPorts, memory_chain_latency, p(PlatformKey).clockRateMHz).get
     val totalRowBits = log2Up(nRows)
     val cascadeRows = memoryStructure.depths
     val addressBases = cascadeRows.zip(cascadeRows.scan(0)(_ + _)).map {
@@ -188,7 +190,7 @@ object MemoryCompiler {
     }
 
     def al_switch(a: Bool): Bool = {
-      if (p(ASICMemoryCompilerKey).isActiveHighSignals) a else !a
+      if (mc.isActiveHighSignals) a else !a
     }
 
     val banks = Seq.tabulate(memoryStructure.bankWidths.length) { bank_idx =>

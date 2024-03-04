@@ -4,11 +4,16 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import composer.MemoryStreams._
-import composer.Platforms.ASICMemoryCompilerKey
+import composer.Platforms.ASIC.SAED.SAED14SRAM.mc
+import composer.Platforms._
 
+object SAED14SRAM {
+  def mc(implicit p: Parameters): SAEDMemoryCompiler =
+    p(PlatformKey).asInstanceOf[Platform with HasMemoryCompiler].memoryCompiler.asInstanceOf[SAEDMemoryCompiler]
+}
 
 class SAED_2RW_SRAM (rows: Int, dataBits: Int)(implicit p: Parameters) extends BlackBox with HasMemoryInterface {
-  override val desiredName = p(ASICMemoryCompilerKey).asInstanceOf[SAEDMemoryCompiler].getMemoryName(2, rows, dataBits)
+  override val desiredName = mc.getMemoryName(2, rows, dataBits)
   val addrBits = log2Up(rows)
   val io = IO(new Bundle() {
     val A1 = Input(UInt(addrBits.W))
@@ -44,7 +49,7 @@ class SAED_2RW_SRAM (rows: Int, dataBits: Int)(implicit p: Parameters) extends B
 }
 
 class SAED_1RW_SRAM(rows: Int, dataBits: Int)(implicit p: Parameters) extends BlackBox with HasMemoryInterface {
-  override val desiredName = p(ASICMemoryCompilerKey).asInstanceOf[SAEDMemoryCompiler].getMemoryName(1, rows, dataBits)
+  override val desiredName = mc.getMemoryName(1, rows, dataBits)
   val addrBits = log2Up(rows)
   val io = IO(new Bundle() {
     val A = Input(UInt(addrBits.W))

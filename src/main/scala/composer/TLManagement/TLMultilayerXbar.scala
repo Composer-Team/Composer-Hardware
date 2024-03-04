@@ -1,15 +1,15 @@
 package composer.TLManagement
 
 import chipsalliance.rocketchip.config._
-
-import composer.CXbarMaxDegree
+import composer.Platforms.PlatformKey
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.tilelink._
 
 //noinspection ScalaFileName
 object makeTLMultilayerXbar {
+
   def apply(in: Seq[TLNode], out: Seq[TLNode])(implicit p: Parameters): Unit = {
-    val xbarLim = p(CXbarMaxDegree)
+    val xbarLim = p(PlatformKey).xbarMaxDegree
     def recursivelyGroupToLim[T <: TLNode](
         group: Seq[T],
         isClient: Boolean

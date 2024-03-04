@@ -1,4 +1,5 @@
-package composer.Platforms.FPGA.Xilinx
+package composer.Platforms.FPGA.Xilinx.Templates
+
 import org.fusesource.scalate._
 
 object SynthScript {

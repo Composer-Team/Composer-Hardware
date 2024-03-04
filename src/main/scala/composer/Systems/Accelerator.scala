@@ -5,9 +5,7 @@ import chisel3._
 import chisel3.util._
 import composer.common._
 import composer._
-import composer.Platforms.{FrontBusCanDriveMemory, HasDisjointMemoryControllers}
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.subsystem.ExtMem
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
 
@@ -123,19 +121,19 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
 }
 
 class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
-  val nMemChannels = p(ExtMem).get.nMemoryChannels
+  val nMemChannels = platform.extMem.nMemoryChannels
 
   val acc = LazyModule(new ComposerAcc())
 
-  val optionalFrontBusAccess = if (p(FrontBusCanDriveMemory)) Some(TLIdentityNode()) else None
+  val optionalFrontBusAccess = if (platform.frontBusCanDriveMemory) Some(TLIdentityNode()) else None
 
   val Seq(r_mem, w_mem) = Seq(acc.reads, acc.writes).map { mems =>
     if (mems.nonEmpty) {
-      val nEndpoints = if (p(HasDisjointMemoryControllers)) Math.min(nMemChannels, mems.length)
+      val nEndpoints = if (platform.memoryControllersAreDisjoint) Math.min(nMemChannels, mems.length)
       else nMemChannels
       val mem_endpoints = Seq.fill(nEndpoints)(TLIdentityNode())
 
-      if (p(HasDisjointMemoryControllers)) {
+      if (platform.memoryControllersAreDisjoint) {
         // disjoint memory controllers go to different addresses. The redirection to the correct controller
         // happens at the crossbar level, so we join all transactions at a single crossbar and then feed out to the
         // individual channels

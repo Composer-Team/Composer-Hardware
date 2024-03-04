@@ -29,8 +29,8 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
         TLClientNode(List(TLMasterPortParameters.v1(
           clients = List(TLMasterParameters.v1(
             name = s"ReadChannel_sys${system_id}_core${core_id}_${para.name}$i",
-            supportsGet = TransferSizes(blockBytes, blockBytes * p(PrefetchSourceMultiplicity)),
-            supportsProbe = TransferSizes(blockBytes, blockBytes * p(PrefetchSourceMultiplicity)),
+            supportsGet = TransferSizes(blockBytes, blockBytes * platform.prefetchSourceMultiplicity),
+            supportsProbe = TransferSizes(blockBytes, blockBytes * platform.prefetchSourceMultiplicity),
             sourceId = IdRange(0, param.maxInFlightTxs)
           )))))
       })
@@ -122,10 +122,10 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
     def recursivelyReduceXBar(grp: Seq[TLNode], inc: Int = 0, slr_id: Int): Seq[TLIdentityNode] = {
       def help(a: Seq[Seq[TLNode]]): Seq[TLNode] = {
         a.map { r =>
-          val memory_xbar = LazyModuleWithFloorplan(new TLXbar(), slr_id = slr_id, requestedName = Some(s"memory_xbar_${SLRHelper.getSLRFromIdx(slr_id)}"))
+          val memory_xbar = LazyModuleWithFloorplan(new TLXbar(), slr_id = slr_id, requestedName = Some(s"memory_xbar_${DieName.getSLRFromIdx(slr_id)}"))
 
           r.foreach(memory_xbar.node := _)
-          val memory_xbar_buffer = LazyModuleWithFloorplan(new TLBuffer(), slr_id = slr_id, requestedName = Some(s"memory_xbar_buffer_slr${SLRHelper.getSLRFromIdx(slr_id)}"))
+          val memory_xbar_buffer = LazyModuleWithFloorplan(new TLBuffer(), slr_id = slr_id, requestedName = Some(s"memory_xbar_buffer_slr${DieName.getSLRFromIdx(slr_id)}"))
 
           memory_xbar_buffer.node := memory_xbar.node
           memory_xbar_buffer.node
@@ -139,9 +139,9 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
       }
 
       if (grp.isEmpty) Seq()
-      else if (grp.length <= p(CXbarMaxDegree)) grp.map(mapToEndpoint)
+      else if (grp.length <= platform.xbarMaxDegree) grp.map(mapToEndpoint)
       else {
-        val groups = grp.grouped(p(CXbarMaxDegree))
+        val groups = grp.grouped(platform.xbarMaxDegree)
         recursivelyReduceXBar(help(groups.toSeq), inc + 1, slr_id).map(mapToEndpoint)
       }
     }
@@ -158,14 +158,14 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
         nodes.flatMap { case (slr, clients) =>
           val reduction = recursivelyReduceXBar(clients, slr_id = slr)
           if (reduction.isEmpty) List()
-          else if (slr == SLRHelper.getMemoryBusSLR) {
+          else if (slr == DieName.getMemoryBusSLR) {
             reduction
           } else {
             // route across the SLR and give to a buffer
-            val canal = LazyModuleWithFloorplan(new TLXbar(), slr_id = slr, requestedName = Some(s"final_slrReduction_xbar_${SLRHelper.getSLRFromIdx(slr)}"))
+            val canal = LazyModuleWithFloorplan(new TLXbar(), slr_id = slr, requestedName = Some(s"final_slrReduction_xbar_${DieName.getSLRFromIdx(slr)}"))
             reduction foreach { a => canal.node := a }
             val sbuf = LazyModule(new TLBuffer())
-            sbuf.suggestName(s"final_slrReduction_buffer_slr${SLRHelper.getSLRFromIdx(slr)}")
+            sbuf.suggestName(s"final_slrReduction_buffer_slr${DieName.getSLRFromIdx(slr)}")
             sbuf.node := canal.node
 
             val endpoint = TLIdentityNode()
@@ -177,7 +177,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
     }
 
     endpoints map { endpoint =>
-      recursivelyReduceXBar(endpoint, slr_id = SLRHelper.getMemoryBusSLR)
+      recursivelyReduceXBar(endpoint, slr_id = DieName.getMemoryBusSLR)
     }
   }
 

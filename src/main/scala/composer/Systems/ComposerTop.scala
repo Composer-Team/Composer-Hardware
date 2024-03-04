@@ -9,7 +9,6 @@ import composer.RoccHelpers.FrontBusHub
 import composer.Systems.ComposerTop._
 import composer.common.CLog2Up
 import composer.Generation.Tune.Tunable
-import composer.Platforms.FPGA.SLRHelper
 import composer.Platforms._
 import composer.Protocol._
 import composer.TLManagement._
@@ -41,21 +40,21 @@ object ComposerTop {
   }
 
   def getAddressSet(ddrChannel: Int)(implicit p: Parameters): AddressSet = {
-    val nMemChannels = p(ExtMem).get.nMemoryChannels
+    val nMemChannels = platform.extMem.nMemoryChannels
     // this one is the defuault for rocket chip. Each new cache line (size def by CacheBlockBytes) is on another
     // DIMM. This makes fetching 4 contiguous cache blocks completely parallelized. Should be way faster...
     //    val continuity = p(CacheBlockBytes)
     //  this one splits the DIMMS into contiguous address spaces. Not sure what that's good for...
     //  but it seems anyways that it won't work UNLESS it's like this!
-    val continuity = p(ExtMem).get.master.size
+    val continuity = platform.extMem.master.size
     val baseTotal = (nMemChannels - 1) * continuity
-    val amask = getAddressMask(log2Up(p(ExtMem).get.master.size), baseTotal.toLong)
+    val amask = getAddressMask(log2Up(platform.extMem.master.size), baseTotal.toLong)
 
-    if (p(ExtMem).get.master.base > 0) {
+    if (platform.extMem.master.base > 0) {
       assert(ddrChannel == 0)
-      require(isPow2(p(ExtMem).get.master.base))
-      val em = p(ExtMem).get.master
-      AddressSet(em.base, em.base-1)
+      require(isPow2(platform.extMem.master.base))
+      val em = platform.extMem.master
+      AddressSet(em.base, em.base - 1)
     } else {
 
       AddressSet(continuity * ddrChannel, amask)
@@ -65,14 +64,14 @@ object ComposerTop {
 
 class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
   override val baseName: String = "TopModule"
-  private val externalMemParams: MemoryPortParams = p(ExtMem).get
+  private val externalMemParams: MemoryPortParams = platform.extMem
   private val nMemChannels = externalMemParams.nMemoryChannels
   private val device = new MemoryDevice
 
   val cmd_resp_axilhub = LazyModule(new FrontBusHub())
 
   // AXI-L Port - commands come through here
-  val (comm_node, frontSource, _) = p(FrontBusProtocolKey).deriveTLSources(p)
+  val (comm_node, frontSource, _) = platform.frontBusProtocol.deriveTLSources(p)
 
 
   val dummyTL = p.alterPartial({ case TileVisibilityNodeKey => cmd_resp_axilhub.widget.node })
@@ -82,7 +81,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
 
   // Rocketchip AXI Nodes
 
-  val has_memory_endpoints = accelerator_system.r_mem.nonEmpty || accelerator_system.w_mem.nonEmpty || p(FrontBusCanDriveMemory)
+  val has_memory_endpoints = accelerator_system.r_mem.nonEmpty || accelerator_system.w_mem.nonEmpty || platform.frontBusCanDriveMemory
   val AXI_MEM = if (has_memory_endpoints) Some(Seq.tabulate(nMemChannels) { channel_idx =>
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
@@ -91,32 +90,31 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
         regionType = RegionType.UNCACHED,
         supportsRead = TransferSizes(
           externalMemParams.master.beatBytes,
-          externalMemParams.master.beatBytes * p(PrefetchSourceMultiplicity)),
+          externalMemParams.master.beatBytes * platform.prefetchSourceMultiplicity),
         supportsWrite = TransferSizes(
           externalMemParams.master.beatBytes,
-          externalMemParams.master.beatBytes * p(PrefetchSourceMultiplicity)),
+          externalMemParams.master.beatBytes * platform.prefetchSourceMultiplicity),
         interleavedId = Some(1)
       )),
       beatBytes = externalMemParams.master.beatBytes
     )))
   }) else None
 
-  val dma_port = if (p(HasDMA).isDefined) {
-    val dma_node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
-      masters = Seq(AXI4MasterParameters(
-        name = "S01_AXI",
-        maxFlight = Some(2),
-        aligned = true,
-        id = IdRange(0, 1 << p(HasDMA).get),
-      ))
-    )))
-    Some(dma_node)
-  } else {
-    None
+  val (dma_port, dmaSourceBits) = platform match {
+    case pWithDMA: Platform with PlatformHasSeparateDMA =>
+      val dma_node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+        masters = Seq(AXI4MasterParameters(
+          name = "S01_AXI",
+          maxFlight = Some(2),
+          aligned = true,
+          id = IdRange(0, 1 << pWithDMA.DMAIDBits),
+        ))
+      )))
+      (Some(dma_node), pWithDMA.DMAIDBits)
+    case _ => (None, 0)
   }
 
-  val DMASourceBits = if (p(HasDMA).isDefined) CLog2Up(p(HasDMA).get) else 0
-  val availableComposerSources = 1 << (p(ExtMem).get.master.idBits - DMASourceBits)
+  val availableComposerSources = 1 << (platform.extMem.master.idBits - dmaSourceBits)
 
   def tieFBandShrink(tl: TLNode, fb: Option[TLNode], name: Option[String]): TLNode = {
     val total = fb match {
@@ -132,7 +130,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
     shrinker
   }
 
-  val (front_r, front_w) = if (p(FrontBusCanDriveMemory)) {
+  val (front_r, front_w) = if (platform.frontBusCanDriveMemory) {
     val front_mem_xbar = TLXbar()
     front_mem_xbar := frontSource
     cmd_resp_axilhub.tl_head := front_mem_xbar
@@ -140,12 +138,12 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
       TLSlavePortParameters.v1(
         managers = Seq(TLSlaveParameters.v1(
           address = (0 until nMemChannels).map(ComposerTop.getAddressSet(_)),
-          supportsGet = TransferSizes(p(FrontBusBeatBytes)),
-          supportsPutFull = TransferSizes(p(FrontBusBeatBytes)),
+          supportsGet = TransferSizes(platform.frontBusBeatBytes),
+          supportsPutFull = TransferSizes(platform.frontBusBeatBytes),
           supportsAcquireB = TransferSizes.none,
           resources = device.reg,
           regionType = RegionType.UNCACHED,
-        )), p(FrontBusBeatBytes), 0
+        )), platform.frontBusBeatBytes, 0
       ),
       TLMasterPortParameters.v1(
         clients = Seq(TLMasterParameters.v1(
@@ -190,20 +188,20 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
       tl2axi.axi_client
     }
   }
-  val mem_tops = if (p(HasDMA).isDefined) {
+  val mem_tops = if (platform.isInstanceOf[PlatformHasSeparateDMA]) {
     if (p(ConstraintHintsKey).contains(ComposerConstraintHint.DistributeCoresAcrossSLRs)) {
       val full_mem_xbar = Seq.tabulate(nMemChannels)(idx =>
         LazyModuleWithFloorplan(new AXI4Xbar(maxFlightPerId = p(MaxInFlightMemTxsPerSource)),
-          slr_id = SLRHelper.getMemoryBusSLR,
+          slr_id = DieName.getMemoryBusSLR,
           requestedName = Some(s"dma_xbar_front_channel$idx")))
       val dma_front = LazyModuleWithFloorplan(new AXI4Buffer(),
-        slr_id = SLRHelper.getFrontBusSLR,
+        slr_id = DieName.getFrontBusSLR,
         requestedName = Some(s"dma_buff_front"))
       val dma_side = LazyModuleWithFloorplan(new AXI4Buffer(),
-        slr_id = SLRHelper.getMemoryBusSLR,
+        slr_id = DieName.getMemoryBusSLR,
         requestedName = Some("dma_buff_mbus"))
       val dma_fanout = LazyModuleWithFloorplan(new AXI4Xbar(),
-        slr_id = SLRHelper.getFrontBusSLR,
+        slr_id = DieName.getFrontBusSLR,
         requestedName = Some(s"dma_xbar_front"))
       require(nMemChannels == 1, "slr needs to be improved to support multiple slrs")
       dma_front.node := dma_port.get
@@ -245,7 +243,7 @@ class TopImpl(outer: ComposerTop)(implicit p: Parameters) extends LazyModuleImp(
   acc.module.io.cmd <> axil_hub.module.io.rocc_in
   axil_hub.module.io.rocc_out <> acc.module.io.resp
 
-  p(FrontBusProtocolKey).deriveTopIOs(ocl_port, clock, reset)
+  platform.frontBusProtocol.deriveTopIOs(ocl_port, clock, reset)
 
   if (outer.AXI_MEM.isDefined) {
     val dram_ports = outer.AXI_MEM.get
@@ -261,26 +259,25 @@ class TopImpl(outer: ComposerTop)(implicit p: Parameters) extends LazyModuleImp(
     }
 
     // make incoming dma port and connect it
-    if (p(HasDMA).isDefined) {
-      val params = outer.AXI_MEM.get(0).in(0)._1.params
-      val dma = IO(Flipped(AXI4Compat(params.copy(idBits = p(HasDMA).get))))
-      AXI4Compat.connectCompatSlave(dma, outer.dma_port.get.out(0)._1)
+    platform match {
+      case pWithDMA: PlatformHasSeparateDMA =>
+        val params = outer.AXI_MEM.get(0).in(0)._1.params
+        val dma = IO(Flipped(AXI4Compat(params.copy(idBits = pWithDMA.DMAIDBits))))
+        AXI4Compat.connectCompatSlave(dma, outer.dma_port.get.out(0)._1)
+      case _ => ;
     }
 
-    p(ExtMem) match {
-      case None => ;
-      case Some(a) => require(M00_AXI(0).rid.getWidth <= a.master.idBits,
-        s"Too many ID bits for this platform. Try reducing the\n" +
-          s"prefetch length of scratchpads/readers/writers.\n" +
-          s"Current width: ${M00_AXI(0).rid.getWidth}\n" +
-          s"Required width: ${a.master.idBits}")
-    }
+    require(M00_AXI(0).rid.getWidth <= platform.extMem.master.idBits,
+      s"Too many ID bits for this platform. Try reducing the\n" +
+        s"prefetch length of scratchpads/readers/writers.\n" +
+        s"Current width: ${M00_AXI(0).rid.getWidth}\n" +
+        s"Required width: ${platform.extMem.master.idBits}")
   }
 
   // Generate C++ headers once all of the cores have been generated so that they have
   //   the opportunity to dictate which symbols they want exported
   CPP.Generation.genCPPHeader(outer.cmd_resp_axilhub.widget.module.crRegistry, outer)(p.alterPartial {
-    case ExtMem => if (outer.AXI_MEM.isDefined) p(ExtMem) else p(ExtMem).map(_.copy(nMemoryChannels = 0))
+    case ExtMem => if (outer.AXI_MEM.isDefined) platform.extMem else platform.extMem.copy(nMemoryChannels = 0)
   })
   ConstraintGeneration.writeConstraints()
   if (p(BuildModeKey).isInstanceOf[BuildMode.Tuning]) {

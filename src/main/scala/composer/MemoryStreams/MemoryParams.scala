@@ -12,8 +12,8 @@ import freechips.rocketchip.util.{DataKey, SimpleBundleField}
  * Bundle used to communicate memory requests between user and memory manager
  */
 class ChannelTransactionBundle(implicit p: Parameters) extends Bundle {
-  val addr = UInt(log2Up(p(ExtMem).get.nMemoryChannels * p(ExtMem).get.master.size).W)
-  val len = UInt(log2Up(p(PlatformPhysicalMemoryBytes)).W)
+  val addr = UInt(log2Up(platform.extMem.nMemoryChannels * platform.extMem.master.size).W)
+  val len = UInt(log2Up(platform.physicalMemoryBytes).W)
 }
 
 /**

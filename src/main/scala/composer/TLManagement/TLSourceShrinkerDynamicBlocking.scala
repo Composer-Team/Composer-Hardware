@@ -4,7 +4,7 @@ package composer.TLManagement
 
 import Chisel._
 import chipsalliance.rocketchip.config._
-import composer.PrefetchSourceMultiplicity
+import composer.platform
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
@@ -79,7 +79,7 @@ class TLSourceShrinkerDynamicBlocking(maxNIDs: Int)(implicit p: Parameters) exte
         val prevSource = Reg(UInt(in.params.sourceBits.W))
         val singleBeatLgSz = log2Up(in.a.bits.data.getWidth/8)
         val isTxContinuation = handlingLongWriteTx && prevSource === in.a.bits.source
-        val longBeatCount = Reg(UInt(log2Up(p(PrefetchSourceMultiplicity)).W))
+        val longBeatCount = Reg(UInt(log2Up(platform.prefetchSourceMultiplicity).W))
 
         in.a.ready := (((a_in_valid && out.a.fire) || (!a_in_valid)) && !full) || isTxContinuation
 
@@ -90,7 +90,7 @@ class TLSourceShrinkerDynamicBlocking(maxNIDs: Int)(implicit p: Parameters) exte
           when (isTxContinuation) {
             a_in.source := prevSourceMap
             longBeatCount := longBeatCount + 1.U
-            when (longBeatCount === (p(PrefetchSourceMultiplicity)-1).U) {
+            when (longBeatCount === (platform.prefetchSourceMultiplicity-1).U) {
               handlingLongWriteTx := false.B
             }
           }.otherwise {

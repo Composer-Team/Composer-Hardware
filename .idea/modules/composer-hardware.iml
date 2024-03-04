@@ -29,6 +29,7 @@
     <orderEntry type="library" name="sbt: edu.berkeley.cs:chiseltest_2.13:0.5.2:jar" level="project" />
     <orderEntry type="library" name="sbt: edu.berkeley.cs:firrtl_2.13:1.5.6:jar" level="project" />
     <orderEntry type="library" name="sbt: edu.berkeley.cs:treadle_2.13:1.5.2:jar" level="project" />
+    <orderEntry type="library" name="sbt: edu.duke.cs.apex:chipkit_2.13:0.0.2:jar" level="project" />
     <orderEntry type="library" name="sbt: edu.duke.cs.apex:rocketchip-cde-fork_2.13:0.1.2:jar" level="project" />
     <orderEntry type="library" name="sbt: edu.duke.cs.apex:rocketchip-hardfloat-fork_2.13:0.1.0:jar" level="project" />
     <orderEntry type="library" name="sbt: edu.duke.cs.apex:rocketchip-macros-fork_2.13:0.1.0:jar" level="project" />

@@ -1,15 +1,14 @@
 package composer.Platforms.ASIC
 
 import chipkit.{LazyComm, PROM_UART}
-import chipsalliance.rocketchip.config.{Config, Parameters}
+import chipsalliance.rocketchip.config._
 import chisel3._
 import composer.Generation.ComposerBuild
-import composer.Platforms.FPGA.PlatformSLRs
-import composer._
+import composer.Platforms.PlatformType.PlatformType
 import composer.Platforms._
+import composer.Protocol.FrontBus.FrontBusProtocol
 import freechips.rocketchip.amba.ahb._
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink.TLIdentityNode
 import os.Path
 import protocol.COMMTopIO
@@ -40,6 +39,7 @@ class ChipkitFrontBusProtocol(generator: Parameters => M0Abstract) extends Front
     moa.module.reset := withActiveHighReset.asBool
     CHIP
   }
+
   override def deriveTLSources(implicit p: Parameters): (Any, TLIdentityNode, Option[TLIdentityNode]) = {
     val chipKitCOMM = LazyModule(new LazyComm)
     val AHBMasterMux = LazyModule(new chipkit.AHBMasterMux(2))
@@ -52,44 +52,25 @@ class ChipkitFrontBusProtocol(generator: Parameters => M0Abstract) extends Front
   }
 }
 
-class WithChipKitPlatform(m0generator: Parameters => M0Abstract,
-                          useFPGAMem: Boolean = false) extends Config((_, _, _) => {
-  case ExtMem =>
-    Some(
-      MemoryPortParams(
-        MasterPortParams(
-          // although we only have 400MB of DRAM, these addresses are stored
-          base = 0x40000000L,
-          size = (1L << 20) * 400,
-          beatBytes = 4,
-          idBits = 6
-        ), 1
-      )
-    )
-  // 4GB total physical memory
-  case PlatformPhysicalMemoryBytes => 1L << 22
-  case FrontBusBaseAddress => 0x400000L
-  case FrontBusAddressMask => 0x1fL
-  case FrontBusCanDriveMemory => true
-  case FrontBusAddressBits => 16
-  case PrefetchSourceMultiplicity => 16
-  case HasDMA => None
-  case CXbarMaxDegree => 8
-  case HasDiscreteMemory => false
-  case FrontBusBeatBytes => 4
-  case CoreCommandLatency => 0
-  case PlatformTypeKey => if (useFPGAMem) PlatformType.FPGA else PlatformType.ASIC
-  case FrontBusProtocolKey => new ChipkitFrontBusProtocol(m0generator)
-  case PlatformNumSLRs => 1
-  case PlatformSLRs => None
-  case DefaultClockRateKey => 100
-  case HasCoherence => None
+class ChipKitPlatform(m0generator: Parameters => M0Abstract,
+                      val technologyLibrary: TechLib,
+                      override val clockRateMHz: Int) extends Platform with HasPostProccessorScript with HasMemoryCompiler {
+  override val platformType: PlatformType = PlatformType.ASIC
+  override val hasDiscreteMemory: Boolean = true
+  override val frontBusBaseAddress: Long = 0x400000L
+  override val frontBusAddressNBits: Int = 32
+  override val frontBusAddressMask: Long = 0x1FL
+  override val frontBusBeatBytes: Int = 4
+  override val frontBusCanDriveMemory: Boolean = true
+  override val frontBusProtocol: FrontBusProtocol = new ChipkitFrontBusProtocol(m0generator)
+  override val physicalMemoryBytes: Long = 1L << 22
+  override val memorySpaceAddressBase: Long = 0x0
+  override val memorySpaceSizeBytes: Long = physicalMemoryBytes
+  override val memoryNChannels: Int = 1
+  override val memoryControllersAreDisjoint: Boolean = true
+  override val memoryControllerIDBits: Int = 4
+  override val memoryControllerBeatBytes: Int = 4
 
-  case IsAWS => false
-  case HasDisjointMemoryControllers => false
-})
-
-class WithForceFPGA extends Config((_, _, _) => {
-  case PlatformNURAM => 10000
-  case PlatformNBRAM => 10000
-})
+  override val memoryCompiler: MemoryCompiler = technologyLibrary.memoryCompiler
+  override def postProcessorMacro(c: Config, paths: Seq[Path]): Unit = technologyLibrary.postProcessorMacro(c, paths)
+}

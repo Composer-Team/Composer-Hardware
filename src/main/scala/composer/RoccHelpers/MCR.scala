@@ -5,7 +5,7 @@ import chisel3.util._
 import composer._
 import freechips.rocketchip.amba.axi4.{AXI4SlaveNode, AXI4SlaveParameters, AXI4SlavePortParameters}
 import chipsalliance.rocketchip.config._
-import composer.Platforms.{FrontBusAddressMask, FrontBusBaseAddress, FrontBusBeatBytes}
+import composer.Platforms._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
@@ -64,7 +64,7 @@ class MCRFileMap() {
 
   def getCRdef(implicit p: Parameters): Seq[String] = {
     (regList.zipWithIndex map { case (entry, i) =>
-      val addr = i << log2Up(p(FrontBusBeatBytes))
+      val addr = i << log2Up(p(PlatformKey).frontBusBeatBytes)
       require(i < 1024)
       s"#define ${entry.name.toUpperCase()} ($addr)"
     }).toSeq
@@ -112,16 +112,16 @@ trait MCRFile {
 }
 
 class MCRFileTL(numRegs: Int)(implicit p: Parameters) extends LazyModule with MCRFile {
-  require((p(FrontBusBaseAddress) & 0x3FFL) == 0)
+  require((p(PlatformKey).frontBusBaseAddress & 0x3FFL) == 0)
 //  println(p(FrontBusAddressMask))
   val node = TLManagerNode(portParams = Seq(TLSlavePortParameters.v1(
     managers = Seq(TLSlaveParameters.v1(
-      address = Seq(AddressSet(p(FrontBusBaseAddress), p(FrontBusAddressMask))),
-      supportsPutFull = TransferSizes(1, p(FrontBusBeatBytes)),
-      supportsPutPartial = TransferSizes(1, p(FrontBusBeatBytes)),
-      supportsGet = TransferSizes(1, p(FrontBusBeatBytes))
+      address = Seq(AddressSet(platform.frontBusBaseAddress, platform.frontBusAddressMask)),
+      supportsPutFull = TransferSizes(1, platform.frontBusBeatBytes),
+      supportsPutPartial = TransferSizes(1, platform.frontBusBeatBytes),
+      supportsGet = TransferSizes(1, platform.frontBusBeatBytes)
     )),
-    beatBytes = p(FrontBusBeatBytes))
+    beatBytes = platform.frontBusBeatBytes)
   ))
 
   lazy val module = new MCRFileModuleTL(this, numRegs)
@@ -130,14 +130,14 @@ class MCRFileTL(numRegs: Int)(implicit p: Parameters) extends LazyModule with MC
 }
 
 class MCRFileAXI(numRegs: Int)(implicit p: Parameters) extends LazyModule with MCRFile {
-  require((p(FrontBusBaseAddress) & 0x3FFL) == 0)
+  require((platform.frontBusBaseAddress& 0x3FFL) == 0)
     val node = AXI4SlaveNode(portParams = Seq(AXI4SlavePortParameters(slaves = Seq(
       AXI4SlaveParameters(
-        address = Seq(AddressSet(p(FrontBusBaseAddress), p(FrontBusAddressMask))),
-        supportsRead = TransferSizes(p(FrontBusBeatBytes)),
-        supportsWrite = TransferSizes(p(FrontBusBeatBytes))
+        address = Seq(AddressSet(platform.frontBusBaseAddress, platform.frontBusAddressMask)),
+        supportsRead = TransferSizes(platform.frontBusBeatBytes),
+        supportsWrite = TransferSizes(platform.frontBusBeatBytes)
       )),
-    beatBytes = p(FrontBusBeatBytes))))
+    beatBytes = platform.frontBusBeatBytes)))
   lazy val module = new MCRFileModuleAXI(this, numRegs)
 
   override def getMCRIO: MCRIO = module.io.mcr
@@ -188,14 +188,14 @@ class MCRFileModuleAXI(outer: MCRFileAXI, numRegs: Int)(implicit p: Parameters) 
       in.ar.ready := !in.aw.valid
 
       when(in.aw.fire) {
-        address := in.aw.bits.addr >> log2Up(p(FrontBusBeatBytes))
+        address := in.aw.bits.addr >> log2Up(platform.frontBusBeatBytes)
         state := s_write_data
         opLen := in.aw.bits.len
         opvalid := true.B
         assert(in.aw.bits.len === 0.U)
       }
       when(in.ar.fire) {
-        address := in.ar.bits.addr >> log2Up(p(FrontBusBeatBytes))
+        address := in.ar.bits.addr >> log2Up(platform.frontBusBeatBytes)
         state := s_read
         opLen := in.ar.bits.len
         opvalid := true.B
@@ -288,13 +288,14 @@ class MCRFileModuleTL(outer: MCRFileTL, numRegs: Int)(implicit p: Parameters) ex
   in.d.bits := DontCare
 
   // For bus widths > 64, we expect multiple transactions to
+
   switch(state) {
     is(s_idle) {
       in.a.ready := true.B
       when (in.a.fire) {
         id := in.a.bits.source
         param := in.a.bits.size
-        val start = log2Up(p(FrontBusBeatBytes))
+        val start = log2Up(platform.frontBusBeatBytes)
         val end = start + log2Up(numRegs) - 1
         address := in.a.bits.address(end, start)
         when (in.a.bits.opcode === TLMessages.PutFullData || in.a.bits.opcode === TLMessages.PutPartialData) {

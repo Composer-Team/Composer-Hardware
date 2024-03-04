@@ -4,11 +4,10 @@ import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
 import composer._
-import composer.Generation._
 import composer.MemoryStreams.Loaders.CScratchpadPackedSubwordLoader
 import composer.common.{CLog2Up, ShiftReg, splitIntoChunks}
 import composer.Generation.Tune._
-import composer.Platforms.{PlatformType, PlatformTypeKey}
+import composer.Platforms._
 import freechips.rocketchip.diplomacy.{TransferSizes, _}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
@@ -66,25 +65,25 @@ class ScratchpadMemReqPort(addrBits: Int, nDatas: Int) extends Bundle {
 class MemoryScratchpad(csp: CScratchpadParams)(implicit p: Parameters) extends LazyModule {
   require(csp.dataWidthBits.intValue() > 0)
   require(csp.nDatas.intValue() > 0)
-  val channelWidthBytes = p(ExtMem).get.master.beatBytes
+  val channelWidthBytes = platform.extMem.master.beatBytes
 
   val blockBytes = p(CacheBlockBytes)
   lazy val module = new ScratchpadImpl(csp, this)
-  require(csp.dataWidthBits.intValue() <= channelWidthBytes * 8 * p(PrefetchSourceMultiplicity))
+  require(csp.dataWidthBits.intValue() <= channelWidthBytes * 8 * platform.prefetchSourceMultiplicity)
   val mem_reader = if (csp.features.supportMemRequest) Some(TLClientNode(Seq(TLMasterPortParameters.v2(
     masters = Seq(TLMasterParameters.v1(
       name = "ScratchpadRead",
       sourceId = IdRange(0, InstanceTunable(2, (1, 4), Some(csp.name + "ScratchpadReaderSources"))),
-      supportsProbe = TransferSizes(channelWidthBytes, channelWidthBytes * p(PrefetchSourceMultiplicity)),
-      supportsGet = TransferSizes(channelWidthBytes, channelWidthBytes * p(PrefetchSourceMultiplicity)),
+      supportsProbe = TransferSizes(channelWidthBytes, channelWidthBytes * platform.prefetchSourceMultiplicity),
+      supportsGet = TransferSizes(channelWidthBytes, channelWidthBytes * platform.prefetchSourceMultiplicity),
     )),
     channelBytes = TLChannelBeatBytes(channelWidthBytes))))) else None
   val mem_writer = if (csp.features.supportWriteback) Some(TLClientNode(Seq(TLMasterPortParameters.v2(
     masters = Seq(TLMasterParameters.v1(
       name = "ScratchpadWriteback",
       sourceId = IdRange(0, InstanceTunable(2, (1, 4), Some(csp.name + "ScratchpadReaderSources"))),
-      supportsProbe = TransferSizes(channelWidthBytes, channelWidthBytes * p(PrefetchSourceMultiplicity)),
-      supportsPutFull = TransferSizes(channelWidthBytes, channelWidthBytes * p(PrefetchSourceMultiplicity))
+      supportsProbe = TransferSizes(channelWidthBytes, channelWidthBytes * platform.prefetchSourceMultiplicity),
+      supportsPutFull = TransferSizes(channelWidthBytes, channelWidthBytes * platform.prefetchSourceMultiplicity)
     )),
     channelBytes = TLChannelBeatBytes(channelWidthBytes))))) else None
 
@@ -113,7 +112,7 @@ class ScratchpadImpl(csp: CScratchpadParams,
   private val scReqBits = log2Up(nDatas)
   val IOs = Seq.fill(nPorts)(IO(new ScratchpadDataPort(scReqBits, dataWidthBits)))
   val req = IO(new ScratchpadMemReqPort(
-    log2Up(p(ExtMem).get.nMemoryChannels*p(ExtMem).get.master.size),
+    log2Up(platform.extMem.nMemoryChannels*platform.extMem.master.size),
     nDatas))
   private val memory = Seq.fill(datasPerCacheLine)(Memory(latency,
     dataWidth = dataWidthBits,
@@ -194,14 +193,11 @@ class ScratchpadImpl(csp: CScratchpadParams,
     loader.io.cache_block_in.bits.len := maxTxLength.U
     val idxCounter = Reg(UInt(log2Up(realNRows).W))
 
-    val tx_ready = p(PlatformTypeKey) match {
-      case PlatformType.FPGA | PlatformType.ASIC =>
+    val tx_ready = {
         val reader = Module(new SequentialReader(
           swWordSize * datasPerCacheLine,
           tl_edge = outer.mem_reader.get.out(0)._2,
-          tl_bundle = outer.mem_reader.get.out(0)._1)(p.alterPartial {
-          case PrefetchSourceMultiplicity => 4
-        }))
+          tl_bundle = outer.mem_reader.get.out(0)._1))
         reader.tl_out <> outer.mem_reader.get.out(0)._1
         reader.io.req.valid := req.init.valid
         reader.io.req.bits.addr := req.init.bits.memAddr

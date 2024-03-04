@@ -3,12 +3,12 @@ package composer.MemoryStreams
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
-import composer.PrefetchSourceMultiplicity
 import composer.Systems.DataChannelIO
 import composer.common.{CLog2Up, ShiftReg}
 import composer.Generation._
 import composer.Generation.Tune._
-import composer.Platforms.{ASICMemoryCompilerKey, BuildModeKey, PlatformType, PlatformTypeKey}
+import composer.Platforms._
+import composer.platform
 import freechips.rocketchip.tilelink._
 
 class ReadChannelIO(val dWidth: Int)(implicit p: Parameters) extends Bundle {
@@ -30,11 +30,12 @@ class SequentialReader(val dWidth: Int,
   val beatBits = beatBytes * 8
   val addressBits = log2Up(tl_edge.manager.maxAddress)
   val maxBytes = dWidth / 8
-  val largeTxNBeats = Math.max(p(PrefetchSourceMultiplicity), maxBytes / beatBytes)
+  val largeTxNBeats = Math.max(platform.prefetchSourceMultiplicity, maxBytes / beatBytes)
   val nSources = tl_edge.client.endSourceId
   val prefetchRows = Math.max(
-    nSources * p(PrefetchSourceMultiplicity),
+    nSources * platform.prefetchSourceMultiplicity,
     minSizeBytes.getOrElse(0) / beatBytes)
+  val rowsAvailableToAlloc = RegInit(prefetchRows.U(log2Up(prefetchRows+1).W))
   val hasOneSource = nSources == 1
   require(isPow2(maxBytes))
 
@@ -95,14 +96,14 @@ class SequentialReader(val dWidth: Int,
 
   val prefetch_readIdx, prefetch_writeIdx = RegInit(0.U(log2Up(prefetchRows).W))
 
-  val prefetch_blatency = p(PlatformTypeKey) match {
+  val prefetch_blatency = platform.platformType match {
     case PlatformType.FPGA => 3
     case PlatformType.ASIC => (prefetchRows.toFloat / 256).ceil.toInt + 2
   }
 
-  val hasDualPortMemory = p(PlatformTypeKey) match {
+  val hasDualPortMemory = platform.platformType match {
     case PlatformType.FPGA => true
-    case PlatformType.ASIC => p(ASICMemoryCompilerKey).mostPortsSupported >= 2
+    case PlatformType.ASIC => platform.asInstanceOf[HasMemoryCompiler].memoryCompiler.mostPortsSupported >= 2
   }
 
   if (!hasDualPortMemory && !SequentialReader.has_warned_dp) {
@@ -130,8 +131,6 @@ class SequentialReader(val dWidth: Int,
     } else {
       (prefetch_buffers.getReadPortIdx(0), prefetch_buffers.getWritePortIdx(0))
     }
-//    val Ridx = prefetch_buffers.getReadPortIdx(0)
-//    val Widx = prefetch_buffers.getWritePortIdx(0)
     prefetch_buffers.addr(ridx) := prefetch_readIdx
     prefetch_buffers.data_in(ridx) := DontCare
     prefetch_buffers.write_enable(ridx) := false.B
@@ -158,7 +157,9 @@ class SequentialReader(val dWidth: Int,
     (true.B, !tl_out.d.valid, 0, 0)
   }
 
+
   tl_out.d.ready := atLeastOneSourceActive && write_ready
+
   val slots_per_alloc = if (beatBytes >= maxBytes) {
     when(tl_out.d.fire) {
       val dSource = tl_out.d.bits.source
@@ -211,6 +212,10 @@ class SequentialReader(val dWidth: Int,
     largeTxNBeats / beatsPerLine
   }
 
+  val allocatingBig = WireInit(false.B)
+  val allocatingSmall = WireInit(false.B)
+
+
   switch(state) {
     is(s_idle) {
       when(io.req.fire) {
@@ -229,7 +234,7 @@ class SequentialReader(val dWidth: Int,
     }
     is(s_send_mem_request) {
       when(len < largestRead.U) {
-        tl_reg.io.enq.valid := sourceAvailable && ((prefetch_writeIdx + 1.U) =/= prefetch_readIdx)
+        tl_reg.io.enq.valid := sourceAvailable && rowsAvailableToAlloc >= 1.U
         tl_reg.io.enq.bits := tl_edge.Get(
           fromSource = chosenSource,
           toAddress = addr,
@@ -240,19 +245,20 @@ class SequentialReader(val dWidth: Int,
           len := len - beatBytes.U
           prefetch_writeIdx := prefetch_writeIdx + 1.U
           beatsRemaining(chosenSource) := 0.U
+          allocatingSmall := true.B
         }
       }.otherwise {
-        val haveRoomToAlloc = Wire(Bool())
-        val dist2Roof = (prefetchRows - 1).U - prefetch_writeIdx
-        if (hasOneSource) {
-          haveRoomToAlloc := prefetch_readIdx === prefetch_writeIdx
-        } else {
-          when(dist2Roof < slots_per_alloc.U) {
-            haveRoomToAlloc := prefetch_readIdx > (slots_per_alloc.U - dist2Roof) && (prefetch_readIdx < prefetch_writeIdx)
-          }.otherwise {
-            haveRoomToAlloc := (prefetch_readIdx > prefetch_writeIdx + slots_per_alloc.U) || (prefetch_readIdx <= prefetch_writeIdx)
-          }
-        }
+        val haveRoomToAlloc = rowsAvailableToAlloc >= slots_per_alloc.U
+//        val dist2Roof = (prefetchRows - 1).U - prefetch_writeIdx
+//        if (hasOneSource) {
+//          haveRoomToAlloc := prefetch_readIdx === prefetch_writeIdx
+//        } else {
+//          when(dist2Roof < slots_per_alloc.U) {
+//            haveRoomToAlloc := prefetch_readIdx > (slots_per_alloc.U - dist2Roof) && (prefetch_readIdx < prefetch_writeIdx)
+//          }.otherwise {
+//            haveRoomToAlloc := (prefetch_readIdx > prefetch_writeIdx + slots_per_alloc.U) || (prefetch_readIdx <= prefetch_writeIdx)
+//          }
+//        }
         tl_reg.io.enq.valid := sourceAvailable && haveRoomToAlloc
         tl_reg.io.enq.bits := tl_edge.Get(
           fromSource = chosenSource,
@@ -260,6 +266,7 @@ class SequentialReader(val dWidth: Int,
           lgSize = lgLargestRead.U
         )._2
         when(tl_reg.io.enq.fire) {
+          allocatingBig := true.B
           addr := addr + largestRead.U
           len := len - largestRead.U
           prefetch_writeIdx := Mux(prefetch_writeIdx === (prefetchRows - slots_per_alloc).U, 0.U, prefetch_writeIdx + slots_per_alloc.U)
@@ -291,6 +298,25 @@ class SequentialReader(val dWidth: Int,
       val low = channelWidthBits * ch_buffer_idx
       channel_buffer_q.io.deq.bits(high, low)
     })
+
+  val currentlyWritingRow = channel_buffer_q.io.enq.fire
+
+  when (currentlyWritingRow) {
+    when (allocatingSmall) {
+      // do nothing
+    }.elsewhen(allocatingBig) {
+      rowsAvailableToAlloc := rowsAvailableToAlloc - (slots_per_alloc-1).U
+    }.otherwise {
+      rowsAvailableToAlloc := rowsAvailableToAlloc + 1.U
+    }
+  }.otherwise {
+    when (allocatingSmall) {
+      rowsAvailableToAlloc := rowsAvailableToAlloc - 1.U
+    }.elsewhen(allocatingBig) {
+      rowsAvailableToAlloc := rowsAvailableToAlloc - slots_per_alloc.U
+    }
+  }
+
 
   channel_buffer := channels(data_channel_read_idx)
 

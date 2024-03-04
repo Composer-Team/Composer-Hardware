@@ -3,10 +3,9 @@ package composer.MemoryStreams
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
-import composer.Generation._
-import composer.Platforms.{ASICMemoryCompilerKey, PlatformType, PlatformTypeKey}
 import composer.common.ShiftReg
 import composer.Generation.Tune.Tunable
+import composer.platform
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
@@ -39,7 +38,7 @@ class IntraCoreScratchpad(asMemorySlave: TLSlavePortParameters,
     nPorts,
     readOnly,
     this)
-  val channelWidthBytes = p(ExtMem).get.master.beatBytes
+  val channelWidthBytes = platform.extMem.master.beatBytes
   val blockBytes = p(CacheBlockBytes)
   val mem_slave_node = TLManagerNode(Seq(asMemorySlave))
 
