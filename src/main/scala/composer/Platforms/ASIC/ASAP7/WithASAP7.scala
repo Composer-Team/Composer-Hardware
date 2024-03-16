@@ -86,7 +86,7 @@ class ASAP7TechLib(corner: ProcessCorner = ProcessCorner.Typical,
         val tmod = path.split("/").last.split("\\.").head
         !ComposerBuild.partitionModules.contains(tmod)
       }
-      val tech_file = "/data/install/pdks/asap7/asap7_snps/icc/asap07_icc.tf"
+//      val tech_file = "/data/install/pdks/asap7/asap7_snps/icc/asap07_icc.tf"
       val stdCellDBs = List("SIMPLE", "INVBUF", "AO", "SEQ").map { p =>
         os.Path(f"/data/install/pdks/asap7/asap7sc7p5t_28/LIB/NLDM/" +
           f"asap7sc7p5t_${p}_${stdcell_suffix}_${cornerString}_nldm.db").toString()

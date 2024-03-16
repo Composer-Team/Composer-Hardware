@@ -27,9 +27,6 @@ case object ComposerQuiet extends Field[Boolean]
 case object UseConfigAsOutputNameKey extends Field[Boolean]
 
 // Architecture parameters
-//case object MaxChannelTransactionLenKey extends Field[Int]
-case object TLInterconnectWidthBytes extends Field[Int]
-
 case object CmdRespBusWidthBytes extends Field[Int]
 
 
@@ -77,7 +74,6 @@ class WithComposer(platform: Platform,
   case ComposerQuiet => quiet
   case PlatformKey => platform
   case AcceleratorSystems => Seq()
-  case TLInterconnectWidthBytes => 16
   case PgLevels => 5
   case XLen => 64 // Applies to all cores
   // PrefetchSourceMultiplicity must comply with the maximum number of beats

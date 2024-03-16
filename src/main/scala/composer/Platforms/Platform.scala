@@ -46,6 +46,8 @@ abstract class Platform {
   val memorySpaceAddressBase: Long
   val memorySpaceSizeBytes: Long
   val memoryNChannels: Int
+  // In the case of multile memory channels, this determines whether or not each channel corresponds to
+  // a separate address space or if each channel accesses the same memory in parallel
   val memoryControllersAreDisjoint: Boolean
   val memoryControllerIDBits: Int
   val memoryControllerBeatBytes: Int
@@ -64,7 +66,8 @@ abstract class Platform {
   // legal burst lengths illegal! This is the case on the Kria platform that, although burst length 64 is a valid
   // burst length in the AXI protocol spec, 16 is the maximum permissible burst supported by the controller.
   // Longer bursts are split into shorter AXI burst on Kria, which can lead to allocation problems and poor
-  // performance under some circumstances.
+  // performance under some circumstances. If this is a parameter of interest, it is usually find in the memory
+  // controller documentation.
   val prefetchSourceMultiplicity: Int = 16
 
   // maximum memory crossbar fanout degree. Larger xbars will be broken up into multiple layers.

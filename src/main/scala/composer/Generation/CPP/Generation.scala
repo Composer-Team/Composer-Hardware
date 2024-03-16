@@ -84,7 +84,7 @@ object Generation {
           s"#endif"
       })
     }
-    val mmio_addr = "const uint64_t ComposerMMIOOffset = 0x" + platform.frontBusBaseAddress.toHexString + "L;"
+    val mmio_addr = "const uint64_t ComposerMMIOOffset = 0x" + platform.frontBusBaseAddress.toHexString + "LL;"
 
     val header = new FileWriter((path / "composer_allocator_declaration.h").toString())
     header.write(

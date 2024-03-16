@@ -164,6 +164,7 @@ object MemoryCompiler {
 
       if (works(Latency - 2)) (Latency - 2, (x: Data) => rn(x), (x: Data) => rn(x))
       else if (works(Latency - 1)) (Latency - 1, (x: Data) => x, (x: Data) => rn(x))
+      else if (works(Latency)) (Latency, (x: Data) => x, (x: Data) => x)
       else {
         val mem = Module(new SyncReadMemMem(0, 0, nPorts, nRows, dataWidth, Latency))
         mem.mio.clock := io.clock
@@ -179,7 +180,7 @@ object MemoryCompiler {
         }
         composer.Generation.CLogger.log(s"Failed to find suitable SRAM configuration for ${nPorts}x${nRows}x${dataWidth} at L=${Latency}" +
           s" Falling back to Register-based memory")
-        return
+        throw new Exception()
       }
     }
     val memoryStructure = mc.getMemoryCascade(nRows, dataWidth, nPorts, memory_chain_latency, p(PlatformKey).clockRateMHz).get

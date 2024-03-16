@@ -4,6 +4,12 @@ import chisel3._
 import chisel3.util.RegEnable
 
 import scala.annotation.tailrec
+
+/**
+ * I've run into trouble in the past where Chisel3 shiftregisters give me
+ * unexpected behavior, so I have these instead.
+ */
+
 object ShiftReg {
   @tailrec
   def apply[T <: Data](t: T, latency: Int): T = {

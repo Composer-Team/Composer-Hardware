@@ -3,6 +3,7 @@ package composer.MemoryStreams
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import composer.Generation.BuildMode
 import composer.MemoryStreams.RAM.SyncReadMemMem
 import composer.Platforms.ASIC.MemoryCompiler
 import composer.Platforms.FPGA.Xilinx.Templates.{BRAMSDP, BRAMTDP}
@@ -26,7 +27,7 @@ object Memory {
       nReadPorts: Int,
       nWritePorts: Int,
       nReadWritePorts: Int,
-      debugName: Option[String] = None
+        debugName: Option[String] = None,
   )(implicit p: Parameters, valName: ValName): CMemoryIOBundle = {
 //    println(s"Creating CMemory with $nReadPorts read ports, $nWritePorts write ports, $nReadWritePorts read/write ports: $debugName, $valName")
     val mostPortsSupported = p(PlatformKey) match {
@@ -92,8 +93,8 @@ object Memory {
       mio
     }
     else {
-      p(PlatformKey).platformType match {
-        case PlatformType.FPGA =>
+      (p(PlatformKey).platformType, p(BuildModeKey)) match {
+        case (PlatformType.FPGA, _) | (_, BuildMode.Simulation) =>
           require(latency >= 1)
           val mio = Wire(Output(new CMemoryIOBundle(nReadPorts, nWritePorts, nReadWritePorts, log2Up(nRows), dataWidth)))
           if (latency >= 3 && nPorts <= 2) {
@@ -184,7 +185,7 @@ object Memory {
             // latency == 1 or 2. Recognizing URAM/BRAM is now in god's hands
           }
           mio
-        case PlatformType.ASIC =>
+        case (PlatformType.ASIC, BuildMode.Synthesis) =>
           println("ASIC Mem")
           val cmem = Module(new CASICMemory(latency, dataWidth, nRows, nPorts))
           cmem.suggestName(valName.name)

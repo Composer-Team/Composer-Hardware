@@ -48,7 +48,7 @@ object ResponseParsing {
       } else {
         ("double", "uint64_t")
       }
-      f"  $ty_name_int __${ele._1}_asInt = (resp & 0x${mask.toHexString}L) >> ${ele._2._2};\n" +
+      f"  $ty_name_int __${ele._1}_asInt = (resp & 0x${mask.toHexString}LL) >> ${ele._2._2};\n" +
         f"  $ty_name __${ele._1} = reinterpret_cast<$ty_name&>(__${ele._1}_asInt);\n"
     } match {
       case a: Seq[String] if a.isEmpty => ""
@@ -62,7 +62,7 @@ object ResponseParsing {
         //noinspection DuplicatedCode
         val shiftAmt = 1 + ele._2._1 - ele._2._2
         val mask = if (shiftAmt < 64) (1L << shiftAmt) - 1 else -1L
-        (ele._1, f"(resp & (0x${mask.toHexString}L << ${ele._2._2})) >> ${ele._2._2}")
+        (ele._1, f"(resp & (0x${mask.toHexString}LL << ${ele._2._2})) >> ${ele._2._2}")
       }
     }.sortBy(_._1).map(_._2).reduce(_ + ", " + _)
 

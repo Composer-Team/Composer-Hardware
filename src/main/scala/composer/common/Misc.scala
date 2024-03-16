@@ -5,6 +5,9 @@ import chisel3.util._
 
 import scala.collection.SeqMap
 
+/**
+ *
+ */
 trait hasAccessibleUserSubRegions {
   val reservedNames: Seq[String]
 

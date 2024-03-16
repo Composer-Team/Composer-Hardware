@@ -200,6 +200,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
             pwpp.postProcessorMacro(configWithBuildMode, movedSrcs ++ chiselGeneratedSrcs)
           case _ => ;
         }
+      case _ => ;
     }
   }
 }

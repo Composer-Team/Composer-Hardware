@@ -18,7 +18,7 @@ trait HasM0BasicInterfaces {
 }
 
 abstract class M0Abstract(implicit p: Parameters) extends LazyModule {
-  val node = AHBMasterSourceNode(
+  val node = AHBSlaveSourceNode(
     portParams = Seq(AHBMasterPortParameters(
       masters = Seq(AHBMasterParameters(
         name = "M0_AHB"
@@ -31,24 +31,25 @@ abstract class M0Abstract(implicit p: Parameters) extends LazyModule {
 class ChipkitFrontBusProtocol(generator: Parameters => M0Abstract) extends FrontBusProtocol {
   override def deriveTopIOs(tlChainObj: Any, withClock: Clock, withActiveHighReset: Reset)(implicit p: Parameters): Bundle = {
     chipkit.sources foreach ComposerBuild.addSource
-    val CHIP = IO(new COMMTopIO)
+//    val CHIP = IO(new COMMTopIO)
     val STDUART = IO(new PROM_UART)
-    val (moa, lzc) = tlChainObj.asInstanceOf[(M0Abstract, LazyComm)]
-    lzc.module.top <> CHIP
+    val (moa, lzc) = tlChainObj.asInstanceOf[(M0Abstract, Int)]
+//    lzc.module.top <> CHIP
     STDUART <> moa.module.uart
     moa.module.reset := withActiveHighReset.asBool
-    CHIP
+    STDUART
   }
 
   override def deriveTLSources(implicit p: Parameters): (Any, TLIdentityNode, Option[TLIdentityNode]) = {
-    val chipKitCOMM = LazyModule(new LazyComm)
-    val AHBMasterMux = LazyModule(new chipkit.AHBMasterMux(2))
+//    val chipKitCOMM = LazyModule(new LazyComm)
+//    val AHBMasterMux = LazyModule(new chipkit.AHBMasterMux(2))
+//    val q = new AHBArbiter()
     val m0 = generator(p)
-    AHBMasterMux.node := chipKitCOMM.M
-    AHBMasterMux.node := m0.node
+//    AHBMasterMux.node := chipKitCOMM.M
+//    AHBMasterMux.node := m0.node
     val tl_node = TLIdentityNode()
-    tl_node := AHBToTL() := AHBMasterMux.node
-    ((m0, chipKitCOMM), tl_node, None)
+    tl_node := AHBToTL() := m0.node
+    ((m0, 0), tl_node, None)
   }
 }
 
@@ -57,9 +58,9 @@ class ChipKitPlatform(m0generator: Parameters => M0Abstract,
                       override val clockRateMHz: Int) extends Platform with HasPostProccessorScript with HasMemoryCompiler {
   override val platformType: PlatformType = PlatformType.ASIC
   override val hasDiscreteMemory: Boolean = true
-  override val frontBusBaseAddress: Long = 0x400000L
+  override val frontBusBaseAddress: Long = 0x2000FC00L
   override val frontBusAddressNBits: Int = 32
-  override val frontBusAddressMask: Long = 0x1FL
+  override val frontBusAddressMask: Long = 0x3FFL
   override val frontBusBeatBytes: Int = 4
   override val frontBusCanDriveMemory: Boolean = true
   override val frontBusProtocol: FrontBusProtocol = new ChipkitFrontBusProtocol(m0generator)
