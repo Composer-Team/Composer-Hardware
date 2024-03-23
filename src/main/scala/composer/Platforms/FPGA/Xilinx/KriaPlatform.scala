@@ -24,7 +24,6 @@ class KriaPlatform(val memoryNChannels: Int = 1) extends Platform with HasPostPr
   override val physicalMemoryBytes: Long = 4L << 30
   override val memorySpaceAddressBase: Long = 0x0
   override val memorySpaceSizeBytes: Long = 1L << 49
-  override val memoryControllersAreDisjoint: Boolean = true
   override val memoryControllerIDBits: Int = 6
   override val memoryControllerBeatBytes: Int = 16
 
