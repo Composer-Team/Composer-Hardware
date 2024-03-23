@@ -21,4 +21,4 @@ lazy val composer =(project in file(".")).settings(
   publishTo := Some(("reposilite-repository" at "http://oak:8080/releases/").withAllowInsecureProtocol(true)),
   credentials += Credentials(Path.userHome / ".sbt" / ".credentials"),
   addCompilerPlugin("edu.berkeley.cs" % "chisel3-plugin" % chiselVersion cross CrossVersion.full)
-)//.dependsOn(chipkit)
+).dependsOn(chipkit)

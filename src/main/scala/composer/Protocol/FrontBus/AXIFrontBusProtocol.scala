@@ -10,7 +10,7 @@ import freechips.rocketchip.subsystem.MasterPortParams
 import freechips.rocketchip.tilelink.TLIdentityNode
 
 class AXIFrontBusProtocol extends FrontBusProtocol {
-  override def deriveTopIOs(tlChainObj: Any, withClock: Clock, withActiveHighReset: Reset)(implicit p: Parameters): Bundle = {
+  override def deriveTopIOs(tlChainObj: Any, withClock: Clock, withActiveHighReset: Reset)(implicit p: Parameters): Unit = {
     val port_cast = tlChainObj.asInstanceOf[AXI4MasterNode]
     val ap = port_cast.out(0)._1.params
     val S00_AXI = IO(Flipped(new AXI4Compat(MasterPortParams(
@@ -19,7 +19,6 @@ class AXIFrontBusProtocol extends FrontBusProtocol {
       beatBytes = ap.dataBits / 8,
       idBits = ap.idBits))))
     AXI4Compat.connectCompatSlave(S00_AXI, port_cast.out(0)._1)
-    S00_AXI
   }
 
   override def deriveTLSources(implicit p: Parameters): (Any, TLIdentityNode, Option[TLIdentityNode]) = {

@@ -5,19 +5,20 @@ package composer.TLManagement
 import chisel3._
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.util._
 import freechips.rocketchip.amba.axi4._
 import chisel3.util._
 import composer.platform
 import composer.common.CLog2Up
-import freechips.rocketchip.subsystem.ExtMem
 import freechips.rocketchip.tilelink._
 
 class TLToAXI4SRW(val addressSet: AddressSet, idMax: Int)(implicit p: Parameters) extends LazyModule {
   /**
-   * I'm developing this TLToAXI4 converter because it allows for TL-based systems to utilize
-   * both AXI busses at once. Otherwise, we're effectively halving our bus width. Masters with
-   * read & write support should filter their requests first.
+   * The problem with using a TL to AXI4 converter is that a write and read request in tile link share the same bus
+   * whereas in AXI4, they are separate. 1To rememdy this, in Composer, we elaborate separate TL networks for writes
+   * and reads. In practice, synthesizers should optimize away any unused channels. Then, we use this module to merge
+   * these two separate networks into a single AXI4 bus.
+   * This idiom is not achievable using existing Diplomacy constructs because the nodes are managers for the same
+   * address range.
    */
 
   val axi_client = AXI4MasterNode(

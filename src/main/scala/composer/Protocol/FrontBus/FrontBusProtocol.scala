@@ -10,7 +10,7 @@ abstract class FrontBusProtocol {
    * tlChainObj provides the diplomacy objects generated in `deriveTLSources` so that you, from a non-lazy context
    * can generate the physical IOs and tie them to the diplomacy object bundle IOs
    */
-  def deriveTopIOs(tlChainObj: Any, withClock: Clock, withActiveHighReset: Reset)(implicit p: Parameters): Bundle
+  def deriveTopIOs(tlChainObj: Any, withClock: Clock, withActiveHighReset: Reset)(implicit p: Parameters): Unit
 
   /**
    * This function is executed from the lazy context. Generate the following:

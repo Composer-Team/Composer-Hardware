@@ -3,6 +3,7 @@ package composer.Systems
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import composer.TLManagement.TLRWFilter
 import composer.common._
 import composer._
 import freechips.rocketchip.diplomacy._
@@ -34,7 +35,7 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
       val target = mpo.toSystem
       val targetSys = system_tups(name2Id(target))
       val assoc_endpoints = targetSys._1.intraCoreMemSlaveNodes.filter(_._1 == mpo.name).map(_._2)
-//      val assoc_endpoints = system_tups.filter(_._3.name == pparams.toSystem)(0)._1.cores.map(_._2.intraCoreMemSlaveNodes.filter(_._1 == pparams.toMemoryPort)(0)).map(_._2)
+      //      val assoc_endpoints = system_tups.filter(_._3.name == pparams.toSystem)(0)._1.cores.map(_._2.intraCoreMemSlaveNodes.filter(_._1 == pparams.toMemoryPort)(0)).map(_._2)
       nodes_per_core foreach { clients =>
         require(clients.length == assoc_endpoints.flatten.length, "sanity - if this doesn't work, somethign bad has happened")
         clients zip assoc_endpoints.flatten foreach { case (c, e) =>
@@ -120,36 +121,41 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   }
 }
 
-class ComposerAccSystem(implicit p: Parameters) extends LazyModule {
+class ComposerAccSystem(hasTLDMA: Boolean)(implicit p: Parameters) extends LazyModule {
   val nMemChannels = platform.extMem.nMemoryChannels
 
   val acc = LazyModule(new ComposerAcc())
 
-  val optionalFrontBusAccess = if (platform.frontBusCanDriveMemory) Some(TLIdentityNode()) else None
+  val tldma = if (hasTLDMA) Some(TLIdentityNode()) else None
 
-  val Seq(r_mem, w_mem) = Seq(acc.reads, acc.writes).map { mems =>
+  val (reads, writes) = tldma match {
+    case Some(tldmanode) =>
+      val filter = LazyModule(new TLRWFilter(
+        TLSlavePortParameters.v1(
+          managers = Seq(TLSlaveParameters.v1(
+            address = (0 until nMemChannels).map(ComposerTop.getAddressSet(_)),
+            supportsGet = TransferSizes(platform.frontBusBeatBytes),
+            supportsPutFull = TransferSizes(platform.frontBusBeatBytes),
+            supportsAcquireB = TransferSizes.none,
+          )), platform.frontBusBeatBytes, 0
+        ),
+        TLMasterPortParameters.v1(
+          clients = Seq(TLMasterParameters.v1(
+            "Splitter",
+            IdRange(0, 1))))))
+      filter.in_node := tldmanode
+      (acc.reads ++ Seq(filter.read_out), acc.writes ++ Seq(filter.write_out))
+    case None =>
+      (acc.reads, acc.writes)
+  }
+
+  val Seq(r_mem, w_mem) = Seq(reads, writes).map { mems =>
     if (mems.nonEmpty) {
-      val nEndpoints = if (platform.memoryControllersAreDisjoint) Math.min(nMemChannels, mems.length)
-      else nMemChannels
-      val mem_endpoints = Seq.fill(nEndpoints)(TLIdentityNode())
-
-      if (platform.memoryControllersAreDisjoint) {
-        // disjoint memory controllers go to different addresses. The redirection to the correct controller
-        // happens at the crossbar level, so we join all transactions at a single crossbar and then feed out to the
-        // individual channels
-        val crossbarModule = LazyModule(new TLXbar())
-        val crossbar = crossbarModule.node
-        mems foreach (crossbar := _)
-        mem_endpoints.foreach(_ := crossbar)
-      } else {
-        // controllers can all access the same addresses! Split up end points to be able to access these addresses in
-        // parallel
-        val nondisjointXbars = Seq.fill(Math.min(nMemChannels, mems.length))(LazyModule(new TLXbar()))
-        mems.zipWithIndex foreach { case (m, idx) =>
-          nondisjointXbars(idx % nMemChannels).node := m
-        }
-        mem_endpoints zip nondisjointXbars foreach { case (m, xb) => m := xb.node }
-      }
+      val mem_endpoints = Seq.fill(nMemChannels)(TLIdentityNode())
+      val crossbarModule = LazyModule(new TLXbar())
+      val crossbar = crossbarModule.node
+      mems foreach (crossbar := _)
+      mem_endpoints.foreach(_ := crossbar)
       mem_endpoints
     } else Seq()
   }

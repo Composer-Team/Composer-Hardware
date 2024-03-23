@@ -13,6 +13,7 @@ import firrtl._
 import firrtl.options._
 import firrtl.options.PhaseManager.PhaseDependency
 import firrtl.stage.RunFirrtlTransformAnnotation
+import firrtl.transforms.NoDCEAnnotation
 import freechips.rocketchip.stage._
 import freechips.rocketchip.subsystem.ExtMem
 import os._
@@ -34,7 +35,7 @@ class ComposerChipStage extends Stage with Phase {
   private val pm = new PhaseManager(targets)
 
   override def run(annotations: AnnotationSeq): AnnotationSeq =
-    pm.transform(annotations ++ Seq(PrintFullStackTraceAnnotation))
+    pm.transform(annotations ++ Seq(PrintFullStackTraceAnnotation, NoDCEAnnotation))
 }
 
 object ComposerBuild {
@@ -144,6 +145,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
           CustomDefaultMemoryEmission(MemoryNoInit),
           CustomDefaultRegisterEmission(useInitAsPreset = false, disableRandomization = true),
           RunFirrtlTransformAnnotation(new VerilogEmitter),
+          NoDCEAnnotation
         )
       )
     )
@@ -152,7 +154,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
 
     // --------------- Verilog Annotators ---------------
     //    KeepHierarchy(targetDir / "ComposerTop.v")
-    partitionModules foreach println
+//    partitionModules foreach println
     val movedSrcs = composer.Generation.Annotators.UniqueMv(sourceList, targetDir)
 
     ConstraintGeneration.slrMappings.foreach { slrMapping =>

@@ -71,15 +71,14 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
   val cmd_resp_axilhub = LazyModule(new FrontBusHub())
 
   // AXI-L Port - commands come through here
-  val (comm_node, frontSource, _) = platform.frontBusProtocol.deriveTLSources(p)
-
+  val (comm_node, frontSource, frontDMA) = platform.frontBusProtocol.deriveTLSources(p)
+  cmd_resp_axilhub.tl_head := frontSource
 
   val dummyTL = p.alterPartial({ case TileVisibilityNodeKey => cmd_resp_axilhub.widget.node })
 
   // Generate accelerator SoC
-  val accelerator_system = LazyModule(new ComposerAccSystem()(dummyTL))
-
-  // Rocketchip AXI Nodes
+  val accelerator_system = LazyModule(new ComposerAccSystem(frontDMA.isDefined)(dummyTL))
+  if (frontDMA.isDefined) accelerator_system.tldma.get := frontDMA.get
 
   val has_memory_endpoints = accelerator_system.r_mem.nonEmpty || accelerator_system.w_mem.nonEmpty || platform.frontBusCanDriveMemory
   val AXI_MEM = if (has_memory_endpoints) Some(Seq.tabulate(nMemChannels) { channel_idx =>
@@ -116,53 +115,19 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
 
   val availableComposerSources = 1 << (platform.extMem.master.idBits - dmaSourceBits)
 
-  def tieFBandShrink(tl: TLNode, fb: Option[TLNode], name: Option[String]): TLNode = {
-    val total = fb match {
-      case Some(q) =>
-        val xbar = TLXbar()
-        xbar := q
-        xbar := tl
-        xbar
-      case None => tl
-    }
+  def tieFBandShrink(tl: TLNode, name: Option[String]): TLNode = {
     val shrinker = TLSourceShrinkerDynamicBlocking(availableComposerSources, name)
-    shrinker := total
+    shrinker := tl
     shrinker
-  }
-
-  val (front_r, front_w) = if (platform.frontBusCanDriveMemory) {
-    val front_mem_xbar = TLXbar()
-    front_mem_xbar := frontSource
-    cmd_resp_axilhub.tl_head := front_mem_xbar
-    val filter = LazyModule(new TLRWFilter(
-      TLSlavePortParameters.v1(
-        managers = Seq(TLSlaveParameters.v1(
-          address = (0 until nMemChannels).map(ComposerTop.getAddressSet(_)),
-          supportsGet = TransferSizes(platform.frontBusBeatBytes),
-          supportsPutFull = TransferSizes(platform.frontBusBeatBytes),
-          supportsAcquireB = TransferSizes.none,
-          resources = device.reg,
-          regionType = RegionType.UNCACHED,
-        )), platform.frontBusBeatBytes, 0
-      ),
-      TLMasterPortParameters.v1(
-        clients = Seq(TLMasterParameters.v1(
-          "Splitter",
-          IdRange(0, 1))))))
-    filter.in_node := front_mem_xbar
-    (Some(filter.read_out), Some(filter.write_out))
-  } else {
-    cmd_resp_axilhub.tl_head := frontSource
-    (None, None)
   }
 
   // Connect accelerators to memory
   val composer_mems = if (accelerator_system.w_mem.isEmpty) {
-    accelerator_system.w_mem.map { src =>
+    accelerator_system.r_mem.map { src =>
       val tl2axi = LazyModule(new TLToAXI4R(
         addressSet = ComposerTop.getAddressSet(0),
         idMax = availableComposerSources))
-      tl2axi.tlReader := tieFBandShrink(src, front_r, Some("read_shrink"))
+      tl2axi.tlReader := tieFBandShrink(src, Some("read_shrink"))
       tl2axi.axi_client
     }
   } else if (accelerator_system.r_mem.isEmpty) {
@@ -170,7 +135,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
       val tl2axi = LazyModule(new TLToAXI4W(
         addressSet = ComposerTop.getAddressSet(0),
         idMax = availableComposerSources))
-      tl2axi.tlWriter := tieFBandShrink(src, front_w, Some("write_shrink"))
+      tl2axi.tlWriter := tieFBandShrink(src, Some("write_shrink"))
       tl2axi.axi_client
     }
   } else {
@@ -181,8 +146,8 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
       val tl2axi = LazyModule(new TLToAXI4SRW(
         addressSet = ComposerTop.getAddressSet(idx),
         idMax = availableComposerSources))
-      tl2axi.tlReader := tieFBandShrink(rss, front_r, Some("read_shrink"))
-      tl2axi.tlWriter := tieFBandShrink(wss, front_w, Some("write_shrink"))
+      tl2axi.tlReader := tieFBandShrink(rss, Some("read_shrink"))
+      tl2axi.tlWriter := tieFBandShrink(wss, Some("write_shrink"))
       // readers and writers are separated into separate systems and re-unified for the AXI bus. In reality though,
       // the read and write busses are logically unrelated so this unification is only symbolic
       tl2axi.axi_client
