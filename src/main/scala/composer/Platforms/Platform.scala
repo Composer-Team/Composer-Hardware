@@ -46,9 +46,6 @@ abstract class Platform {
   val memorySpaceAddressBase: Long
   val memorySpaceSizeBytes: Long
   val memoryNChannels: Int
-  // In the case of multile memory channels, this determines whether or not each channel corresponds to
-  // a separate address space or if each channel accesses the same memory in parallel
-  val memoryControllersAreDisjoint: Boolean
   val memoryControllerIDBits: Int
   val memoryControllerBeatBytes: Int
 
