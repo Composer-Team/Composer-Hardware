@@ -37,7 +37,7 @@ object Memory {
     val nPorts = nReadPorts + nWritePorts + nReadWritePorts
 
     if (nPorts > mostPortsSupported && (nWritePorts + nReadWritePorts > 1 || mostPortsSupported == 1)) {
-      println("SRMM")
+//      println("SRMM")
       val regMem = Module(new SyncReadMemMem(nReadPorts, nWritePorts, nReadWritePorts, nRows, dataWidth, latency))
       require(nPorts < 16)
       (0 until nReadPorts) foreach { idx =>
@@ -48,7 +48,7 @@ object Memory {
       regMem.mio
     }
     else if (nPorts > mostPortsSupported) {
-      println("Duplicated Mem")
+//      println("Duplicated Mem")
       // duplicate the memory
       val nDuplicates = ((nPorts - 1).toFloat / (mostPortsSupported - 1)).ceil.toInt
 //      println("Duplicate memory " + nDuplicates + " times for " + nPorts + " ports")
@@ -186,7 +186,7 @@ object Memory {
           }
           mio
         case (PlatformType.ASIC, BuildMode.Synthesis) =>
-          println("ASIC Mem")
+//          println("ASIC Mem")
           val cmem = Module(new CASICMemory(latency, dataWidth, nRows, nPorts))
           cmem.suggestName(valName.name)
           TransitName(cmem.io, cmem)
