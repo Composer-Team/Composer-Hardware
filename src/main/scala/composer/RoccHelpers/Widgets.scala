@@ -21,9 +21,6 @@ abstract class Widget(implicit p: Parameters) extends LazyModule {
 
 abstract class WidgetModule(outer: Widget) extends LazyModuleImp(outer) {
 
-  // TODO: use this to get the nastidatabits
-  //  val (ctrl, edge) =  outer.node.in
-
   val nastiXDataBits = 32
 
   var _finalized = false
