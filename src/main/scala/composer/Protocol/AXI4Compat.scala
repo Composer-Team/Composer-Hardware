@@ -175,7 +175,7 @@ object AXI4Compat {
   }
 
   def apply(bundleParameters: AXI4BundleParameters): AXI4Compat = {
-    println(bundleParameters.addrBits)
+//    println(bundleParameters.addrBits)
     new AXI4Compat(
       MasterPortParams(0, 1L << bundleParameters.addrBits, bundleParameters.dataBits / 8,
       bundleParameters.idBits))
