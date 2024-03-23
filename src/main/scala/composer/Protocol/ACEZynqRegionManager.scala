@@ -9,6 +9,26 @@ import composer.common.CLog2Up
 import freechips.rocketchip.subsystem.MasterPortParams
 
 /**
+ * This code is now in a state of deprecation.
+ * When considering coherence, there are some tradeoffs that are hard to make on the basis of performance, but trivial
+ * to make on the basis of ease-of-implementation.
+ *
+ * From the basis of performance, we have two options when considering accelerators of the style that Composer intends
+ * to accelerate (namely VLIW accelerators with multiple-ms latency). We can either:
+ * 1. Invalidate the cache line in CPU caches  before the accelerator starts using it and then issue non-shared DRAM
+ * transactions from the accelerator. This incurs the cost of an initial setup for all of the segments that the kernel
+ * uses, but then future memory accesses from the accelerator incur no additional latency and bypass any sort of
+ * coherence logic/snooping that a shared segment may incur.
+ * 2. Issue all transactions from the accelerator as shared, write-invalidate transactions. This likely incurs a small
+ * overhead on every transaction, but it's not clear how big of a problem this is. From the point-of-view of our
+ * accelerator implementation, it's just a matter of hard-coding some AXI bits. From the performance perspective,
+ * there's really nothing for us to do; if the interconnect uses some sort of directory, this may incur a very small
+ * latency, and if the interconnect uses snooping, this may incur a slightly larger latency. It's _extremely_
+ * difficult to figure of the costs here without actually implementing the system and testing it on every system,
+ * which I don't intend to do at the current moment... So we're just going with what's easy and gets the job done.
+ */
+
+/**
  * The Region manager is responsible for a couple of things.
  * 1. Accept commands from the host which contain an address range (start addr, offset)
  * and enqueue them into a list for managed segments
