@@ -43,15 +43,10 @@ class ChipkitFrontBusProtocol(generator: Parameters => M0Abstract) extends Front
     chipkit.sources foreach ComposerBuild.addSource
     val CHIP = IO(new COMMTopIO)
     val STDUART = IO(new PROM_UART)
-    val (moa, lzc, _) = tlChainObj.asInstanceOf[(M0Abstract, LazyComm, Any)]
+    val CHIP_ASPSEL = IO(Input(Bool()))
+    val (moa, lzc, slave_select) = tlChainObj.asInstanceOf[(M0Abstract, LazyComm, TLSlaveMux)]
     lzc.module.top <> CHIP
-
-//    conv.node.in(0)._1.hsel := conv.node.in(0)._1.htrans =/= 0.U
-//    conv.node.in(0)._1.hready := true.B
-//    lzc.M.out(0)._1.hready := true.B
-
-//    tsm.module.slave_select := 0.U
-//    dontTouch(tsm.module.slave_select)
+    slave_select.module.slave_select := CHIP_ASPSEL
     STDUART <> moa.module.uart
     moa.module.reset := withActiveHighReset.asBool
   }
@@ -60,17 +55,16 @@ class ChipkitFrontBusProtocol(generator: Parameters => M0Abstract) extends Front
     val chipKitCOMM = LazyModule(new LazyComm)
     val m0 = generator(p)
     println("ChipKitFrontBusProtocol: deriveTLSources")
-//    val select = LazyModule(new TLSlaveMux())
-//    select.in := AHBToTL() := chipKitCOMM.M
+    val select = LazyModule(new TLSlaveMux())
+    select.in := AHBToTL() := chipKitCOMM.M
     val ahb2tl = LazyModule(new AHBToTL())
-    m0.program_sram := ahb2tl.node := chipKitCOMM.M // select.out_sram
-//    val tl_dma = TLIdentityNode()
-//    tl_dma := select.out_dma
+    m0.program_sram := select.out_sram
+    val tl_dma = TLIdentityNode()
+    tl_dma := select.out_dma
 
     val tl_node = TLIdentityNode()
     tl_node := AHBToTL() := m0.node
-    ((m0, chipKitCOMM, ahb2tl), tl_node, None)
-//      Some(tl_dma))
+    ((m0, chipKitCOMM, select), tl_node, Some(tl_dma))
   }
 }
 
