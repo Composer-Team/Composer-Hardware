@@ -196,7 +196,7 @@ object BRAMTDP {
     if (nRows >= 4 * 1024 && dwidth < 64) {
       if (!p(ComposerQuiet) && warningsIssued < 5) {
         System.err.println(
-          s"One of the memory modules ($debugName) has a data width less than 64 ($dwidth) but has a total\n" +
+          s"  One of the memory modules ($debugName) has a data width less than 64 ($dwidth) but has a total\n" +
             s"data capacity that makes it appropriate for URAM (applicable for Ultrascale+ devices)\n" +
             s"This may lead to poor URAM cascading. Consider increasing the width if possible."
         )

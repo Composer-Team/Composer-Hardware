@@ -1,12 +1,11 @@
 
 val chiselVersion = "3.5.6"
 
-lazy val chipkit = project in file("chipkit")
 ThisBuild / scalaVersion := "2.13.10"
 
 lazy val composer =(project in file(".")).settings(
   name := "composer-hardware",
-  version := "snap15",
+  version := "snap16",
   organization := "edu.duke.cs.apex",
   libraryDependencies ++= Seq(
     "edu.berkeley.cs" %% "chisel3" % chiselVersion,
@@ -21,4 +20,4 @@ lazy val composer =(project in file(".")).settings(
   publishTo := Some(("reposilite-repository" at "http://oak:8080/releases/").withAllowInsecureProtocol(true)),
   credentials += Credentials(Path.userHome / ".sbt" / ".credentials"),
   addCompilerPlugin("edu.berkeley.cs" % "chisel3-plugin" % chiselVersion cross CrossVersion.full)
-).dependsOn(chipkit)
+)
