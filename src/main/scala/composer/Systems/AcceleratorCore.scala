@@ -49,12 +49,17 @@ object AcceleratorCore {
   class Address(addrBits: Int) extends Bundle {
     val address = UInt(addrBits.W)
 
-    def :=(other: Data): Unit = {
-      address := other
-    }
-
     implicit def toUInt: UInt = address
+
+    // override + operator
+    def +(that: UInt): Address = {
+      val a = Wire(new Address(addrBits))
+      a.address := this.address + that
+      a
+    }
   }
+
+  implicit def addressToUInt(addr: Address): UInt = addr.address
 }
 
 class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends Module {
@@ -145,11 +150,6 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
 
   case class ScratchpadModuleChannel(requestChannel: ScratchpadMemReqPort, dataChannels: Seq[ScratchpadDataPort])
 
-  //  private def getMemPWidth(name: String): Int = {
-  //    outer.memParams.filter(_.name == name)(0).asInstanceOf[CReadChannelParams].d
-  //    ataBytes * 8
-  //  }
-  //
   def getReaderModule(name: String, idx: Int = 0): ReaderModuleChannel = {
     val a = getReaderModules(name, Some(idx))
     ReaderModuleChannel(a._1(0), a._2(0))
@@ -178,9 +178,16 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
   val sp_ios = Map.from(outer.memParams.filter(_.isInstanceOf[CScratchpadParams]).map {
     case mp: CScratchpadParams =>
       (mp.name,
-        (mp, (IO(new ScratchpadMemReqPort(_addrBits, mp.nDatas.intValue())), (0 until mp.nPorts).map(_ =>
-          IO(Flipped(new ScratchpadDataPort(log2Up(mp.nDatas.intValue()), mp.dataWidthBits.intValue())))
-        ))))
+        (mp, ({
+          val io = IO(Flipped(new ScratchpadMemReqPort(_addrBits, mp.nDatas.intValue())))
+          io.suggestName(s"scratchpadRequest_${mp.name}")
+          io
+        },
+          (0 until mp.nPorts).map { ch: Int =>
+            val io = IO(Flipped(new ScratchpadDataPort(log2Up(mp.nDatas.intValue()), mp.dataWidthBits.intValue())))
+            io.suggestName(s"scratchpadData_${mp.name}_channel${ch}")
+            io
+          })))
   })
 
 
@@ -202,36 +209,6 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
         val q = read_ios(name)
         (List(q._2(id)._1), List(q._2(id)._2))
     }
-    //    val params = outer.memParams.filter(_.name == name)(0).asInstanceOf[CReadChannelParams]
-    //    val mod = idx match {
-    //      case Some(id_unpack) =>
-    //        val clients = getTLClients(name, outer.readers)
-    //        List(Module(new SequentialReader(
-    //          params.dataBytes * 8,
-    //          tl_bundle = clients(id_unpack).out(0)._1,
-    //          tl_edge = clients(id_unpack).out(0)._2)))
-    //      case None =>
-    //        getTLClients(name, outer.readers).map(tab_id =>
-    //          Module(new SequentialReader(
-    //            params.dataBytes * 8,
-    //            tl_bundle = tab_id.out(0)._1,
-    //            tl_edge = tab_id.out(0)._2)))
-    //    }
-    //    //noinspection DuplicatedCode
-    //    mod foreach { m =>
-    //      m.tl_out <> m.tl_bundle
-    //      m.suggestName(name)
-    //    }
-    //    val ret = (mod.map(_.io.req), mod.map(_.io.channel))
-    //    // initially tie off everything to false and DontCare. Saves some pain down the line
-    //    ret._2.foreach { dat =>
-    //      dat.data.ready := false.B
-    //    }
-    //    ret._1.foreach { dat =>
-    //      dat.bits := DontCare
-    //      dat.valid := false.B
-    //    }
-    //    ret
   }
 
   def getWriterModule(name: String,
@@ -241,12 +218,9 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
   }
 
   def getScratchpad(name: String): ScratchpadModuleChannel = {
-    //      val lm = outer.scratch_mod.filter(_._1 == name)(0)._2
-    //      lm.suggestName(name)
-    //      val mod = lm.module
-    //
-    //      ScratchpadModuleChannel(mod.req, mod.IOs)
     val a = sp_ios(name)._2
+    a._1.writeback.valid := false.B
+    a._1.writeback.bits := DontCare
     ScratchpadModuleChannel(a._1, a._2)
   }
 
@@ -276,6 +250,12 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
     new Address(_addrBits)
   }
 
+  def Address(in: UInt): Address = {
+    val a = Wire(Address())
+    a.address := in
+    a
+  }
+
   implicit def addrToUInt(address: Address): UInt = address.address
 
   def ComposerIO[T1 <: AccelCommand, T2 <: AccelResponse](bundleIn: T1, bundleOut: T2): CustomIO[T1, T2] = {
@@ -295,14 +275,14 @@ class AcceleratorCore(val outer: ComposerSystem)(implicit p: Parameters) extends
 
     when(io_declaration.req.bits.inst.funct === nCommands.U) {
       composerCustomCommandManager.cio.cmd.req <> io_declaration.req
-      when (io_declaration.req.fire) {
+      when(io_declaration.req.fire) {
         thisCommandInFlight := io_declaration.req.bits.inst.xd
       }
     }
 
     when(thisCommandInFlight) {
       io_declaration.resp <> composerCustomCommandManager.cio.cmd.resp
-      when (io_declaration.resp.fire) {
+      when(io_declaration.resp.fire) {
         thisCommandInFlight := false.B
       }
     }.otherwise {

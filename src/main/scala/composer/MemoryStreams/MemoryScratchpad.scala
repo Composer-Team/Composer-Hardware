@@ -8,6 +8,7 @@ import composer.MemoryStreams.Loaders.CScratchpadPackedSubwordLoader
 import composer.common.{CLog2Up, ShiftReg, splitIntoChunks}
 import composer.Generation.Tune._
 import composer.Platforms._
+import composer.Systems.AcceleratorCore.Address
 import freechips.rocketchip.diplomacy.{TransferSizes, _}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
@@ -46,9 +47,9 @@ class ScratchpadDataPort(val scReqBits: Int, val dataWidthBits: Int) extends CSc
   }
 }
 
-class ScratchpadMemReqPort(addrBits: Int, nDatas: Int) extends Bundle {
+class ScratchpadMemReqPort(addrBits: Int, nDatas: Int)(implicit p: Parameters) extends Bundle {
   val init, writeback = Flipped(Decoupled(new Bundle() {
-    val memAddr = UInt(addrBits.W)
+    val memAddr = new Address(log2Up(platform.extMem.master.size))
     val scAddr = UInt(log2Up(nDatas).W)
     val len = UInt(addrBits.W)
   }))

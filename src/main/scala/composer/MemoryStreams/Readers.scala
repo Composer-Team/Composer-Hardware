@@ -160,7 +160,7 @@ class SequentialReader(val dWidth: Int,
 
   tl_out.d.ready := atLeastOneSourceActive && write_ready
 
-  val slots_per_alloc = if (beatBytes >= maxBytes) {
+  val (slots_per_alloc, small_tx_mult) = if (beatBytes >= maxBytes) {
     when(tl_out.d.fire) {
       val dSource = tl_out.d.bits.source
       val prefetchIdx = sourceToIdx(dSource)
@@ -176,15 +176,15 @@ class SequentialReader(val dWidth: Int,
       }
       beatsRemaining(dSource) := beatsRemaining(dSource) - 1.U
     }
-    largeTxNBeats
+    (largeTxNBeats, 1)
   } else {
     val beatsPerLine = maxBytes / beatBytes
     val beatBufferPerSource = Reg(Vec(nSources, Vec(beatsPerLine - 1, UInt(beatBits.W))))
     val perSourceBeatProgress = Reg(Vec(nSources, UInt(log2Up(beatsPerLine).W)))
     when(tl_reg.io.enq.fire) {
-      assert(tl_reg.io.enq.bits.size >= log2Up(maxBytes).U,
-        "requested length is smaller than a single channel beat. This behavior is disallowed." +
-          "If this is absolutely necessary, contact developer.")
+      assert(tl_reg.io.enq.bits.size >= log2Up(beatBytes).U,
+        "requested length(lg %d) is smaller than a single channel beat(lg %d). This behavior is disallowed." +
+          "If this is absolutely necessary, contact developer.", tl_reg.io.enq.bits.size, log2Up(beatBytes).U)
       perSourceBeatProgress(chosenSource) := 0.U
     }
     when(tl_out.d.fire) {
@@ -195,21 +195,20 @@ class SequentialReader(val dWidth: Int,
       when(beatsRemaining(src) === 0.U) {
         sourceIdleBits(src) := true.B
       }
-
       perSourceBeatProgress(src) := perSourceBeatProgress(src) + 1.U
       when(perSourceBeatProgress(src) === (beatsPerLine - 1).U) {
         perSourceBeatProgress(src) := 0.U
-
-        prefetch_buffers_valid(sourceToIdx(src)) := true.B
         sourceToIdx(src) := sourceToIdx(src) + 1.U
-
+        prefetch_buffers_valid(sourceToIdx(src)) := true.B
         prefetch_buffers.addr(write_port_idx) := sourceToIdx(src)
+        prefetch_buffers.data_in(write_port_idx) := Cat(tl_out.d.bits.data, Cat(beatBufferPerSource(src).reverse))
         prefetch_buffers.data_in(write_port_idx) := Cat(tl_out.d.bits.data, Cat(beatBufferPerSource(src).reverse))
         prefetch_buffers.chip_select(write_port_idx) := true.B
 
       }
     }
-    largeTxNBeats / beatsPerLine
+    require(isPow2(beatsPerLine))
+    (largeTxNBeats / beatsPerLine, beatsPerLine)
   }
 
   val allocatingBig = WireInit(false.B)
@@ -219,7 +218,7 @@ class SequentialReader(val dWidth: Int,
   switch(state) {
     is(s_idle) {
       when(io.req.fire) {
-        addr := io.req.bits.addr
+        addr := io.req.bits.addr.address
         len := io.req.bits.len
         assert(io.req.bits.len(log2Up(beatBytes) - 1, 0) === 0.U,
           f"The provided length is not aligned to the data bus size. Please align to $beatBytes.\n" +
@@ -234,17 +233,17 @@ class SequentialReader(val dWidth: Int,
     }
     is(s_send_mem_request) {
       when(len < largestRead.U) {
-        tl_reg.io.enq.valid := sourceAvailable && rowsAvailableToAlloc >= 1.U
+        tl_reg.io.enq.valid := sourceAvailable && rowsAvailableToAlloc >= small_tx_mult.U
         tl_reg.io.enq.bits := tl_edge.Get(
           fromSource = chosenSource,
           toAddress = addr,
-          lgSize = CLog2Up(beatBytes).U
+          lgSize = CLog2Up(beatBytes * small_tx_mult).U
         )._2
         when(tl_reg.io.enq.fire) {
-          addr := addr + beatBytes.U
-          len := len - beatBytes.U
+          addr := addr + (beatBytes * small_tx_mult).U
+          len := len - (beatBytes * small_tx_mult).U
           prefetch_writeIdx := prefetch_writeIdx + 1.U
-          beatsRemaining(chosenSource) := 0.U
+          beatsRemaining(chosenSource) := (small_tx_mult-1).U
           allocatingSmall := true.B
         }
       }.otherwise {

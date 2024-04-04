@@ -3,6 +3,7 @@ package composer.Systems
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
+import composer.Floorplanning.{ConstraintGeneration, LazyModuleWithSLRs}
 import composer._
 import composer.Generation._
 import composer.RoccHelpers.FrontBusHub
@@ -158,16 +159,16 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
       val full_mem_xbar = Seq.tabulate(nMemChannels)(idx =>
         LazyModuleWithFloorplan(new AXI4Xbar(maxFlightPerId = p(MaxInFlightMemTxsPerSource)),
           slr_id = DieName.getMemoryBusSLR,
-          requestedName = Some(s"dma_xbar_front_channel$idx")))
+          name = s"dma_xbar_front_channel$idx"))
       val dma_front = LazyModuleWithFloorplan(new AXI4Buffer(),
         slr_id = DieName.getFrontBusSLR,
-        requestedName = Some(s"dma_buff_front"))
+        name = s"dma_buff_front")
       val dma_side = LazyModuleWithFloorplan(new AXI4Buffer(),
         slr_id = DieName.getMemoryBusSLR,
-        requestedName = Some("dma_buff_mbus"))
+        name = "dma_buff_mbus")
       val dma_fanout = LazyModuleWithFloorplan(new AXI4Xbar(),
         slr_id = DieName.getFrontBusSLR,
-        requestedName = Some(s"dma_xbar_front"))
+        name = s"dma_xbar_front")
       require(nMemChannels == 1, "slr needs to be improved to support multiple slrs")
       dma_front.node := dma_port.get
       dma_side.node := dma_front.node

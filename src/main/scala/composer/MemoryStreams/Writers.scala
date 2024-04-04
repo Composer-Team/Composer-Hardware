@@ -137,6 +137,7 @@ class SequentialWriter(nBytes: Int,
       io.req.ready := true.B
       when(io.req.fire) {
         val l = (io.req.bits.len >> log2Up(beatBytes)).asUInt
+        assert(l > 0.U, f"Cannot write 0 bytes. Truncation of length field? ${io.req.bits.len}")
         req_len := l
         val choppedAddr = (io.req.bits.addr >> log2Up(beatBytes)).asUInt
         req_addr := choppedAddr
@@ -212,9 +213,9 @@ class SequentialWriter(nBytes: Int,
       }
     }
   } else {
-    val dsplit = splitIntoChunks(io.channel.data.bits, beatBytes*8).reverse
+    val dsplit = splitIntoChunks(io.channel.data.bits, beatBytes*8)
     val inProgressPushing = RegInit(false.B)
-    val channelReg = Reg(Vec(nBytes / beatBytes, UInt(beatBytes.W))) // bottom chunk will get optimized away
+    val channelReg = Reg(Vec(nBytes / beatBytes, UInt((beatBytes*8).W))) // bottom chunk will get optimized away
     val dsplitCount = Reg(UInt(log2Up(nBytes / beatBytes + 1).W))
     when (!inProgressPushing) {
       io.channel.data.ready := req_len > 0.U && write_buffer_io.ready

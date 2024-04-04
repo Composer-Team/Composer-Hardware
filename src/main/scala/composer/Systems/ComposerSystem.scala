@@ -2,6 +2,7 @@ package composer.Systems
 
 import chipsalliance.rocketchip.config._
 import chisel3.util._
+import composer.Floorplanning.{ConstraintGeneration, LazyModuleWithSLRs}
 import composer._
 import composer.Generation._
 import composer.MemoryStreams._
@@ -16,7 +17,10 @@ import freechips.rocketchip.tilelink._
 object ComposerSystem {
 }
 
-class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: Int, val canBeIntaCoreCommandEndpoint: Boolean, val acc: ComposerAcc)(implicit p: Parameters) extends LazyModuleWithSLRs {
+class ComposerSystem(val systemParams: AcceleratorSystemConfig,
+                     val system_id: Int,
+                     val canBeIntaCoreCommandEndpoint: Boolean,
+                     val acc: ComposerAcc)(implicit p: Parameters) extends LazyModuleWithSLRs {
   val nCores = systemParams.nCores
   val memParams = systemParams.memoryChannelParams
   val blockBytes = p(CacheBlockBytes)
@@ -41,20 +45,22 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
       val para = mcp.asInstanceOf[CWriteChannelParams]
       (para,
         List.tabulate(para.nChannels) { i =>
-        TLClientNode(List(TLMasterPortParameters.v1(
-          List(TLMasterParameters.v1(
-            name = s"WriteChannel_sys${system_id}_core${core_id}_${para.name}$i",
-            sourceId = IdRange(0, para.maxInFlightTxs),
-            supportsPutFull = TransferSizes(1, p(CacheBlockBytes)),
-            supportsPutPartial = TransferSizes(1, p(CacheBlockBytes)),
-            supportsProbe = TransferSizes(1, p(CacheBlockBytes)))))))
-      })
+          TLClientNode(List(TLMasterPortParameters.v1(
+            List(TLMasterParameters.v1(
+              name = s"WriteChannel_sys${system_id}_core${core_id}_${para.name}$i",
+              sourceId = IdRange(0, para.maxInFlightTxs),
+              supportsPutFull = TransferSizes(1, p(CacheBlockBytes)),
+              supportsPutPartial = TransferSizes(1, p(CacheBlockBytes)),
+              supportsProbe = TransferSizes(1, p(CacheBlockBytes)))))))
+        })
     }
   }
-  val scratch_mod = Seq.fill(nCores)(memParams.filter(_.isInstanceOf[CScratchpadParams]).map(_.asInstanceOf[CScratchpadParams]).map {
+  val scratch_mod = Seq.tabulate(nCores)(coreIdx => memParams.filter(_.isInstanceOf[CScratchpadParams]).map(_.asInstanceOf[CScratchpadParams]).map {
     param =>
-      lazy val mod = LazyModule(param.make)
-      mod.suggestName(param.name)
+      lazy val mod = LazyModuleWithFloorplan(
+        param.make,
+        slr_id = core2slr(coreIdx),
+        name = s"${systemParams.name}_core${coreIdx}_${param.name}")
       (param, mod)
   })
   val readerNodes = (0 until nCores).map(coreIdx =>
@@ -122,10 +128,10 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
     def recursivelyReduceXBar(grp: Seq[TLNode], inc: Int = 0, slr_id: Int): Seq[TLIdentityNode] = {
       def help(a: Seq[Seq[TLNode]]): Seq[TLNode] = {
         a.map { r =>
-          val memory_xbar = LazyModuleWithFloorplan(new TLXbar(), slr_id = slr_id, requestedName = Some(s"memory_xbar_${DieName.getSLRFromIdx(slr_id)}"))
+          val memory_xbar = LazyModuleWithFloorplan(new TLXbar(), slr_id = slr_id, name = s"memory_xbar_${DieName.getSLRFromIdx(slr_id)}")
 
           r.foreach(memory_xbar.node := _)
-          val memory_xbar_buffer = LazyModuleWithFloorplan(new TLBuffer(), slr_id = slr_id, requestedName = Some(s"memory_xbar_buffer_slr${DieName.getSLRFromIdx(slr_id)}"))
+          val memory_xbar_buffer = LazyModuleWithFloorplan(new TLBuffer(), slr_id = slr_id, name = s"memory_xbar_buffer_slr${DieName.getSLRFromIdx(slr_id)}")
 
           memory_xbar_buffer.node := memory_xbar.node
           memory_xbar_buffer.node
@@ -153,6 +159,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
     val reads_per_slr = getNodesBySLR(readerNodes)
     val writes_per_slr = getNodesBySLR(writerNodes)
 
+    var node_ctr = 0
     val endpoints = Seq(reads_per_slr, writes_per_slr) map { nodes =>
       if (distributeCores) {
         nodes.flatMap { case (slr, clients) =>
@@ -162,10 +169,11 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig, val system_id: I
             reduction
           } else {
             // route across the SLR and give to a buffer
-            val canal = LazyModuleWithFloorplan(new TLXbar(), slr_id = slr, requestedName = Some(s"final_slrReduction_xbar_${DieName.getSLRFromIdx(slr)}"))
+            val canal = LazyModuleWithFloorplan(new TLXbar(), slr_id = slr, name = s"slrRed_xb_sys${systemParams.name}_${DieName.getSLRFromIdx(slr)}_${node_ctr}")
             reduction foreach { a => canal.node := a }
             val sbuf = LazyModule(new TLBuffer())
-            sbuf.suggestName(s"final_slrReduction_buffer_slr${DieName.getSLRFromIdx(slr)}")
+            sbuf.suggestName(s"slrRed_buf_sys${systemParams.name}_${DieName.getSLRFromIdx(slr)}_${node_ctr}")
+            node_ctr += 1
             sbuf.node := canal.node
 
             val endpoint = TLIdentityNode()

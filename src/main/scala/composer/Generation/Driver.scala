@@ -2,6 +2,7 @@ package composer.Generation
 
 import chipsalliance.rocketchip.config._
 import chisel3.stage._
+import composer.Floorplanning.ConstraintGeneration
 import composer.Generation.Annotators.AnnotateXilinxInterface.XilinxInterface
 import composer.Generation
 import composer.Generation.Annotators.{CrossBoundaryDisable, WalkPath}
@@ -61,6 +62,11 @@ object ComposerBuild {
   def getPartitions: Seq[String] = partitionModules
 
   private[composer] def addSource(): Unit = {}
+
+  var postProcessorBundles: Seq[Any] = Seq.empty
+  def addPostProcessorBundle(bundle: Any): Unit = {
+    postProcessorBundles = postProcessorBundles :+ bundle
+  }
 
   def composerRoot(): String = {
     if (System.getenv("COMPOSER_ROOT") != null)

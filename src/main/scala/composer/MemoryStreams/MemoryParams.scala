@@ -4,6 +4,7 @@ package composer.MemoryStreams
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import composer.Systems.AcceleratorCore.Address
 import composer._
 import freechips.rocketchip.subsystem.ExtMem
 import freechips.rocketchip.util.{DataKey, SimpleBundleField}
@@ -12,7 +13,7 @@ import freechips.rocketchip.util.{DataKey, SimpleBundleField}
  * Bundle used to communicate memory requests between user and memory manager
  */
 class ChannelTransactionBundle(implicit p: Parameters) extends Bundle {
-  val addr = UInt(log2Up(platform.extMem.nMemoryChannels * platform.extMem.master.size).W)
+  val addr = new Address(log2Up(platform.extMem.master.size))
   val len = UInt(log2Up(platform.physicalMemoryBytes).W)
 }
 

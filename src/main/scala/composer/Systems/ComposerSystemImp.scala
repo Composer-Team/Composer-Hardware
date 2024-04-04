@@ -5,9 +5,10 @@ import chisel3._
 import chisel3.util._
 import composer._
 import composer.ComposerParams._
-import composer.Generation.{ComposerBuild, LazyModuleImpWithSLRs}
+import composer.Floorplanning.{LazyFloorplan, LazyModuleImpWithSLRs}
+import composer.Generation.{BuildMode, ComposerBuild}
 import composer.MemoryStreams._
-import composer.Platforms.{DieName, MultiDiePlatform}
+import composer.Platforms.{BuildModeKey, DieName, MultiDiePlatform, PlatformType}
 import composer.RoccHelpers._
 import composer.TLManagement._
 import composer.common._
@@ -65,28 +66,47 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
 
   val addressBits = CLog2Up(platform.extMem.nMemoryChannels * platform.extMem.master.size)
 
-  val cores = Seq.fill(outer.nCores)(Module(outer.systemParams.moduleConstructor match {
-    case mb: ModuleBuilder => mb.constructor(outer, p)
-    case bbc: BlackboxBuilderCustom => new AcceleratorBlackBoxCore(outer, bbc)
-    case bbb: BlackboxBuilderRocc => new AcceleratorBlackBoxCore(outer, bbb)
-  }))
+  val cores = Seq.tabulate(outer.nCores) { core_idx: Int =>
+    val impl = ModuleWithSLR(outer.systemParams.moduleConstructor match {
+      case mb: ModuleBuilder =>
+        if (core_idx == 0) {
+          //          LazyFloorplan.registerSystem(outer.nCores, mb.constructor(outer, p), Seq())
+        }
+        mb.constructor(outer, p)
+      case bbc: BlackboxBuilderCustom => new AcceleratorBlackBoxCore(outer, bbc)
+      case bbb: BlackboxBuilderRocc => new AcceleratorBlackBoxCore(outer, bbb)
+    }, core2slr(core_idx))
+    if (platform.platformType == PlatformType.FPGA && p(BuildModeKey) != BuildMode.Simulation) {
+      impl.reset := ShiftReg(reset, 5)
+    }
+    impl
+  }
+
+
   ComposerBuild.requestModulePartition(outer.systemParams.name)
   val coreGroups = cores.zipWithIndex.map(t => t.copy(_2 = core2slr(t._2))).groupBy(_._2)
-
 
   var gl_incrementer = 0
   val resp = {
     @tailrec
     def collapseResp(degree: Int, to_size: Int, resps: Seq[DecoupledIO[AccelRoccResponse]], slr_id: Int): Seq[DecoupledIO[AccelRoccResponse]] = {
       if (resps.length <= to_size) {
-        resps
+        val respQueues = Seq.tabulate(resps.length) { ridx =>
+          val q = ModuleWithSLR(new Queue(new AccelRoccResponse, 2),
+            slr_id,
+            f"respQ_${outer.system_id}_${slr_id}_$gl_incrementer")
+          gl_incrementer = gl_incrementer + 1
+          q.io.enq <> resps(ridx)
+          q.io.deq
+        }
+        respQueues
       } else {
         val subgroups = resps.grouped(degree).toSeq
         val subGroupsArb = subgroups map { sg =>
           val respArb = ModuleWithSLR(
             new RRArbiter(new AccelRoccResponse(), sg.length),
             slr_id,
-            requestedName = Some(f"respArb_${outer.system_id}_${slr_id}_$gl_incrementer"))
+            f"respArb_${outer.system_id}_${slr_id}_$gl_incrementer")
           val respQ = Module(new Queue(new AccelRoccResponse(), entries = 2))
           gl_incrementer = gl_incrementer + 1
           sg.zipWithIndex.foreach { case (core_resp, idx) =>
@@ -118,9 +138,9 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
       collapseResp(DieName.SLRRespRoutingFanout, 1, coreResps, DieName.getFrontBusSLR)(0)
     } else {
       val respsCollapsed = coreGroups.map { case (slr_id, core_list) =>
-
         (slr_id, collapseResp(DieName.SLRRespRoutingFanout, DieName.RespEndpointsPerSLR, core_list.map {
           case (c: AcceleratorCore, coreIdx: Int) =>
+            println(s"ComposerSystemImp: coreIdx: $coreIdx is in SLR $slr_id")
             c.io_declaration.resp.map { ioresp =>
               val composerRespWire = Wire(new AccelRoccResponse())
               composerRespWire.getDataField := ioresp.getDataField
@@ -233,7 +253,6 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     val response = hasRoccResponseFields[AccelRoccResponse](new AccelRoccResponse, responseManager.io.bits)
 
 
-
     cores.zipWithIndex.foreach { case (core, core_idx) =>
       core.composer_response_ios_(target).valid := responseManager.io.valid && response.core_id === core_idx.U
       core.composer_response_ios_(target).bits := response
@@ -293,7 +312,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
       (slr_id, recursivelyGroupCmds(DieName.SLRCmdRoutingFanout, DieName.CmdEndpointsPerSLR, core_cmd_endpoints.map(pr => (pr(0)._1, pr(0)._2)), Some(slr_id)))
     }
     val origin = DieName.getCmdRespPath() match {
-      case None => recursivelyGroupCmds(DieName.SLRCmdRoutingFanout, 1, slr_endpoints.flatMap(_._2).toSeq, None)(0)._1
+      case None => recursivelyGroupCmds(DieName.SLRCmdRoutingFanout, 1, slr_endpoints.flatMap(_._2), None)(0)._1
       case Some(path) =>
         recursivelyGroupCmds(DieName.SLRRespRoutingFanout, 1,
           path.foldRight(Seq[(DecoupledIO[CommandSrcPair], Seq[Int])]()) { case (slr_id, acc) =>
@@ -307,7 +326,6 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
 
           }, Some(DieName.getFrontBusSLR))(0)._1
     }
-
     cmd <> origin
   } else {
     cores.zipWithIndex.map { case (core, coreIdx) =>
@@ -324,24 +342,26 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     readSet.foreach { case (nodeParams, nodes) =>
       val (cParams, clients) = core.read_ios(nodeParams.name)
       (nodes zip clients).zipWithIndex foreach { case ((node, client), channel_idx) =>
-        val readerModule = Module(new SequentialReader(client._2.data.bits.getWidth,
+        val readerModule = ModuleWithSLR(new SequentialReader(client._2.data.bits.getWidth,
           node.out(0)._1, node.out(0)._2,
-          cParams.bufferSizeBytesMin))
-        readerModule.suggestName(
+          cParams.bufferSizeBytesMin),
+          core2slr(coreIdx),
           s"readerModule_${outer.baseName}_${nodeParams.name}_core${coreIdx}_channel$channel_idx")
         readerModule.io.channel <> client._2
         readerModule.io.req <> client._1
         readerModule.tl_out <> node.out(0)._1
-      }}}
+      }
+    }
+  }
   cores.zipWithIndex.zip(outer.writers) foreach { case ((core, coreIdx), writeSet) =>
     writeSet foreach { case (nodeName, nodes) =>
       val (cParams, clients) = core.write_ios(nodeName.name)
       (nodes zip clients).zipWithIndex foreach { case ((node, client), channel_idx) =>
-      val writerModule = Module(new SequentialWriter(
-        client._2.dWidth/8,
-        node.out(0)._1, node.out(0)._2,
-        cParams.bufferSizeBytesMin))
-        writerModule.suggestName(s"writerModule_${outer.baseName}_${nodeName.name}_core${coreIdx}_channel${channel_idx}")
+        val writerModule = ModuleWithSLR(new SequentialWriter(
+          client._2.dWidth / 8,
+          node.out(0)._1, node.out(0)._2,
+          cParams.bufferSizeBytesMin), core2slr(coreIdx),
+          s"writerModule_${outer.baseName}_${nodeName.name}_core${coreIdx}_channel${channel_idx}")
         writerModule.io.channel <> client._2
         writerModule.io.req <> client._1
         writerModule.tl_out <> node.out(0)._1
@@ -356,6 +376,5 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
       spi._2 zip smod.module.IOs foreach { case (a, b) => a <> b }
     }
   }
-
   tieClocks()
 }
