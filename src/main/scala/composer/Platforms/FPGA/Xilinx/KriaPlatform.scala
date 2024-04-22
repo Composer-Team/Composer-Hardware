@@ -9,7 +9,8 @@ import composer.Protocol.FrontBus.{AXIFrontBusProtocol, FrontBusProtocol}
 import os.Path
 
 
-class KriaPlatform(val memoryNChannels: Int = 1) extends Platform with HasPostProccessorScript {
+class KriaPlatform(val memoryNChannels: Int = 1,
+                   override val clockRateMHz: Int = 100) extends Platform with HasPostProccessorScript {
 
   override val platformType: PlatformType = PlatformType.FPGA
   override val hasDiscreteMemory: Boolean = false
@@ -29,14 +30,17 @@ class KriaPlatform(val memoryNChannels: Int = 1) extends Platform with HasPostPr
 
   override def postProcessorMacro(c: Config, paths: Seq[Path]): Unit = {
     if (c(BuildModeKey) == BuildMode.Synthesis) {
+      println("tcl macros: " + getTclMacros().mkString("\n"))
+      val s = SynthScript(
+        "composer",
+        "output",
+        "xck26-sfvc784-2LV-c",
+        "xilinx.com:kv260_som:part0:1.4",
+        clockRateMHz.toString,
+        precompile_dependencies = getTclMacros()
+      )
       os.write.over(os.Path(ComposerBuild.composerGenDir) / "synth.tcl",
-        SynthScript(
-          "composer",
-          "output",
-          "xck26-sfvc784-2LV-c",
-          "xilinx.com:kv260_som:part0:1.4",
-          clockRateMHz.toString
-        ))
+        s.setup + "\n"  + s.run)
     }
   }
 }

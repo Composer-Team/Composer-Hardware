@@ -2,6 +2,7 @@ package composer.Platforms.FPGA.Xilinx
 
 import chipsalliance.rocketchip.config.{Config, Parameters}
 import composer.Generation._
+import composer.Platforms.FPGA.Xilinx.Templates.SynthScript
 import composer.Platforms._
 import composer.Platforms.FPGA._
 import os.Path
@@ -11,7 +12,28 @@ object AWS_sole {
   }
 }
 
-class AWSF1Platform(memoryNChannels: Int) extends U200Platform(memoryNChannels) with HasPostProccessorScript {
+object AWSF1Platform {
+  def check_if_setup(ip: String): Boolean = {
+    val res = os.proc("ssh", "ec2-user@" + ip, "ls", "~/aws-fpga").call()
+    res.exitCode == 0
+  }
+  def initial_setup(ip: String): Unit = {
+    val croot = sys.env("COMPOSER_ROOT")
+    os.proc("rsync", "-azr", f"$croot/bin", f"ec2-user@$ip:~/bin").call()
+    os.proc("ssh", f"ec2-user@$ip", "~/bin/aws/scripts/initial_setup.sh").call()
+  }
+}
+
+class AWSF1Platform(memoryNChannels: Int,
+                    val clock_recipe: String = "A0") extends U200Platform(memoryNChannels) with HasPostProccessorScript {
+
+  override val clockRateMHz: Int = clock_recipe match {
+    case "A0" => 125
+    case "A1" => 250
+    case "A2" => 15
+    case _ => throw new Exception("Invalid clock recipe. Only supporting A0, A1, A2 for main clock right now.")
+  }
+
   override val platformDies = Seq(
     DieName("pblock_CL_mid", memoryBus = true),
     DieName("pblock_CL_bot", frontBus = true),
@@ -47,15 +69,30 @@ class AWSF1Platform(memoryNChannels: Int) extends U200Platform(memoryNChannels) 
          f"set hdl_sources [list ${hdl_srcs.mkString(" \\\n")} ]")
       // write ip tcl
       val ip_tcl = os.Path(ComposerBuild.composerGenDir) / "aws" / "ip.tcl"
-      os.write.over(ip_tcl, ComposerBuild.postProcessorBundles.map {
-        case tclMacro(cmd, _) => cmd
-        case _ => ""
-      }.mkString("\n"))
+      os.write.over(ip_tcl,
+        """
+          |set ipDir ips
+          |exec rm -rf $ipDir/*
+          |exec mkdir -p $ipDir
+          |""".stripMargin + SynthScript(
+        "",
+        "",
+        "",
+        "",
+        clockRateMHz.toString,
+        precompile_dependencies = getTclMacros()
+      ).ip_script + "\nupdate_compile_order -fileset sources_1\n")
 
-      val xci_list = ComposerBuild.postProcessorBundles.filter(_.isInstanceOf[tclMacro]).collect {
-        case tclMacro(_, xciPath) => xciPath
+      // get aws address from stdio input
+      println("Compilation is done.")
+      println("Enter the AWS F1 instance IP address (blank if ignore transfer):")
+      val in = scala.io.StdIn.readLine().trim
+      if (in.nonEmpty) {
+        os.proc("rsync", "-avz", f"${ComposerBuild.composerGenDir}/aws/", f"ec2-user@$in:~/build-dir/generated-src/").call()
+        if (!AWSF1Platform.check_if_setup(in)) {
+          AWSF1Platform.initial_setup(in)
+        }
       }
-      os.write.append(ip_tcl, f"\nset xci_list [list ${xci_list.map{p => f"$$::env(HOME)/build-dir/design/${p.relativeTo(ComposerBuild.targetDir / "aws")}"}.mkString(" \\\n")} ]")
     }
   }
 }

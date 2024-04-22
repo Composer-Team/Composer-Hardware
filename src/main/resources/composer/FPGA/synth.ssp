@@ -16,54 +16,15 @@
 # SSP stuff
 <%@ val output_dir: String %>
 
-set synth_fail [catch {synth_design -flatten_hierarchy none -mode out_of_context -retiming \\
-  -directive PerformanceOptimized } ]
+update_compile_order -fileset sources_1
+update_module_reference design_1_top_0
+set_property STEPS.SYNTH_DESIGN.ARGS.RETIMING true [get_runs synth_1]
 
-write_checkpoint -force ${output_dir}/synth.dcp -quiet
-if {$synth_fail} {
-  puts "Synth Failed"
-  exit 1
-}
+launch_runs synth_1 -jobs 8
+wait_on_run synth_1
 
-set opt_design_fail [catch {opt_design -directive Explore}]
-write_checkpoint -force ${output_dir}/opt.dcp -quiet
-if {$opt_design_fail} {
-  puts "Opt Design Failed"
-  exit 1
-}
+launch_runs impl_1 -jobs 8
+wait_on_run impl_1
 
-set timing_pass [[get_property SLACK [get_timing_paths]]>=0]
-
-# If timing is not met, bail
-if { $timing_pass==0 } {
-    puts "Timing not met"
-    exit 1
-}
-
-# If timing is met, place design. Check that placement succeeds
-set place_fail [catch { place_design -directive Explore  > ${output_dir}/place_log.txt }]
-set place_timing_pass [[get_property SLACK [get_timing_paths]]>=0]
-if {$place_fail} {
-  puts "place fail"
-  exit 1
-}
-
-# If failure, then bail
-if { $place_timing_pass==0 } {
-    puts "Placement failed"
-    exit 1
-}
-# Write out the placed design
-write_checkpoint -force ${output_dir}/place.dcp -quiet
-
-# If success, route design. Check that routing succeeds
-set route_fail [catch {route_design -directive Explore > ${output_dir}/route_log.txt}]
-if {$route_fail} {
-  puts "Failed route"
-  exit 1
-}
-set route_timing_pass [[get_property SLACK [get_timing_paths]]>=0]
-# Write out the routed design
-write_checkpoint -force ${output_dir}/route.dcp
-
-exit 0
+open_run impl_1
+report_timing_summary > timing_summary.txt
