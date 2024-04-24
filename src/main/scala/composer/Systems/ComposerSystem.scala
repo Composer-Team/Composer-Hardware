@@ -162,26 +162,44 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig,
     var node_ctr = 0
     val endpoints = Seq(reads_per_slr, writes_per_slr) map { nodes =>
       if (distributeCores) {
-        nodes.flatMap { case (slr, clients) =>
-          val reduction = recursivelyReduceXBar(clients, slr_id = slr)
+        val mdp = platform.asInstanceOf[Platform with MultiDiePlatform]
+        val memoryRoot = DieName.getMemoryBusSLR
+
+        def reduceFromTo(from: Int, to: Int, nodes: Seq[TLNode]): Seq[TLNode] = {
+          require(Math.abs(from - to) == 1)
+          val reduction = recursivelyReduceXBar(nodes, slr_id = from)
           if (reduction.isEmpty) List()
-          else if (slr == DieName.getMemoryBusSLR) {
-            reduction
-          } else {
-            // route across the SLR and give to a buffer
-            val canal = LazyModuleWithFloorplan(new TLXbar(), slr_id = slr, name = s"slrRed_xb_sys${systemParams.name}_${DieName.getSLRFromIdx(slr)}_${node_ctr}")
+          else if (from == to) reduction
+          else {
+            val canal = LazyModuleWithFloorplan(new TLXbar(), slr_id = from, name = s"slrRed_xb_sys${systemParams.name}_${DieName.getSLRFromIdx(from)}_${node_ctr}")
             reduction foreach { a => canal.node := a }
-            val sbuf = LazyModule(new TLBuffer())
-            sbuf.suggestName(s"slrRed_buf_sys${systemParams.name}_${DieName.getSLRFromIdx(slr)}_${node_ctr}")
+            //noinspection DuplicatedCode
+            val sbuf = LazyModuleWithFloorplan(new TLBuffer(), slr_id = from, name = s"slrRed_sbuf_sys${systemParams.name}_${DieName.getSLRFromIdx(from)}_${node_ctr}")
+            //noinspection DuplicatedCode
+            val dbuf = LazyModuleWithFloorplan(new TLBuffer(), slr_id = to, name = s"slrRed_dbuf_sys${systemParams.name}_${DieName.getSLRFromIdx(to)}_${node_ctr}")
+            print(f"Routing between SLRs: ${DieName.getSLRFromIdx(from)} -> ${DieName.getSLRFromIdx(to)} ($from -> $to)\n")
             node_ctr += 1
             sbuf.node := canal.node
-
-            val endpoint = TLIdentityNode()
-            endpoint := sbuf.node
-            List(endpoint)
+            dbuf.node := sbuf.node
+            Seq(dbuf.node)
           }
-        }.toSeq
+        }
+
+        def treeOutMemoryBus(slr: Int): Seq[TLNode] = {
+          if (slr < 0 || slr >= mdp.platformDies.length) Seq()
+          else {
+            val neighbors = (slr match {
+              case x if x == memoryRoot => Seq(slr - 1, slr + 1)
+              case x if x > memoryRoot => Seq(slr + 1)
+              case x if x < memoryRoot => Seq(slr - 1)
+            }) map { x => reduceFromTo(x, slr, treeOutMemoryBus(x)) }
+            recursivelyReduceXBar(neighbors.flatten ++ nodes(slr), slr_id = slr)
+          }
+        }
+        treeOutMemoryBus(memoryRoot)
       } else nodes.flatMap(_._2).toSeq
+
+
     }
 
     endpoints map { endpoint =>

@@ -4,7 +4,8 @@ import chipsalliance.rocketchip.config._
 
 case class DieName(name: String,
                    frontBus: Boolean = false,
-                   memoryBus: Boolean = false)
+                   memoryBus: Boolean = false,
+                   resetRoot: Boolean = false)
 // implementation specifics
 
 object DieName {
@@ -36,7 +37,7 @@ object DieName {
 
   final def getCmdRespPath()(implicit p: Parameters): Option[Seq[Int]] = {
     if (!p(PlatformKey).isInstanceOf[MultiDiePlatform]) return None
-    val path_conv = mdp.platformPreferedDieCmdRespRoutingPath.map(mdp.platformDies.map(_.name).indexOf(_))
+    val path_conv = mdp.dieConnectivity.map(mdp.platformDies.map(_.name).indexOf(_))
     require(path_conv.forall(_ >= 0))
     Some(path_conv)
   }

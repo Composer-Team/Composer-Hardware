@@ -1,12 +1,13 @@
 package composer.Floorplanning
 
 import chipsalliance.rocketchip.config.Parameters
-import chisel3.Module
+import chisel3.experimental.BaseModule
+import chisel3.{Module, RawModule}
 import composer.Floorplanning.LazyModuleWithSLRs.globalNameList
 import freechips.rocketchip.diplomacy.{LazyModuleImp, ValName}
 
 class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters) extends LazyModuleImp(wrapper) {
-  private var clockMap: List[(Module, Int)] = List.empty
+  private var clockMap: List[(BaseModule, Int)] = List.empty
   private var gl_id = 0
 
   /**
@@ -14,7 +15,7 @@ class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters)
    * some additonal bookkeeping whenever tieClocks(). If slrId is not manually defined, it assumes the Default SLR
    * specified by the Platform Configuration.
    */
-  def ModuleWithSLR[T <: Module](m: => T, real_slrid: Int)(implicit valName: ValName): T = {
+  def ModuleWithSLR[T <: BaseModule](m: => T, real_slrid: Int)(implicit valName: ValName): T = {
     val mod = Module(m)
     if (!ConstraintGeneration.canDistributeOverSLRs()) return mod
     val name = wrapper.baseName + "_" + valName.name + "_" + gl_id
@@ -29,7 +30,7 @@ class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters)
     mod
   }
 
-  def ModuleWithSLR[T <: Module](m: => T, real_slrid: Int, name: String)(implicit valName: ValName): T = {
+  def ModuleWithSLR[T <: BaseModule](m: => T, real_slrid: Int, name: String)(implicit valName: ValName): T = {
     val mod = Module(m)
     if (!ConstraintGeneration.canDistributeOverSLRs()) return mod
     if (globalNameList.contains(name)) {

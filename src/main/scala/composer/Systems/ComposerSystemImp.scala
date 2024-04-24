@@ -5,10 +5,10 @@ import chisel3._
 import chisel3.util._
 import composer._
 import composer.ComposerParams._
-import composer.Floorplanning.{LazyFloorplan, LazyModuleImpWithSLRs}
-import composer.Generation.{BuildMode, ComposerBuild}
+import composer.Floorplanning._
+import composer.Generation._
 import composer.MemoryStreams._
-import composer.Platforms.{BuildModeKey, DieName, MultiDiePlatform, PlatformType}
+import composer.Platforms._
 import composer.RoccHelpers._
 import composer.TLManagement._
 import composer.common._
@@ -66,18 +66,44 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
 
   val addressBits = CLog2Up(platform.extMem.nMemoryChannels * platform.extMem.master.size)
 
+  val perDieReset = if (ConstraintGeneration.canDistributeOverSLRs()) {
+    val nDies = platform.asInstanceOf[MultiDiePlatform].platformDies.length
+    val resetRootIdx = platform.asInstanceOf[MultiDiePlatform].platformDies.indexWhere(_.resetRoot)
+    val resets = Seq.fill(nDies) {
+      Wire(Reset())
+    }
+
+    def treeReset(die: Int, r: Reset): Unit = {
+      if (die < 0 || die >= nDies) return
+      val resetBridge = ModuleWithSLR(new ResetBridge(r, 5), die, f"resetBridge_${outer.system_id}_${die}")
+      resetBridge.io.reset := r
+      resetBridge.io.clock := clock
+      die match {
+        case x: Int if x == resetRootIdx =>
+          resets(x) := resetBridge.io.dut_reset
+          treeReset(die+1, RegNext(resetBridge.io.dut_reset))
+          treeReset(die-1, RegNext(resetBridge.io.dut_reset))
+        case x: Int if x < resetRootIdx =>
+          resets(x) := resetBridge.io.dut_reset
+          treeReset(die - 1, RegNext(resetBridge.io.dut_reset))
+        case x: Int if x > resetRootIdx =>
+          resets(x) := resetBridge.io.dut_reset
+          treeReset(die + 1, RegNext(resetBridge.io.dut_reset))
+      }
+    }
+    treeReset(resetRootIdx, reset)
+    resets
+  } else Seq(reset)
   val cores = Seq.tabulate(outer.nCores) { core_idx: Int =>
     val impl = ModuleWithSLR(outer.systemParams.moduleConstructor match {
-      case mb: ModuleBuilder =>
-        if (core_idx == 0) {
-          //          LazyFloorplan.registerSystem(outer.nCores, mb.constructor(outer, p), Seq())
-        }
-        mb.constructor(outer, p)
+      case mb: ModuleBuilder => mb.constructor(outer, p)
       case bbc: BlackboxBuilderCustom => new AcceleratorBlackBoxCore(outer, bbc)
       case bbb: BlackboxBuilderRocc => new AcceleratorBlackBoxCore(outer, bbb)
     }, core2slr(core_idx))
-    if (platform.platformType == PlatformType.FPGA && p(BuildModeKey) != BuildMode.Simulation) {
-      impl.reset := ShiftReg(reset, 5)
+    if (ConstraintGeneration.canDistributeOverSLRs()) {
+      impl.reset := RegNext(perDieReset(core2slr(core_idx)))
+    } else {
+      impl.reset := perDieReset(0)
     }
     impl
   }

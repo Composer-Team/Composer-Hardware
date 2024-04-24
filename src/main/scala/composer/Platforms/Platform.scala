@@ -91,7 +91,7 @@ trait HasXilinxMem {
 
 trait MultiDiePlatform {
   val platformDies: Seq[DieName]
-  val platformPreferedDieCmdRespRoutingPath: Seq[String]
+  val dieConnectivity: Seq[String]
 }
 
 trait PlatformHasSeparateDMA {

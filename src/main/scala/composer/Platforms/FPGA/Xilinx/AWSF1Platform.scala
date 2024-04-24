@@ -35,11 +35,11 @@ class AWSF1Platform(memoryNChannels: Int,
   }
 
   override val platformDies = Seq(
+    DieName("pblock_CL_bot", frontBus = true, resetRoot = true),
     DieName("pblock_CL_mid", memoryBus = true),
-    DieName("pblock_CL_bot", frontBus = true),
     DieName("pblock_CL_top"))
 
-  override val platformPreferedDieCmdRespRoutingPath: Seq[String] = Seq(
+  override val dieConnectivity: Seq[String] = Seq(
     "pblock_CL_bot",
     "pblock_CL_mid",
     "pblock_CL_top")
