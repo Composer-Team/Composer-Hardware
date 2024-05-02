@@ -3,6 +3,7 @@ package composer.Systems
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import composer.Generation.DotGen
 import composer.TLManagement.TLRWFilter
 import composer.common._
 import composer._
@@ -17,6 +18,9 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
   val name2Id = scala.collection.immutable.Map.from(configs.zipWithIndex.map(a => (a._1.name, a._2)))
   val requireInternalCmdRouting = configs.map(_.canIssueCoreCommandsTo).foldLeft(false)(_ || _.nonEmpty)
 
+  val sysCmddN = DotGen.addNode("SysCmd")
+  val sysRespN = DotGen.addNode("SysResp")
+
   val system_tups = name2Id.keys.map { name =>
     val id = name2Id(name)
     val config = configs(id)
@@ -27,7 +31,9 @@ class ComposerAcc(implicit p: Parameters) extends LazyModule {
   }.toSeq
 
 
-  system_tups.foreach(a => a._1.suggestName(a._3.name))
+  system_tups.foreach{ a =>
+      a._1.suggestName(a._3.name)
+  }
 
   // tie together intra-core memory ports in one system to core/channel sps individually in another system
   system_tups.foreach { case (sys, _, _) =>
@@ -88,8 +94,14 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
   val system_id = accCmd.bits.inst.system_id
   accCmd.ready := false.B //base case
 
+  outer.system_tups.foreach { a =>
+    a._1.module.cmd_origin_dN
+  }
   val systemSoftwareResps = outer.system_tups.filter(_._3.canReceiveSoftwareCommands) map { sys_tup =>
-    val sys_queue = Module(new Queue(new AccelRoccCommand, entries = 2))
+    val (sys_queue, sys_queue_dN) = (Module(new Queue(new AccelRoccCommand, entries = 1)),
+      DotGen.addNode(f"${sys_tup._3.name}.cmdQ"))
+    DotGen.addEdge(sys_queue_dN, sys_tup._1.module.cmdArbiter_dN)
+    DotGen.addEdge(outer.sysCmddN, sys_queue_dN)
     val params = sys_tup._3
     val sys_idx = outer.name2Id(params.name)
     sys_queue.suggestName(params.name + "_command_queue")
@@ -105,19 +117,22 @@ class ComposerAccModule(outer: ComposerAcc)(implicit p: Parameters) extends Lazy
     sys_tup._1.module.sw_io.get.cmd <> sys_queue.io.deq
 
     // while we're flushing don't let anything get in
-    sys_tup._1.module.sw_io.get.resp
+    (sys_tup._1.module.sw_io.get.resp, sys_tup._1.module.respQ_dN)
   }
 
   if (systemSoftwareResps.isEmpty) {
     io.resp.valid := false.B
     io.resp.bits := DontCare
   } else {
-    val respArbiter = Module(new RRArbiter[AccelRoccResponse](new AccelRoccResponse, systemSoftwareResps.size))
-    respArbiter.io.in.zip(systemSoftwareResps).foreach { case (arbio, sysio) =>
+    val (respArbiter, respArbiter_dN) = (Module(new RRArbiter[AccelRoccResponse](new AccelRoccResponse, systemSoftwareResps.size)),
+      DotGen.addNode(f"SystemRespArbiter"))
+    respArbiter.io.in.zip(systemSoftwareResps).foreach { case (arbio, (sysio, r_dN)) =>
       // these commands are being routed back to the sw so they need to be full Rocc
       arbio <> sysio
+      DotGen.addEdge(r_dN, respArbiter_dN)
     }
     respArbiter.io.out <> io.resp
+    DotGen.addEdge(respArbiter_dN, outer.sysRespN)
   }
 }
 
@@ -126,7 +141,7 @@ class ComposerAccSystem(hasTLDMA: Boolean)(implicit p: Parameters) extends LazyM
 
   val acc = LazyModule(new ComposerAcc())
 
-  val tldma = if (hasTLDMA) Some(TLIdentityNode()) else None
+  val tldma = if (hasTLDMA) Some((TLIdentityNode(), DotGen.addNode("TLDMA", imaginary = true))) else None
 
   val (reads, writes) = tldma match {
     case Some(tldmanode) =>
@@ -143,19 +158,27 @@ class ComposerAccSystem(hasTLDMA: Boolean)(implicit p: Parameters) extends LazyM
           clients = Seq(TLMasterParameters.v1(
             "Splitter",
             IdRange(0, 1))))))
-      filter.in_node := tldmanode
-      (acc.reads ++ Seq(filter.read_out), acc.writes ++ Seq(filter.write_out))
+      val filterdN = DotGen.addNode("AXISplitFilter")
+      filter.in_node := (tldmanode._1)
+      (acc.reads ++ Seq((filter.read_out, filterdN)), acc.writes ++ Seq((filter.write_out, filterdN)))
     case None =>
       (acc.reads, acc.writes)
   }
 
   val Seq(r_mem, w_mem) = Seq(reads, writes).map { mems =>
     if (mems.nonEmpty) {
-      val mem_endpoints = Seq.fill(nMemChannels)(TLIdentityNode())
+      val mem_endpoints = Seq.fill(nMemChannels)((TLIdentityNode(), DotGen.addNode("MemEP", imaginary = true)))
       val crossbarModule = LazyModule(new TLXbar())
+      val xbardN = DotGen.addNode("Xbar")
       val crossbar = crossbarModule.node
-      mems foreach (crossbar := _)
-      mem_endpoints.foreach(_ := crossbar)
+      mems foreach { m =>
+        crossbar := m._1
+        DotGen.addEdge(m._2, xbardN)
+      }
+      mem_endpoints.foreach { a =>
+        a._1 := crossbar
+        DotGen.addEdge(xbardN, a._2)
+      }
       mem_endpoints
     } else Seq()
   }

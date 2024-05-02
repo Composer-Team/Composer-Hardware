@@ -2,24 +2,14 @@ package composer.Systems
 
 import chipsalliance.rocketchip.config._
 import chisel3._
-import chisel3.experimental.hierarchy.{instantiable, public}
 import chisel3.util._
 import composer._
-import composer.ComposerParams.{CoreIDLengthKey, SystemIDLengthKey}
-import composer.Generation.ComposerBuild
+import composer.Generation._
 import composer.MemoryStreams.{ScratchpadDataPort, ScratchpadMemReqPort, _}
-import composer.RoccHelpers._
-import composer.TLManagement.{ComposerIntraCoreIOModule, TLClientModule, TLClientModuleIO}
+import composer.TLManagement._
 import composer.common._
-import composer.Generation.Tune.Tunable
 import composer.Systems.AcceleratorCore.Address
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.subsystem._
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.BundleField
-
-import java.io.File
-import scala.collection.immutable.Seq
 import scala.language.implicitConversions
 
 class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2, val functionID: Int) extends Bundle {

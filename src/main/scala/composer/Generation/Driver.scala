@@ -166,7 +166,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
     ConstraintGeneration.slrMappings.foreach { slrMapping =>
       crossBoundaryDisableList = crossBoundaryDisableList :+ slrMapping._1
     }
-    if (crossBoundaryDisableList.nonEmpty && !buildMode.isInstanceOf[BuildMode.Training.type]) {
+    if (crossBoundaryDisableList.nonEmpty && buildMode == BuildMode.Synthesis) {
       CrossBoundaryDisable(crossBoundaryDisableList, targetDir)
     }
     if (configWithBuildMode(PlatformKey).platformType == PlatformType.FPGA &&

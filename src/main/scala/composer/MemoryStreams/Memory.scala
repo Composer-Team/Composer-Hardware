@@ -37,7 +37,6 @@ object Memory {
     val nPorts = nReadPorts + nWritePorts + nReadWritePorts
 
     if (nPorts > mostPortsSupported && (nWritePorts + nReadWritePorts > 1 || mostPortsSupported == 1)) {
-//      println("SRMM")
       val regMem = Module(new SyncReadMemMem(nReadPorts, nWritePorts, nReadWritePorts, nRows, dataWidth, latency))
       require(nPorts < 16)
       (0 until nReadPorts) foreach { idx =>

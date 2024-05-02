@@ -3,6 +3,7 @@ package composer.MemoryStreams
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
+import composer.Generation.DotGen
 import composer._
 import composer.MemoryStreams.Loaders.CScratchpadPackedSubwordLoader
 import composer.common.{CLog2Up, ShiftReg, splitIntoChunks}
@@ -71,22 +72,28 @@ class MemoryScratchpad(csp: CScratchpadParams)(implicit p: Parameters) extends L
   val blockBytes = p(CacheBlockBytes)
   lazy val module = new ScratchpadImpl(csp, this)
   require(csp.dataWidthBits.intValue() <= channelWidthBytes * 8 * platform.prefetchSourceMultiplicity)
-  val mem_reader = if (csp.features.supportMemRequest) Some(TLClientNode(Seq(TLMasterPortParameters.v2(
-    masters = Seq(TLMasterParameters.v1(
-      name = "ScratchpadRead",
-      sourceId = IdRange(0, InstanceTunable(2, (1, 4), Some(csp.name + "ScratchpadReaderSources"))),
-      supportsProbe = TransferSizes(channelWidthBytes, channelWidthBytes * platform.prefetchSourceMultiplicity),
-      supportsGet = TransferSizes(channelWidthBytes, channelWidthBytes * platform.prefetchSourceMultiplicity),
-    )),
-    channelBytes = TLChannelBeatBytes(channelWidthBytes))))) else None
-  val mem_writer = if (csp.features.supportWriteback) Some(TLClientNode(Seq(TLMasterPortParameters.v2(
-    masters = Seq(TLMasterParameters.v1(
-      name = "ScratchpadWriteback",
-      sourceId = IdRange(0, InstanceTunable(2, (1, 4), Some(csp.name + "ScratchpadReaderSources"))),
-      supportsProbe = TransferSizes(channelWidthBytes, channelWidthBytes * platform.prefetchSourceMultiplicity),
-      supportsPutFull = TransferSizes(channelWidthBytes, channelWidthBytes * platform.prefetchSourceMultiplicity)
-    )),
-    channelBytes = TLChannelBeatBytes(channelWidthBytes))))) else None
+  val mem_reader = if (csp.features.supportMemRequest) {
+    val dotName = DotGen.addPortNode(f"${csp.name}.Reader")
+    Some((TLClientNode(Seq(TLMasterPortParameters.v2(
+      masters = Seq(TLMasterParameters.v1(
+        name = "ScratchpadRead",
+        sourceId = IdRange(0, InstanceTunable(2, (1, 4), Some(csp.name + "ScratchpadReaderSources"))),
+        supportsProbe = TransferSizes(channelWidthBytes, channelWidthBytes * platform.prefetchSourceMultiplicity),
+        supportsGet = TransferSizes(channelWidthBytes, channelWidthBytes * platform.prefetchSourceMultiplicity),
+      )),
+      channelBytes = TLChannelBeatBytes(channelWidthBytes))))), dotName)
+  }else None
+  val mem_writer = if (csp.features.supportWriteback) {
+    val dotName = DotGen.addPortNode(csp.name + ".Writer")
+    Some((TLClientNode(Seq(TLMasterPortParameters.v2(
+      masters = Seq(TLMasterParameters.v1(
+        name = "ScratchpadWriteback",
+        sourceId = IdRange(0, InstanceTunable(2, (1, 4), Some(csp.name + "ScratchpadReaderSources"))),
+        supportsProbe = TransferSizes(channelWidthBytes, channelWidthBytes * platform.prefetchSourceMultiplicity),
+        supportsPutFull = TransferSizes(channelWidthBytes, channelWidthBytes * platform.prefetchSourceMultiplicity)
+      )),
+      channelBytes = TLChannelBeatBytes(channelWidthBytes))))), dotName)
+  } else None
 
   csp.dataWidthBits match {
     case a: Tunable if !a.isIdentity =>
@@ -197,9 +204,9 @@ class ScratchpadImpl(csp: CScratchpadParams,
     val tx_ready = {
         val reader = Module(new SequentialReader(
           swWordSize * datasPerCacheLine,
-          tl_edge = outer.mem_reader.get.out(0)._2,
-          tl_bundle = outer.mem_reader.get.out(0)._1))
-        reader.tl_out <> outer.mem_reader.get.out(0)._1
+          tl_edge = outer.mem_reader.get._1.out(0)._2,
+          tl_bundle = outer.mem_reader.get._1.out(0)._1))
+        reader.tl_out <> outer.mem_reader.get._1.out(0)._1
         reader.io.req.valid := req.init.valid
         reader.io.req.bits.addr := req.init.bits.memAddr
         reader.io.req.bits.len := req.init.bits.len
@@ -222,8 +229,8 @@ class ScratchpadImpl(csp: CScratchpadParams,
     if (supportWriteback) {
       require(specialization.isInstanceOf[FlatPackScratchpadParams] && dataWidthBits % 8 == 0)
       val writer = Module(new SequentialWriter(nBytes = dataWidthBits / 8,
-        tl_outer = outer.mem_writer.get.out(0)._1,
-        edge = outer.mem_writer.get.out(0)._2))
+        tl_outer = outer.mem_writer.get._1.out(0)._1,
+        edge = outer.mem_writer.get._1.out(0)._2))
       writer.tl_out.a.ready := false.B
       writer.tl_out.d.valid := false.B
       writer.tl_out.d.bits := DontCare
@@ -232,7 +239,7 @@ class ScratchpadImpl(csp: CScratchpadParams,
 
       when(wb_state =/= wb_idle) {
         req.init.ready := false.B
-        writer.tl_out <> outer.mem_writer.get.out(0)._1
+        writer.tl_out <> outer.mem_writer.get._1.out(0)._1
       }
       writer.io.req.valid := req.writeback.valid
       writer.io.req.bits.len := req.writeback.bits.len

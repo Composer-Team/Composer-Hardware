@@ -70,7 +70,6 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
   private val device = new MemoryDevice
 
   val cmd_resp_axilhub = LazyModule(new FrontBusHub())
-
   // AXI-L Port - commands come through here
   val (comm_node, frontSource, frontDMA) = platform.frontBusProtocol.deriveTLSources(p)
   cmd_resp_axilhub.tl_head := frontSource
@@ -79,11 +78,16 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
 
   // Generate accelerator SoC
   val accelerator_system = LazyModule(new ComposerAccSystem(frontDMA.isDefined)(dummyTL))
-  if (frontDMA.isDefined) accelerator_system.tldma.get := frontDMA.get
+
+  if (frontDMA.isDefined) {
+    accelerator_system.tldma.get._1 := frontDMA.get
+    val fdma_dN = DotGen.addPortNode("FrontDMA")
+    DotGen.addEdge(fdma_dN, accelerator_system.tldma.get._2)
+  }
 
   val has_memory_endpoints = accelerator_system.r_mem.nonEmpty || accelerator_system.w_mem.nonEmpty || platform.frontBusCanDriveMemory
   val AXI_MEM = if (has_memory_endpoints) Some(Seq.tabulate(nMemChannels) { channel_idx =>
-    AXI4SlaveNode(Seq(AXI4SlavePortParameters(
+    (AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
         address = Seq(getAddressSet(channel_idx)),
         resources = device.reg,
@@ -97,7 +101,10 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
         interleavedId = Some(1)
       )),
       beatBytes = externalMemParams.master.beatBytes
-    )))
+    ))), DotGen.addPortNode("AXIMem", platform match {
+      case pmd: Platform with MultiDiePlatform => pmd.platformDies.indexWhere(_.memoryBus)
+      case _ => -1
+    }))
   }) else None
 
   val (dma_port, dmaSourceBits) = platform match {
@@ -110,16 +117,22 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
           id = IdRange(0, 1 << pWithDMA.DMAIDBits),
         ))
       )))
-      (Some(dma_node), pWithDMA.DMAIDBits)
+      (Some(dma_node, DotGen.addPortNode("DMASep",
+        platform match {
+          case pmd: Platform with MultiDiePlatform => pmd.platformDies.indexWhere(_.frontBus)
+          case _ => -1
+        })), pWithDMA.DMAIDBits)
     case _ => (None, 0)
   }
 
   val availableComposerSources = 1 << (platform.extMem.master.idBits - dmaSourceBits)
 
-  def tieFBandShrink(tl: TLNode, name: Option[String]): TLNode = {
+  def tieFBandShrink(tl: (TLNode, String), name: Option[String]): (TLNode, String) = {
     val shrinker = TLSourceShrinkerDynamicBlocking(availableComposerSources, name)
-    shrinker := tl
-    shrinker
+    val shrinkdN = DotGen.addNode(s"${tl._2}_shrink")
+    shrinker := tl._1
+    DotGen.addEdge(tl._2, shrinkdN)
+    (shrinker, shrinkdN)
   }
 
   // Connect accelerators to memory
@@ -128,63 +141,108 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
       val tl2axi = LazyModule(new TLToAXI4R(
         addressSet = ComposerTop.getAddressSet(0),
         idMax = availableComposerSources))
-      tl2axi.tlReader := tieFBandShrink(src, Some("read_shrink"))
-      tl2axi.axi_client
+      val dN = DotGen.addNode("TLToAXI4R")
+      val (shrunk, shrunkdN) = tieFBandShrink(src, Some("read_shrink"))
+      tl2axi.tlReader := shrunk
+      DotGen.addEdge(shrunkdN, dN)
+      DotGen.addEdge(src._2, shrunkdN)
+      (tl2axi.axi_client, dN)
     }
   } else if (accelerator_system.r_mem.isEmpty) {
     accelerator_system.w_mem.map { src =>
       val tl2axi = LazyModule(new TLToAXI4W(
         addressSet = ComposerTop.getAddressSet(0),
         idMax = availableComposerSources))
-      tl2axi.tlWriter := tieFBandShrink(src, Some("write_shrink"))
-      tl2axi.axi_client
+      val dN = DotGen.addNode("TLToAXI4W")
+      val (shrunk, shrunkdN) = tieFBandShrink(src, Some("write_shrink"))
+      tl2axi.tlWriter := shrunk
+      DotGen.addEdge(shrunkdN, dN)
+      DotGen.addEdge(src._2, shrunkdN)
+      (tl2axi.axi_client, dN)
     }
   } else {
     accelerator_system.r_mem.zip(accelerator_system.w_mem).zipWithIndex map { case ((r, w), idx) =>
-      val Seq(rss, wss) = Seq(r, w).zip(Seq("readIDShrinker", "writeIDShrinker")).map {
-        case (m, nm) => TLSourceShrinkerDynamicBlocking(availableComposerSources, Some(nm)) := m
+      val Seq(rss, wss) = Seq(r, w).zip(Seq("readIDShrinker", "writeIDShrinker")).map { case (m, nm) =>
+        val q = TLSourceShrinkerDynamicBlocking(availableComposerSources, Some(nm))
+        q := m._1
+        val dN = DotGen.addNode(nm)
+        DotGen.addEdge(m._2, dN)
+        (q, dN)
       }
       val tl2axi = LazyModule(new TLToAXI4SRW(
         addressSet = ComposerTop.getAddressSet(idx),
         idMax = availableComposerSources))
-      tl2axi.tlReader := tieFBandShrink(rss, Some("read_shrink"))
-      tl2axi.tlWriter := tieFBandShrink(wss, Some("write_shrink"))
+      val dN = DotGen.addNode("TLToAXI4SRW")
+
+      val rsh = tieFBandShrink(rss, Some("read_shrink"))
+      val wsh = tieFBandShrink(wss, Some("write_shrink"))
+      tl2axi.tlReader := rsh._1
+      tl2axi.tlWriter := wsh._1
+      DotGen.addEdge(rsh._2, dN)
+      DotGen.addEdge(wsh._2, dN)
+      DotGen.addEdge(r._2, rsh._2)
+      DotGen.addEdge(w._2, wsh._2)
       // readers and writers are separated into separate systems and re-unified for the AXI bus. In reality though,
       // the read and write busses are logically unrelated so this unification is only symbolic
-      tl2axi.axi_client
+      (tl2axi.axi_client, dN)
     }
   }
   val mem_tops = if (platform.isInstanceOf[PlatformHasSeparateDMA]) {
     if (p(ConstraintHintsKey).contains(ComposerConstraintHint.DistributeCoresAcrossSLRs)) {
       val full_mem_xbar = Seq.tabulate(nMemChannels)(idx =>
-        LazyModuleWithFloorplan(new AXI4Xbar(maxFlightPerId = p(MaxInFlightMemTxsPerSource)),
+        (LazyModuleWithFloorplan(new AXI4Xbar(maxFlightPerId = p(MaxInFlightMemTxsPerSource)),
           slr_id = DieName.getMemoryBusSLR,
-          name = s"dma_xbar_front_channel$idx"))
+          name = s"dma_xbar_front_channel$idx"),
+          DotGen.addNode("DMA_Xbar")))
       val dma_front = LazyModuleWithFloorplan(new AXI4Buffer(),
         slr_id = DieName.getFrontBusSLR,
         name = s"dma_buff_front")
+      val dmafdN = DotGen.addNode("DMA_Buffer")
       val dma_side = LazyModuleWithFloorplan(new AXI4Buffer(),
         slr_id = DieName.getMemoryBusSLR,
         name = "dma_buff_mbus")
+      val dmsdN = DotGen.addNode("DMA_Buffer")
       val dma_fanout = LazyModuleWithFloorplan(new AXI4Xbar(),
         slr_id = DieName.getFrontBusSLR,
         name = s"dma_xbar_front")
+      val dmafandN = DotGen.addNode("DMA_Xbar")
       require(nMemChannels == 1, "slr needs to be improved to support multiple slrs")
-      dma_front.node := dma_port.get
+      dma_front.node := dma_port.get._1
+      DotGen.addEdge(dma_port.get._2, dmafdN)
       dma_side.node := dma_front.node
+      DotGen.addEdge(dmafdN, dmsdN)
       dma_fanout.node := dma_side.node
-      full_mem_xbar zip composer_mems foreach { case (xb, cm) =>
+      DotGen.addEdge(dmsdN, dmafandN)
+      full_mem_xbar zip composer_mems foreach { case ((xb, xbdN), (cm, cmdN)) =>
         xb.node := cm
+        DotGen.addEdge(cmdN, xbdN)
         xb.node := dma_fanout.node
+        DotGen.addEdge(dmafandN, xbdN)
       }
-      full_mem_xbar.map(_.node)
+      full_mem_xbar.map(a => (a._1.node, a._2))
     } else {
-      val dma_mem_xbar = Seq.fill(nMemChannels)(AXI4Xbar(maxFlightPerId = p(MaxInFlightMemTxsPerSource)))
+      val dma_mem_xbar = Seq.fill(nMemChannels)((
+        AXI4Xbar(maxFlightPerId = p(MaxInFlightMemTxsPerSource)),
+        DotGen.addNode("DMA_Xbar")))
       val dma = AXI4Xbar()
-      dma := AXI4Buffer() := dma_port.get
-      dma_mem_xbar zip composer_mems foreach { case (xb, cm) =>
+      def extendDMA(l: Int, node: AXI4Node = dma_port.get._1): AXI4Node = {
+        if (l == 0) node
+        else {
+          val buff = AXI4Buffer()
+          buff := node
+          extendDMA(l - 1, buff)
+        }
+      }
+      val dmaBdN = DotGen.addNode(f"DMA_buff.latency4")
+      val dmaxbdN = DotGen.addNode("DMA_Xbar")
+      dma := extendDMA(4)
+      DotGen.addEdge(dma_port.get._2, dmaBdN)
+      DotGen.addEdge(dmaBdN, dmaxbdN)
+      dma_mem_xbar zip composer_mems foreach { case ((xb, xbdn), (cm, cdn)) =>
         xb := cm
         xb := dma
+        DotGen.addEdge(cdn, xbdn)
+        DotGen.addEdge(dmaxbdN, xbdn)
       }
       dma_mem_xbar
     }
@@ -192,9 +250,11 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
 
   AXI_MEM match {
     case Some(mems) =>
-      mem_tops zip mems foreach { case (mt, endpoint) =>
-        endpoint :=
-          AXI4Buffer() := mt
+      mem_tops zip mems foreach { case ((mt, mtn), (endpoint, epN)) =>
+        endpoint := AXI4Buffer() := mt
+        val buffdN = DotGen.addNode("AXI4Buffer")
+        DotGen.addEdge(mtn, buffdN)
+        DotGen.addEdge(buffdN, epN)
       }
     case None => ;
   }
@@ -208,17 +268,23 @@ class TopImpl(outer: ComposerTop)(implicit p: Parameters) extends LazyModuleImp(
   val ocl_port = outer.comm_node
   acc.module.io.cmd <> axil_hub.module.io.rocc_in
   axil_hub.module.io.rocc_out <> acc.module.io.resp
+  val frontdN = DotGen.addPortNode("FrontBus", platform match {
+    case pmd: Platform with MultiDiePlatform => pmd.platformDies.indexWhere(_.frontBus)
+    case _ => -1
+  })
+  DotGen.addEdge(outer.accelerator_system.acc.sysRespN, frontdN)
+  DotGen.addEdge(frontdN, outer.accelerator_system.acc.sysCmddN)
 
   platform.frontBusProtocol.deriveTopIOs(ocl_port, clock, reset)
 
   if (outer.AXI_MEM.isDefined) {
     val dram_ports = outer.AXI_MEM.get
     val M00_AXI = dram_ports.zipWithIndex.map { case (a, idx) =>
-      val io = IO(AXI4Compat(a.in(0)._1.params))
+      val io = IO(AXI4Compat(a._1.in(0)._1.params))
       io.suggestName(s"M0${idx}_AXI")
       io
     }
-    val ins = dram_ports.map(_.in(0))
+    val ins = dram_ports.map(_._1.in(0))
     //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
     (M00_AXI zip ins) foreach { case (i, (o, _)) =>
       AXI4Compat.connectCompatMaster(i, o)
@@ -227,9 +293,9 @@ class TopImpl(outer: ComposerTop)(implicit p: Parameters) extends LazyModuleImp(
     // make incoming dma port and connect it
     platform match {
       case pWithDMA: PlatformHasSeparateDMA =>
-        val params = outer.AXI_MEM.get(0).in(0)._1.params
+        val params = outer.AXI_MEM.get(0)._1.in(0)._1.params
         val dma = IO(Flipped(AXI4Compat(params.copy(idBits = pWithDMA.DMAIDBits))))
-        AXI4Compat.connectCompatSlave(dma, outer.dma_port.get.out(0)._1)
+        AXI4Compat.connectCompatSlave(dma, outer.dma_port.get._1.out(0)._1)
       case _ => ;
     }
 
@@ -245,8 +311,10 @@ class TopImpl(outer: ComposerTop)(implicit p: Parameters) extends LazyModuleImp(
   CPP.Generation.genCPPHeader(outer.cmd_resp_axilhub.widget.module.crRegistry, outer)(p.alterPartial {
     case ExtMem => if (outer.AXI_MEM.isDefined) platform.extMem else platform.extMem.copy(nMemoryChannels = 0)
   })
-  ConstraintGeneration.writeConstraints()
+  if (p(BuildModeKey) == BuildMode.Synthesis)
+    ConstraintGeneration.writeConstraints()
   if (p(BuildModeKey).isInstanceOf[BuildMode.Tuning]) {
     Tunable.exportNames()
   }
+  DotGen.writeToFile("composer.dot")
 }

@@ -69,7 +69,17 @@ abstract class Platform {
 
   // maximum memory crossbar fanout degree. Larger xbars will be broken up into multiple layers.
   // This can be tuned for platforms where congestion is a primary concern
-  val xbarMaxDegree = 16
+  val xbarMaxDegree = 2
+  // maximum number of logical memory channels will be used to cross across SLRs
+  val maxMemSLRcrossings = 1
+  // maximum number of logical memory endpoints per system (read and write handled separately)
+  val maxMemEndpointsPerSystem = 1
+
+  val maxMemEndpointsPerCore = 1
+
+  val interCoreMemReductionLatency = 1
+  val intraCoreInterSLRMemReductionLatency = 2
+  val crossSLRLatency = 2 // Only used in FPGAs
 
   val coreCommandLatency = 2
 
@@ -90,8 +100,20 @@ trait HasXilinxMem {
 
 
 trait MultiDiePlatform {
+  /**
+   * The dies are the physical units that the platform is divided into. Each die has a name and a set of
+   * properties that describe the physical characteristics of the die. The order of the dies should
+   * correspond to the physical connectivity: platformDies(0) is directly connected to platformDies(1).
+   * We do not currently support more complex connectivities, but this could just as well be added.
+   */
   val platformDies: Seq[DieName]
-  val dieConnectivity: Seq[String]
+  /**
+   * The placement affinity is the relative fraction of cores that should be placed on each die.
+   * This is useful if you know that certain dies have existing IP that take up area on certain
+   * dies, making resource contention more of a problem there. By default, we assign an equal
+   * affinity to each die.
+   */
+  def placementAffinity: Seq[Int] = platformDies.map(_ => 1)
 }
 
 trait PlatformHasSeparateDMA {

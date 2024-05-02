@@ -34,8 +34,13 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
 
   val validSrcs = Seq(sw_io, outer.internalCommandManager).filter(_.isDefined)
   // if sources can come from multiple domains (sw,managerNode.portParams(0).endSinkId + 1 other systems), then we have to remember where cmds came from
-  val cmdArbiter = ModuleWithSLR(new RRArbiter(new CommandSrcPair(outer.acc.sysNCmdSourceLookup(outer.systemParams.name)), validSrcs.length),
-    DieName.getFrontBusSLR)
+  val (cmdArbiter, cmdArbiter_dN) = (ModuleWithSLR(
+    new RRArbiter(new CommandSrcPair(
+      outer.acc.sysNCmdSourceLookup(outer.systemParams.name)),
+      validSrcs.length),
+    DieName.getFrontBusSLR,
+    f"CommandArbiter${outer.systemParams.name}"), DotGen.addNode(f"${outer.systemParams.name}.cmdArb", DieName.getFrontBusSLR))
+
   val internalCmdSource = if (outer.internalCommandManager.isDefined) {
     val managerNode = outer.internalCommandManager.get
     val (b, e) = managerNode.in(0)
@@ -65,7 +70,6 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
   lazy val coreSelect = cmd.bits.cmd.getCoreID
 
   val addressBits = CLog2Up(platform.extMem.nMemoryChannels * platform.extMem.master.size)
-
   val perDieReset = if (ConstraintGeneration.canDistributeOverSLRs()) {
     val nDies = platform.asInstanceOf[MultiDiePlatform].platformDies.length
     val resetRootIdx = platform.asInstanceOf[MultiDiePlatform].platformDies.indexWhere(_.resetRoot)
@@ -75,14 +79,14 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
 
     def treeReset(die: Int, r: Reset): Unit = {
       if (die < 0 || die >= nDies) return
-      val resetBridge = ModuleWithSLR(new ResetBridge(r, 5), die, f"resetBridge_${outer.system_id}_${die}")
+      val resetBridge = ModuleWithSLR(new ResetBridge(r, 5), die, f"__resetBridge_${outer.system_id}_${die}")
       resetBridge.io.reset := r
       resetBridge.io.clock := clock
       die match {
         case x: Int if x == resetRootIdx =>
           resets(x) := resetBridge.io.dut_reset
-          treeReset(die+1, RegNext(resetBridge.io.dut_reset))
-          treeReset(die-1, RegNext(resetBridge.io.dut_reset))
+          treeReset(die + 1, RegNext(resetBridge.io.dut_reset))
+          treeReset(die - 1, RegNext(resetBridge.io.dut_reset))
         case x: Int if x < resetRootIdx =>
           resets(x) := resetBridge.io.dut_reset
           treeReset(die - 1, RegNext(resetBridge.io.dut_reset))
@@ -91,108 +95,118 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
           treeReset(die + 1, RegNext(resetBridge.io.dut_reset))
       }
     }
+
     treeReset(resetRootIdx, reset)
     resets
   } else Seq(reset)
   val cores = Seq.tabulate(outer.nCores) { core_idx: Int =>
+    println(s"Core ${core_idx} on slr ${core2slr(core_idx)}")
     val impl = ModuleWithSLR(outer.systemParams.moduleConstructor match {
       case mb: ModuleBuilder => mb.constructor(outer, p)
       case bbc: BlackboxBuilderCustom => new AcceleratorBlackBoxCore(outer, bbc)
       case bbb: BlackboxBuilderRocc => new AcceleratorBlackBoxCore(outer, bbb)
-    }, core2slr(core_idx))
+    }, core2slr(core_idx), f"System${outer.systemParams.name}_core${core_idx}_impl")
+    val dotName = DotGen.addModuleNode(f"${outer.systemParams.name}.core$core_idx.impl", core2slr(core_idx))
     if (ConstraintGeneration.canDistributeOverSLRs()) {
       impl.reset := RegNext(perDieReset(core2slr(core_idx)))
     } else {
       impl.reset := perDieReset(0)
     }
-    impl
+    (impl, dotName)
   }
 
 
   ComposerBuild.requestModulePartition(outer.systemParams.name)
-  val coreGroups = cores.zipWithIndex.map(t => t.copy(_2 = core2slr(t._2))).groupBy(_._2)
+  val coreGroups = cores.zipWithIndex.map { case (co, idx) => (co, core2slr(idx), idx) }.groupBy(_._2)
 
   var gl_incrementer = 0
-  val resp = {
-    @tailrec
-    def collapseResp(degree: Int, to_size: Int, resps: Seq[DecoupledIO[AccelRoccResponse]], slr_id: Int): Seq[DecoupledIO[AccelRoccResponse]] = {
-      if (resps.length <= to_size) {
-        val respQueues = Seq.tabulate(resps.length) { ridx =>
-          val q = ModuleWithSLR(new Queue(new AccelRoccResponse, 2),
-            slr_id,
-            f"respQ_${outer.system_id}_${slr_id}_$gl_incrementer")
-          gl_incrementer = gl_incrementer + 1
-          q.io.enq <> resps(ridx)
-          q.io.deq
+  val (resp, resp_dN) = {
+    def collapseResp(resps: Seq[(DecoupledIO[AccelRoccResponse], String)], slr_id: Int): (DecoupledIO[AccelRoccResponse], String) = {
+      @tailrec
+      def extend(d: DecoupledIO[AccelRoccResponse], l: Int, dn: String): (DecoupledIO[AccelRoccResponse], String) = {
+        if (l == 0) (d, dn)
+        else {
+          val (q, q_dN) = (
+            ModuleWithSLR(new Queue(new AccelRoccResponse, 1), slr_id, f"__${outer.systemParams.name}_rExtend$gl_incrementer"),
+            DotGen.addNode(f"${outer.systemParams.name}.respQ_extend"))
+          DotGen.addEdge(dn, q_dN)
+          gl_incrementer += 1
+          q.io.enq <> d
+          extend(q.io.deq, l-1, q_dN)
         }
-        respQueues
-      } else {
-        val subgroups = resps.grouped(degree).toSeq
-        val subGroupsArb = subgroups map { sg =>
-          val respArb = ModuleWithSLR(
-            new RRArbiter(new AccelRoccResponse(), sg.length),
-            slr_id,
-            f"respArb_${outer.system_id}_${slr_id}_$gl_incrementer")
-          val respQ = Module(new Queue(new AccelRoccResponse(), entries = 2))
-          gl_incrementer = gl_incrementer + 1
-          sg.zipWithIndex.foreach { case (core_resp, idx) =>
-            respArb.io.in(idx) <> core_resp
-          }
-          respArb.io.out <> respQ.io.enq
-          respQ.io.deq
-        }
-        collapseResp(degree, to_size, subGroupsArb, slr_id)
       }
+
+      val extendeds = resps.map(a => extend(a._1, 3, a._2))
+      val (respArb, respArb_dN) = (ModuleWithSLR(
+        new RRArbiter(new AccelRoccResponse(), extendeds.length),
+        slr_id,
+        f"respArb_${outer.system_id}_${slr_id}_$gl_incrementer"),
+        DotGen.addNode(f"${outer.systemParams.name}.respArbit"))
+      respArb.io.in zip extendeds foreach { case (a, (b, b_dN)) =>
+        a <> b
+        DotGen.addEdge(b_dN, respArb_dN)
+      }
+      extend(respArb.io.out, 3, respArb_dN)
     }
 
     if (coreGroups.keys.size == 1) {
-      val coreResps = cores.zipWithIndex.map { case (c: AcceleratorCore, cidx: Int) =>
+      val coreResps = cores.zipWithIndex.map { case ((c: AcceleratorCore, cn: String), cidx: Int) =>
         val lastRecievedRd = Reg(UInt(5.W))
         when(c.io_declaration.req.fire) {
           lastRecievedRd := c.io_declaration.req.bits.inst.rd
         }
-        val resp_queue = ModuleWithSLR(new Queue[AccelRoccResponse](
-          new AccelRoccResponse(), entries = 2), DieName.getFrontBusSLR)
+        val (resp_queue, resp_queue_dN) = (ModuleWithSLR(new Queue[AccelRoccResponse](
+          new AccelRoccResponse(), entries = 1), DieName.getFrontBusSLR),
+          DotGen.addNode(f"${outer.systemParams.name}.respQHead"))
+        DotGen.addEdge(cn, resp_queue_dN)
         resp_queue.io.enq.bits.system_id := outer.system_id.U
         resp_queue.io.enq.bits.core_id := cidx.U
         resp_queue.io.enq.bits.rd := lastRecievedRd
         resp_queue.io.enq.bits.getDataField := c.io_declaration.resp.bits.getDataField
         resp_queue.io.enq.valid := c.io_declaration.resp.valid
         c.io_declaration.resp.ready := resp_queue.io.enq.ready
-        resp_queue.io.deq
+        (resp_queue.io.deq, resp_queue_dN)
       }
-      collapseResp(DieName.SLRRespRoutingFanout, 1, coreResps, DieName.getFrontBusSLR)(0)
+      collapseResp(coreResps, DieName.getFrontBusSLR)
     } else {
       val respsCollapsed = coreGroups.map { case (slr_id, core_list) =>
-        (slr_id, collapseResp(DieName.SLRRespRoutingFanout, DieName.RespEndpointsPerSLR, core_list.map {
-          case (c: AcceleratorCore, coreIdx: Int) =>
-            println(s"ComposerSystemImp: coreIdx: $coreIdx is in SLR $slr_id")
-            c.io_declaration.resp.map { ioresp =>
+        (slr_id, collapseResp(core_list.map {
+          case ((c: AcceleratorCore, cn: String), slr_id: Int, core_idx: Int) =>
+            val respEPs = c.io_declaration.resp.map { ioresp =>
               val composerRespWire = Wire(new AccelRoccResponse())
               composerRespWire.getDataField := ioresp.getDataField
               composerRespWire.rd := ioresp.rd
               composerRespWire.system_id := outer.system_id.U
-              composerRespWire.core_id := coreIdx.U
+              composerRespWire.core_id := core_idx.U
               composerRespWire
             }
+            (respEPs, cn)
         }, slr_id))
       }
-      DieName.getCmdRespPath() match {
-        case None =>
-          val topLevelResp = collapseResp(DieName.SLRRespRoutingFanout, 1, respsCollapsed.flatMap(_._2).toSeq, DieName.getFrontBusSLR)
-          topLevelResp(0)
-        case Some(path) =>
-          collapseResp(DieName.SLRRespRoutingFanout, 1,
-            path.foldRight(Seq[DecoupledIO[AccelRoccResponse]]()) { case (slr_idx, acc) =>
-              collapseResp(DieName.SLRRespRoutingFanout, DieName.RespEndpointsPerSLR,
-                acc ++ respsCollapsed(slr_idx),
-                slr_idx)
-            }, DieName.getFrontBusSLR)(0)
+      platform match {
+        case pd: Platform with MultiDiePlatform =>
+          val frontDie = pd.platformDies.indexWhere(_.frontBus)
+
+          def respTree(slr_id: Int): Option[(DecoupledIO[AccelRoccResponse], String)] = {
+            if (slr_id < 0 || slr_id >= pd.platformDies.length) None
+            else {
+              val up = if (slr_id >= frontDie) respTree(slr_id + 1) else None
+              val down = if (slr_id <= frontDie) respTree(slr_id - 1) else None
+              val me = Some(respsCollapsed(slr_id))
+              Some(collapseResp(Seq(up, down, me).filter(_.isDefined).map(_.get), slr_id))
+            }
+          }
+
+          respTree(frontDie).get
+        case _ =>
+          respsCollapsed(0)
       }
     }
   }
 
-  val respQ = Queue(resp)
+  val (respQ, respQ_dN) = (Queue(resp),
+    DotGen.addNode(f"${outer.systemParams.name}.respTop"))
+  DotGen.addEdge(resp_dN, respQ_dN)
 
   val internalRespDispatchModule = if (outer.canBeIntaCoreCommandEndpoint) {
     val internalReturnDestinations = Reg(Vec(outer.nCores, new Bundle() {
@@ -279,115 +293,132 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
     val response = hasRoccResponseFields[AccelRoccResponse](new AccelRoccResponse, responseManager.io.bits)
 
 
-    cores.zipWithIndex.foreach { case (core, core_idx) =>
+    cores.zipWithIndex.foreach { case ((core, _), core_idx) =>
       core.composer_response_ios_(target).valid := responseManager.io.valid && response.core_id === core_idx.U
       core.composer_response_ios_(target).bits := response
     }
 
-    responseManager.io.ready := VecInit(cores.map(_.composer_response_ios_(target).ready))(response.core_id)
+    responseManager.io.ready := VecInit(cores.map(a => a._1.composer_response_ios_(target).ready))(response.core_id)
   }
 
-  if (platform.coreCommandLatency > 0) {
+  var qCntr = 0
 
-    // take in series of endpoints that recieve a commandSrc pair and return a smaller sequence (by degree radix) of commandSrc pairs
-    def connectCoreGroup(degree: Int, endpoints: Seq[(DecoupledIO[CommandSrcPair], Seq[Int])], slr_id: Option[Int]):
-    Seq[(DecoupledIO[CommandSrcPair], Seq[Int])] = {
-      val core_group = endpoints.grouped(degree)
-      core_group.map { cg =>
-        val core_group_cmd_queue = slr_id match {
-          case Some(slrId) => ModuleWithSLR(new Queue(new CommandSrcPair(outer.acc.sysNCmdSourceLookup(outer.systemParams.name)), 2), slrId)
-          case None => Module(new Queue(new CommandSrcPair(outer.acc.sysNCmdSourceLookup(outer.systemParams.name)), 2))
-        }
-        core_group_cmd_queue.io.deq.ready := false.B
-        val local_cselect = core_group_cmd_queue.io.deq.bits.cmd.getCoreID
-        cg.foreach { case (core_q, core_id_set) =>
-          val choose_queue = core_id_set.map(cid => cid.U === local_cselect).reduce(_ || _)
-          core_q.valid := core_group_cmd_queue.io.deq.valid && choose_queue
-          core_q.bits := core_group_cmd_queue.io.deq.bits
-          when(choose_queue) {
-            core_group_cmd_queue.io.deq.ready := core_q.ready
+  // take in series of endpoints that recieve a commandSrc pair and return a smaller sequence (by degree radix) of commandSrc pairs
+  def collapseCoreGroup(srcs: Seq[(DecoupledIO[CommandSrcPair], Seq[Int], String)],
+                        slr_id: Option[Int],
+                        extend_length: Int): (DecoupledIO[CommandSrcPair], Seq[Int], String) = {
+    def constructQ(name: String, slri: Option[Int]): Queue[CommandSrcPair] = {
+      val qConstructor: () => Queue[CommandSrcPair] =
+        () => new Queue(new CommandSrcPair(outer.acc.sysNCmdSourceLookup(outer.systemParams.name)), 1)
+      slri match {
+        case Some(idx) =>
+          val m = ModuleWithSLR(qConstructor(), idx, name)
+          m
+        case None =>
+          val m = Module(qConstructor())
+          m.suggestName(name)
+      }
+    }
+
+    def extend_endpoint(d: DecoupledIO[CommandSrcPair], l: Int, dn: String): (DecoupledIO[CommandSrcPair], String) = {
+      if (l == 0) (d, dn)
+      else {
+        val extender = constructQ(s"${outer.systemParams.name}_extender_$qCntr", None)
+        val dotN = DotGen.addNode(f"${outer.systemParams.name}.cmd_extend", slr_id.getOrElse(-1))
+        DotGen.addEdge(dotN, dn)
+        extender.io.deq <> d
+        extend_endpoint(extender.io.enq, l - 1, dotN)
+      }
+    }
+
+    val fanIn = constructQ(s"${outer.systemParams.name}_fanIn_$qCntr", slr_id)
+    val fanInDN = DotGen.addNode(f"${outer.systemParams.name}.fanIn", slr_id.getOrElse(-1))
+    val (fanInEntrance, fanInEnN) = extend_endpoint(fanIn.io.enq, 3, fanInDN)
+    fanIn.io.deq.ready := false.B
+    qCntr += 1
+
+    val extenders = srcs.map { case (cg, cgids, dN) =>
+      @tailrec
+      val (extendedEndpoint, eeN) = extend_endpoint(cg, extend_length, dN)
+      DotGen.addEdge(fanInDN, eeN)
+      val isSelected = cgids.map { id: Int => fanIn.io.deq.bits.cmd.getCoreID === id.U }.reduce(_ || _)
+      extendedEndpoint.valid := fanIn.io.deq.valid && isSelected
+      extendedEndpoint.bits := fanIn.io.deq.bits
+      when(isSelected) {
+        fanIn.io.deq.ready := extendedEndpoint.ready
+      }
+      qCntr += 1
+      (extendedEndpoint, cgids)
+    }
+    (fanInEntrance, extenders.flatMap(_._2), fanInEnN)
+  }
+
+  def core2CmdEndpoint(core: AcceleratorCore): DecoupledIO[CommandSrcPair] = {
+    val cmdsrcpr = Wire(Output(Decoupled(new CommandSrcPair(outer.acc.sysNCmdSourceLookup(outer.systemParams.name)))))
+    core.io_declaration.req.bits := cmdsrcpr.bits.cmd
+    core.io_source := cmdsrcpr.bits.src
+    core.io_declaration.req.valid := cmdsrcpr.valid
+    cmdsrcpr.ready := core.io_declaration.req.ready
+    // queue in front of every core (no-fanout)
+    cmdsrcpr
+  }
+
+  val (cmd_origin, cmd_origin_dN) = platform match {
+    case pd: Platform with MultiDiePlatform =>
+      val cmdRoot = pd.platformDies.indexWhere(_.frontBus)
+
+      def treeCmd(slr_id: Int): Option[(DecoupledIO[CommandSrcPair], Seq[Int], String)] = {
+        if (slr_id < 0 || slr_id >= pd.platformDies.length) None
+        else {
+          val up = if (slr_id >= cmdRoot) treeCmd(slr_id + 1) else None
+          val down = if (slr_id <= cmdRoot) treeCmd(slr_id - 1) else None
+          val me = coreGroups.getOrElse(slr_id, Seq.empty).map { case ((core, cn), _, core_idx) =>
+            (core2CmdEndpoint(core), Seq(core_idx), cn)
           }
+          val me_col = if (me.isEmpty) None else Some(collapseCoreGroup(me, Some(slr_id), 3))
+          val all_group = Seq(me_col, up, down).filter(_.isDefined).map(_.get)
+          if (all_group.isEmpty) None
+          else Some(collapseCoreGroup(all_group, Some(slr_id), 1))
         }
-        (core_group_cmd_queue.io.enq, cg.flatMap(_._2))
-      }.toSeq
-    }
-
-    @tailrec
-    def recursivelyGroupCmds(degree: Int, to_size: Int, endpoints: Seq[(DecoupledIO[CommandSrcPair], Seq[Int])], slrId: Option[Int]): Seq[(DecoupledIO[CommandSrcPair], Seq[Int])] = {
-      if (endpoints.size <= to_size) {
-        endpoints
-      } else {
-        recursivelyGroupCmds(degree, to_size, connectCoreGroup(degree, endpoints, slrId), slrId)
       }
-    }
 
-    val slr_endpoints = (platform match {
-      case multiDiePlatform: MultiDiePlatform => multiDiePlatform.platformDies.indices
-      case _ => Seq(0)
-    }) map { slr_id =>
-      val slr_cores = cores.zipWithIndex.filter(pr => core2slr(pr._2) == slr_id)
-      val core_cmd_endpoints = slr_cores.map { case (core, core_idx) =>
-        val cmdsrcpr = Wire(Output(Decoupled(new CommandSrcPair(outer.acc.sysNCmdSourceLookup(outer.systemParams.name)))))
-        core.io_declaration.req.bits := cmdsrcpr.bits.cmd
-        core.io_source := cmdsrcpr.bits.src
-        core.io_declaration.req.valid := cmdsrcpr.valid
-        cmdsrcpr.ready := core.io_declaration.req.ready
-        // queue in front of every core (no-fanout)
-        connectCoreGroup(1, Seq((cmdsrcpr, Seq(core_idx))), Some(slr_id))
-      }
-      (slr_id, recursivelyGroupCmds(DieName.SLRCmdRoutingFanout, DieName.CmdEndpointsPerSLR, core_cmd_endpoints.map(pr => (pr(0)._1, pr(0)._2)), Some(slr_id)))
-    }
-    val origin = DieName.getCmdRespPath() match {
-      case None => recursivelyGroupCmds(DieName.SLRCmdRoutingFanout, 1, slr_endpoints.flatMap(_._2), None)(0)._1
-      case Some(path) =>
-        recursivelyGroupCmds(DieName.SLRRespRoutingFanout, 1,
-          path.foldRight(Seq[(DecoupledIO[CommandSrcPair], Seq[Int])]()) { case (slr_id, acc) =>
-            recursivelyGroupCmds(DieName.SLRCmdRoutingFanout, DieName.CmdEndpointsPerSLR,
-              connectCoreGroup(1, acc, None) ++
-                (slr_endpoints.find(_._1 == slr_id) match {
-                  case None => Seq()
-                  case Some(q) => q._2
-                }),
-              Some(slr_id))
-
-          }, Some(DieName.getFrontBusSLR))(0)._1
-    }
-    cmd <> origin
-  } else {
-    cores.zipWithIndex.map { case (core, coreIdx) =>
-      core.io_declaration.req.valid := cmd.valid && coreSelect === coreIdx.U
-      core.io_declaration.req.bits := cmd.bits.cmd
-      core.io_source := cmd.bits.src
-      core.io_declaration.req.ready
-    }
-    cmd.ready := VecInit(cores.map(_.io_declaration.req.ready))(coreSelect)
+      val tc = treeCmd(cmdRoot).get
+      (tc._1, tc._3)
+    case _ =>
+      val tc = collapseCoreGroup(coreGroups(0).map { a => (core2CmdEndpoint(a._1._1), Seq(a._3), a._1._2) }, None, 4)
+      (tc._1, tc._3)
   }
+  cmd <> cmd_origin
+  DotGen.addEdge(cmdArbiter_dN, cmd_origin_dN)
 
   /* handle all memory */
-  cores.zipWithIndex.zip(outer.readers) foreach { case ((core, coreIdx), readSet) =>
+  cores.zipWithIndex.zip(outer.readers) foreach { case (((core, cN), coreIdx), readSet) =>
     readSet.foreach { case (nodeParams, nodes) =>
       val (cParams, clients) = core.read_ios(nodeParams.name)
-      (nodes zip clients).zipWithIndex foreach { case ((node, client), channel_idx) =>
+      (nodes zip clients).zipWithIndex foreach { case (((node, nn), client), channel_idx) =>
         val readerModule = ModuleWithSLR(new SequentialReader(client._2.data.bits.getWidth,
           node.out(0)._1, node.out(0)._2,
           cParams.bufferSizeBytesMin),
           core2slr(coreIdx),
           s"readerModule_${outer.baseName}_${nodeParams.name}_core${coreIdx}_channel$channel_idx")
+        DotGen.addEdge(cN, nn)
+        println(s"Connecting reader $cN to $nn")
         readerModule.io.channel <> client._2
         readerModule.io.req <> client._1
         readerModule.tl_out <> node.out(0)._1
       }
     }
   }
-  cores.zipWithIndex.zip(outer.writers) foreach { case ((core, coreIdx), writeSet) =>
+  cores.zipWithIndex.zip(outer.writers) foreach { case (((core, cN), coreIdx), writeSet) =>
     writeSet foreach { case (nodeName, nodes) =>
       val (cParams, clients) = core.write_ios(nodeName.name)
-      (nodes zip clients).zipWithIndex foreach { case ((node, client), channel_idx) =>
+      (nodes zip clients).zipWithIndex foreach { case (((node, nn), client), channel_idx) =>
         val writerModule = ModuleWithSLR(new SequentialWriter(
           client._2.dWidth / 8,
           node.out(0)._1, node.out(0)._2,
           cParams.bufferSizeBytesMin), core2slr(coreIdx),
           s"writerModule_${outer.baseName}_${nodeName.name}_core${coreIdx}_channel${channel_idx}")
+        DotGen.addEdge(cN, nn)
         writerModule.io.channel <> client._2
         writerModule.io.req <> client._1
         writerModule.tl_out <> node.out(0)._1
@@ -395,11 +426,18 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
 
     }
   }
-  cores.zip(outer.scratch_mod) foreach { case (core, smods) =>
+  cores.zip(outer.scratch_mod) foreach { case ((core, cN), smods) =>
     smods foreach { case (spad_name, smod) =>
       val (sparams, spi) = core.sp_ios(spad_name.name)
       spi._1 <> smod.module.req
       spi._2 zip smod.module.IOs foreach { case (a, b) => a <> b }
+      smod.mem_reader.foreach { case (_, a) =>
+        DotGen.addEdge(cN, a)
+      }
+      smod.mem_writer.foreach { case (_, a) =>
+        DotGen.addEdge(cN, a)
+      }
+      println(s"Connecting spad to $cN")
     }
   }
   tieClocks()

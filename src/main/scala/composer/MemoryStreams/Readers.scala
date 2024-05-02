@@ -36,7 +36,6 @@ class SequentialReader(val dWidth: Int,
     nSources * platform.prefetchSourceMultiplicity,
     minSizeBytes.getOrElse(0) / beatBytes)
   val rowsAvailableToAlloc = RegInit(prefetchRows.U(log2Up(prefetchRows+1).W))
-  val hasOneSource = nSources == 1
   require(isPow2(maxBytes))
 
 
@@ -45,7 +44,6 @@ class SequentialReader(val dWidth: Int,
   val tl_out = IO(new TLBundle(tl_bundle.params))
   val tl_reg = Module(new Queue(new TLBundleA(tl_out.params), 2, false, false, false))
   tl_out.a <> tl_reg.io.deq
-//  tl_out.a.bits.user(AllocateIDSignal) := true.B
 
   val channelWidthBits = maxBytes * 8
   val storedDataWidthBytes = Math.max(beatBytes, dWidth / 8)

@@ -69,7 +69,7 @@ object Generation {
         val strobeDtype = getVerilatorDtype(platform.extMem.master.beatBytes)
         val addrWid = log2Up(platform.extMem.master.size)
         val addrDtype = getVerilatorDtype(addrWid)
-        val idDtype = getVerilatorDtype(top.AXI_MEM.get(0).in(0)._1.ar.bits.id.getWidth)
+        val idDtype = getVerilatorDtype(top.AXI_MEM.get(0)._1.in(0)._1.ar.bits.id.getWidth)
         s"#ifdef SIM\n" +
           s"#include <verilated.h>\n" +
           s"using ComposerMemAddressSimDtype=$addrDtype;\n" +

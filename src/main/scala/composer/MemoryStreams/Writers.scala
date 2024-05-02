@@ -197,10 +197,13 @@ class SequentialWriter(nBytes: Int,
   } else if (nBytes < beatBytes) {
     val beatLim = beatBytes / nBytes
     val beatBuffer = Reg(Vec(beatLim - 1, UInt((nBytes * 8).W)))
-    val beatCounter = RegInit(0.U(log2Up(beatLim).W))
+    val beatCounter = Reg(UInt(log2Up(beatLim).W))
     io.channel.data.ready := write_buffer_io.ready && req_len > 0.U
     write_buffer_io.valid := false.B
     write_buffer_io.bits := DontCare
+    when(io.req.fire) {
+      beatCounter := 0.U
+    }
     when(io.channel.data.fire) {
       val bytesGrouped = (0 until nBytes).map(i => io.channel.data.bits((i + 1) * 8 - 1, i * 8))
       beatBuffer(beatCounter) := Cat(bytesGrouped.reverse)

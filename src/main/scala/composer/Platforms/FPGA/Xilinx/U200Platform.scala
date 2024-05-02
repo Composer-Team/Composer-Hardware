@@ -31,5 +31,4 @@ class U200Platform(val memoryNChannels: Int) extends Platform with MultiDiePlatf
     DieName("1", memoryBus = true),
     DieName("2")
   )
-  override val dieConnectivity: Seq[String] = Seq("0", "1", "2")
 }

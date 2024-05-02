@@ -14,6 +14,8 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.tilelink._
 
+import scala.annotation.tailrec
+
 object ComposerSystem {
 }
 
@@ -30,13 +32,14 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig,
     memParams.filter(_.isInstanceOf[CReadChannelParams]).map { para =>
       val param: CReadChannelParams = para.asInstanceOf[CReadChannelParams]
       (param, List.tabulate(para.nChannels) { i =>
-        TLClientNode(List(TLMasterPortParameters.v1(
+        val dotName = DotGen.addPortNode(s"${systemParams.name}.ReadChannel.core_${core_id}.${para.name}${i}.", core2slr(core_id))
+        (TLClientNode(List(TLMasterPortParameters.v1(
           clients = List(TLMasterParameters.v1(
             name = s"ReadChannel_sys${system_id}_core${core_id}_${para.name}$i",
             supportsGet = TransferSizes(blockBytes, blockBytes * platform.prefetchSourceMultiplicity),
             supportsProbe = TransferSizes(blockBytes, blockBytes * platform.prefetchSourceMultiplicity),
             sourceId = IdRange(0, param.maxInFlightTxs)
-          )))))
+          ))))), dotName)
       })
     }
   }
@@ -45,13 +48,14 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig,
       val para = mcp.asInstanceOf[CWriteChannelParams]
       (para,
         List.tabulate(para.nChannels) { i =>
-          TLClientNode(List(TLMasterPortParameters.v1(
+          val dotName = DotGen.addPortNode(s"WriteChannel_sys${system_id}_core${core_id}_${para.name}${i}_", core2slr(core_id))
+          (TLClientNode(List(TLMasterPortParameters.v1(
             List(TLMasterParameters.v1(
               name = s"WriteChannel_sys${system_id}_core${core_id}_${para.name}$i",
               sourceId = IdRange(0, para.maxInFlightTxs),
               supportsPutFull = TransferSizes(1, p(CacheBlockBytes)),
               supportsPutPartial = TransferSizes(1, p(CacheBlockBytes)),
-              supportsProbe = TransferSizes(1, p(CacheBlockBytes)))))))
+              supportsProbe = TransferSizes(1, p(CacheBlockBytes))))))), dotName)
         })
     }
   }
@@ -63,10 +67,87 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig,
         name = s"${systemParams.name}_core${coreIdx}_${param.name}")
       (param, mod)
   })
-  val readerNodes = (0 until nCores).map(coreIdx =>
-    (readers(coreIdx).map(_._2) :+ scratch_mod(coreIdx).map(_._2.mem_reader).filter(_.isDefined).map(_.get)).flatten)
-  val writerNodes = (0 until nCores).map(coreIdx =>
-    (writers(coreIdx).map(_._2) :+ scratch_mod(coreIdx).map(_._2.mem_writer).filter(_.isDefined).map(_.get)).flatten)
+
+  @tailrec
+  private def recursivelyReduceXBar(grp: Seq[(TLNode, String)],
+                                    inc: Int = 0, slr_id: Int,
+                                    prefix: String,
+                                    xbarDegree: Int,
+                                    finalDegree: Int): Seq[(TLIdentityNode, String)] = {
+    CLogger.log(f"Synching together nodes on slr ${slr_id} of type $prefix with depth ${inc}")
+
+    def help(a: Seq[Seq[(TLNode, String)]]): Seq[(TLNode, String)] = {
+      a.zipWithIndex.map { case (r, g_idx) =>
+        val memory_xbar = LazyModuleWithFloorplan(new TLXbar(),
+          slr_id = slr_id,
+          name = s"__${systemParams.name}_m${prefix}_xb_${DieName.getSLRFromIdx(slr_id)}_d${inc}_g${g_idx}")
+        val xbarDot = DotGen.addNode(f"${systemParams.name}.mem_xbar", slr_id)
+        r.foreach { rs =>
+          memory_xbar.node := rs._1
+          DotGen.addEdge(rs._2, xbarDot)
+        }
+        val memory_xbar_buffer = LazyModuleWithFloorplan(new TLBuffer(), slr_id = slr_id,
+          name = s"__${systemParams.name}_${prefix}_xbbuf_${DieName.getSLRFromIdx(slr_id)}_d${inc}_g${g_idx}")
+        val xbarBufDot = DotGen.addBufferNode(s"${systemParams.name}.xbar", slr_id)
+
+        memory_xbar_buffer.node := memory_xbar.node
+        DotGen.addEdge(xbarDot, xbarBufDot)
+        (memory_xbar_buffer.node, xbarBufDot)
+      }
+    }
+
+    def mapToEndpoint(x: TLNode, xName: String): (TLIdentityNode, String) = {
+      val memory_endpoint_identity = TLIdentityNode()
+      val epDot = DotGen.addNode(s"${systemParams.name}.node2EPmap", slr_id, imaginary = true)
+      DotGen.addEdge(xName, epDot)
+      memory_endpoint_identity := x
+      (memory_endpoint_identity, epDot)
+    }
+
+    if (grp.isEmpty) Seq()
+    else if (grp.length <= finalDegree) {
+      grp.map(a => mapToEndpoint(a._1, a._2))
+    } else {
+      val groups = grp.grouped(xbarDegree)
+      val endpoints = help(groups.toSeq)
+      recursivelyReduceXBar(endpoints, inc + 1, slr_id, prefix, xbarDegree, finalDegree)
+    }
+  }
+
+  @tailrec
+  private def extendMem(a: TLNode, l: Int, aname: String): (TLNode, String) = {
+    if (l == 0) (a, aname)
+    else {
+      val buf = LazyModule(new TLBuffer())
+      buf.suggestName(f"__${systemParams.name}_mem_extend")
+      buf.node := a
+      val nname = DotGen.addNode(s"${systemParams.name}.mem_extend")
+      DotGen.addEdge(aname, nname)
+      extendMem(buf.node, l - 1, nname)
+    }
+  }
+
+
+  val readerNodes = (0 until nCores).map { coreIdx =>
+    val extended_readers = readers(coreIdx).map(_._2) :+ scratch_mod(coreIdx).map(_._2.mem_reader).filter(_.isDefined).map { a =>
+      extendMem(a.get._1, platform.interCoreMemReductionLatency, a.get._2)
+    }
+    recursivelyReduceXBar(extended_readers.flatten,
+      slr_id = core2slr(coreIdx),
+      prefix = s"${systemParams.name}_core${coreIdx}_read",
+      xbarDegree = platform.xbarMaxDegree, finalDegree = platform.maxMemEndpointsPerCore)
+  }
+
+  val writerNodes = (0 until nCores).map { coreIdx =>
+    val extended_writers = writers(coreIdx).map(_._2) :+ scratch_mod(coreIdx).map(_._2.mem_writer).filter(_.isDefined).map { a =>
+      extendMem(a.get._1, platform.interCoreMemReductionLatency, a.get._2)
+    }
+    recursivelyReduceXBar(extended_writers.flatten,
+      slr_id = core2slr(coreIdx),
+      prefix = s"${systemParams.name}_core${coreIdx}_write",
+      xbarDegree = platform.xbarMaxDegree,
+      finalDegree = platform.maxMemEndpointsPerCore)
+  }
   // these go to external memory
   val externalCoreCommNodes = (0 until nCores).map(coreIdx => Map.from(systemParams.canIssueCoreCommandsTo.map { targetSys =>
     (targetSys, TLClientNode(Seq(TLMasterPortParameters.v1(clients = Seq(TLMasterParameters.v1(
@@ -123,89 +204,114 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig,
       (mp, memMasters, otherSPParams)
   }
 
+  val Seq(r_nodes, w_nodes) = Seq(("r", readerNodes), ("w", writerNodes)).map { case (prefix, all_nodes) =>
+    def getNodesBySLR(q: IndexedSeq[Seq[(TLNode, String)]]): Map[Int, IndexedSeq[(TLNode, String)]] =
+      q.zipWithIndex.groupBy(pr => core2slr(pr._2)).map { case (slr_id, nodes) =>
 
-  val Seq(r_nodes, w_nodes) = {
-    def recursivelyReduceXBar(grp: Seq[TLNode], inc: Int = 0, slr_id: Int): Seq[TLIdentityNode] = {
-      def help(a: Seq[Seq[TLNode]]): Seq[TLNode] = {
-        a.map { r =>
-          val memory_xbar = LazyModuleWithFloorplan(new TLXbar(), slr_id = slr_id, name = s"memory_xbar_${DieName.getSLRFromIdx(slr_id)}")
-
-          r.foreach(memory_xbar.node := _)
-          val memory_xbar_buffer = LazyModuleWithFloorplan(new TLBuffer(), slr_id = slr_id, name = s"memory_xbar_buffer_slr${DieName.getSLRFromIdx(slr_id)}")
-
-          memory_xbar_buffer.node := memory_xbar.node
-          memory_xbar_buffer.node
-        }
+        (slr_id, nodes.flatMap(_._1).map(a => extendMem(a._1, 0, a._2)))
       }
 
-      def mapToEndpoint(x: TLNode): TLIdentityNode = {
-        val memory_endpoint_identity = TLIdentityNode()
-        memory_endpoint_identity := x
-        memory_endpoint_identity
-      }
-
-      if (grp.isEmpty) Seq()
-      else if (grp.length <= platform.xbarMaxDegree) grp.map(mapToEndpoint)
-      else {
-        val groups = grp.grouped(platform.xbarMaxDegree)
-        recursivelyReduceXBar(help(groups.toSeq), inc + 1, slr_id).map(mapToEndpoint)
-      }
-    }
-
-
-    def getNodesBySLR(q: IndexedSeq[List[TLClientNode]]): Map[Int, IndexedSeq[TLClientNode]] =
-      q.zipWithIndex.groupBy(pr => core2slr(pr._2)).map[Int, IndexedSeq[TLClientNode]](p => (p._1, p._2.flatMap(_._1)))
-
-    val reads_per_slr = getNodesBySLR(readerNodes)
-    val writes_per_slr = getNodesBySLR(writerNodes)
+    val nodes = getNodesBySLR(all_nodes)
 
     var node_ctr = 0
-    val endpoints = Seq(reads_per_slr, writes_per_slr) map { nodes =>
-      if (distributeCores) {
-        val mdp = platform.asInstanceOf[Platform with MultiDiePlatform]
-        val memoryRoot = DieName.getMemoryBusSLR
+    val endpoints = if (distributeCores) {
+      val mdp = platform.asInstanceOf[Platform with MultiDiePlatform]
+      val memoryRoot = DieName.getMemoryBusSLR
 
-        def reduceFromTo(from: Int, to: Int, nodes: Seq[TLNode]): Seq[TLNode] = {
-          require(Math.abs(from - to) == 1)
-          val reduction = recursivelyReduceXBar(nodes, slr_id = from)
-          if (reduction.isEmpty) List()
-          else if (from == to) reduction
+      def reduceFromTo(from: Int, to: Int, nodes: Seq[(TLNode, String)]): Seq[(TLNode, String)] = {
+        if (from < 0 || from >= mdp.platformDies.length || to < 0 || to >= mdp.platformDies.length)
+          return Seq.empty
+
+        @tailrec
+        def extend(a: TLNode, aname: String, slr_id: Int, l: Int): (TLNode, String) = {
+          if (l == 0) (a, aname)
           else {
-            val canal = LazyModuleWithFloorplan(new TLXbar(), slr_id = from, name = s"slrRed_xb_sys${systemParams.name}_${DieName.getSLRFromIdx(from)}_${node_ctr}")
-            reduction foreach { a => canal.node := a }
-            //noinspection DuplicatedCode
-            val sbuf = LazyModuleWithFloorplan(new TLBuffer(), slr_id = from, name = s"slrRed_sbuf_sys${systemParams.name}_${DieName.getSLRFromIdx(from)}_${node_ctr}")
-            //noinspection DuplicatedCode
-            val dbuf = LazyModuleWithFloorplan(new TLBuffer(), slr_id = to, name = s"slrRed_dbuf_sys${systemParams.name}_${DieName.getSLRFromIdx(to)}_${node_ctr}")
-            print(f"Routing between SLRs: ${DieName.getSLRFromIdx(from)} -> ${DieName.getSLRFromIdx(to)} ($from -> $to)\n")
+            val buf = LazyModuleWithFloorplan(new TLBuffer(),
+              slr_id = slr_id, f"slrRed_${prefix}ext_sys${systemParams.name}_${from}_${to}_${node_ctr}")
+            val bufDot = DotGen.addBufferNode(s"${systemParams.name}.slrReduction", slr_id)
+            DotGen.addEdge(aname, bufDot)
             node_ctr += 1
-            sbuf.node := canal.node
-            dbuf.node := sbuf.node
-            Seq(dbuf.node)
+            buf.node := a
+            extend(buf.node, bufDot, slr_id, l - 1)
           }
         }
 
-        def treeOutMemoryBus(slr: Int): Seq[TLNode] = {
-          if (slr < 0 || slr >= mdp.platformDies.length) Seq()
-          else {
-            val neighbors = (slr match {
-              case x if x == memoryRoot => Seq(slr - 1, slr + 1)
-              case x if x > memoryRoot => Seq(slr + 1)
-              case x if x < memoryRoot => Seq(slr - 1)
-            }) map { x => reduceFromTo(x, slr, treeOutMemoryBus(x)) }
-            recursivelyReduceXBar(neighbors.flatten ++ nodes(slr), slr_id = slr)
+        require(Math.abs(from - to) == 1)
+        val reduction = recursivelyReduceXBar(nodes,
+          slr_id = from, prefix = s"${prefix}Red_${systemParams.name}_${from}_${to}",
+          xbarDegree = platform.xbarMaxDegree, finalDegree = platform.maxMemSLRcrossings)
+        if (reduction.isEmpty) List()
+        else if (from == to) reduction
+        else {
+          CLogger.log(s"Creating XBar between SLRs ${DieName.getSLRFromIdx(from)} and ${DieName.getSLRFromIdx(to)}")
+          val canal = LazyModuleWithFloorplan(new TLXbar(), slr_id = from, name = s"slrRed_${prefix}xb_sys${systemParams.name}_slr${from}_${node_ctr}")
+          val canaldN = DotGen.addNode(f"${systemParams.name}.canal.xbar", from)
+          reduction foreach { a =>
+            val (enode, eN) = extend(a._1, a._2, from, 4)
+            canal.node := enode
+            DotGen.addEdge(eN, canaldN)
           }
+          //noinspection DuplicatedCode
+          val sbuf = LazyModuleWithFloorplan(new TLBuffer(), slr_id = from,
+            name = s"__slrRed_${prefix}sbuf_sys${systemParams.name}_slr${from}to${to}_${node_ctr}")
+          val sbufdN = DotGen.addBufferNode(f"${systemParams.name}.xSLRsource.${from}to${to}", from)
+          //noinspection DuplicatedCode
+          val dbuf = LazyModuleWithFloorplan(new TLBuffer(), slr_id = to,
+            name = s"__slrRed_${prefix}dbuf_sys${systemParams.name}_slr${from}to${to}_${node_ctr}")
+          val dbufdN = DotGen.addBufferNode(f"${systemParams.name}.xSLRdest.${from}to${to}", to)
+          CLogger.log(f"Routing between SLRs: ${DieName.getSLRFromIdx(from)} -> ${DieName.getSLRFromIdx(to)} ($from -> $to)\n")
+          node_ctr += 1
+          sbuf.node := canal.node
+          DotGen.addEdge(canaldN, sbufdN)
+          dbuf.node := sbuf.node
+          DotGen.addEdge(sbufdN, dbufdN)
+
+          @tailrec
+          def extendedDbuf(tl_node: TLNode, l: Int, n_dn: String): (TLNode, String) = {
+            if (l == 0) (tl_node, n_dn)
+            else {
+              val buf = LazyModuleWithFloorplan(new TLBuffer(), slr_id = to,
+                name = s"__slrRed_${prefix}dbuf_sys${systemParams.name}_ext${l}_slr${from}to${to}_${node_ctr}")
+              val bufdN = DotGen.addBufferNode(f"${systemParams.name}.xSLRdest_ext$l.${from}to${to}", to)
+              DotGen.addEdge(n_dn, bufdN)
+              node_ctr += 1
+              buf.node := tl_node
+              extendedDbuf(buf.node, l - 1, bufdN)
+            }
+          }
+
+          Seq(extendedDbuf(dbuf.node, 1, dbufdN))
         }
-        treeOutMemoryBus(memoryRoot)
-      } else nodes.flatMap(_._2).toSeq
+      }
 
+      def treeOutMemoryBus(slr: Int): Seq[(TLNode, String)] = {
+        if (slr < 0 || slr >= mdp.platformDies.length) Seq()
+        else {
+          val neighbors = (slr match {
+            case x if x == memoryRoot =>
+              CLogger.log(f"Memory root trees to ${slr - 1} and ${slr + 1}")
+              Seq(slr - 1, slr + 1)
+            case x if x > memoryRoot =>
+              CLogger.log(f"\t$x trees to ${slr + 1}")
+              Seq(slr + 1)
+            case x if x < memoryRoot =>
+              CLogger.log(f"\t$x trees to ${slr - 1}")
+              Seq(slr - 1)
+          }) map { x => reduceFromTo(x, slr, treeOutMemoryBus(x)) }
 
-    }
+          recursivelyReduceXBar(neighbors.flatten ++ nodes.getOrElse(slr, Seq()),
+            slr_id = slr, prefix = s"${prefix}Red_${systemParams.name}_toMem",
+            xbarDegree = platform.xbarMaxDegree, finalDegree = platform.maxMemSLRcrossings)
+        }
+      }
 
-    endpoints map { endpoint =>
-      recursivelyReduceXBar(endpoint, slr_id = DieName.getMemoryBusSLR)
-    }
+      treeOutMemoryBus(memoryRoot)
+    } else nodes.flatMap(_._2).toSeq
+
+    recursivelyReduceXBar(endpoints, slr_id = DieName.getMemoryBusSLR, prefix = s"${prefix}Red_${systemParams.name}_toMem",
+      xbarDegree = platform.xbarMaxDegree, finalDegree = platform.maxMemEndpointsPerSystem)
   }
+
 
   /* SEND OUT STUFF*/
 
