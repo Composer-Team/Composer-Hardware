@@ -46,7 +46,7 @@ class AWSF1Platform(memoryNChannels: Int,
     DieName("pblock_CL_mid", memoryBus = true),
     DieName("pblock_CL_top"))
 
-  override val placementAffinity: Seq[Int] = Seq(2, 2, 2)
+  override val placementAffinity: Seq[Int] = Seq(2, 2, 3)
 
   override def postProcessorMacro(c: Config, paths: Seq[Path]): Unit = {
     if (c(BuildModeKey) == BuildMode.Synthesis) {
@@ -97,7 +97,10 @@ class AWSF1Platform(memoryNChannels: Int,
           fail = false
           try {
             println("Transfering...")
-            os.proc("rsync", "-avz", f"${ComposerBuild.composerGenDir}/aws/", f"ec2-user@$in:~/build-dir/generated-src/").call()
+            os.proc("ssh", f"ec2-user@$in", "rm", "-rf", "~/build-dir/generated-src/*")
+            os.proc("rsync", "--progress", "-avz", f"${ComposerBuild.composerGenDir}/aws/", f"ec2-user@$in:~/build-dir/generated-src/").call(
+              stdout = os.Inherit
+            )
           } catch {
             case e: Exception =>
               println(e)
