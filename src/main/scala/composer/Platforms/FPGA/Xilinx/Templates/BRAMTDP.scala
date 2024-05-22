@@ -7,21 +7,29 @@ import composer.Generation.ComposerBuild
 import composer.MemoryStreams.HasMemoryInterface
 import composer.Platforms.{HasXilinxMem, Platform, PlatformKey}
 import composer._
+import composer.common.CLog2Up
 
 import java.io.FileWriter
 import scala.annotation.tailrec
 
-case class FPGAMemoryPrimitiveConsumer(brams: Int, urams: Int, verilogAnnotations: String, fileNameAnnotation: String)
+case class FPGAMemoryPrimitiveConsumer(brams: Int,
+                                       urams: Int,
+                                       mux_degree: Option[Int],
+                                       verilogAnnotations: String,
+                                       fileNameAnnotation: String)
 
 private[composer] class BRAMTDP(latency: Int,
                                 dataWidth: Int,
                                 nRows: Int,
+                                withWriteEnable: Boolean,
                                 debugName: String,
                                )(implicit p: Parameters) extends BlackBox with HasMemoryInterface {
+  val weWidth = if (withWriteEnable) dataWidth / 8 else 1
+  val adjDataW = if (withWriteEnable) 8 else dataWidth
   val io = IO(new Bundle {
     val CE = Input(Bool())
-    val WEB1 = Input(Bool())
-    val WEB2 = Input(Bool())
+    val WEB1 = Input(UInt(weWidth.W))
+    val WEB2 = Input(UInt(weWidth.W))
     val OEB1 = Input(Bool())
     val OEB2 = Input(Bool())
     val O1 = Output(UInt(dataWidth.W))
@@ -44,7 +52,7 @@ private[composer] class BRAMTDP(latency: Int,
 
   override def read_enable: Seq[Bool] = Seq(io.OEB1, io.OEB2)
 
-  override def write_enable: Seq[Bool] = Seq(io.WEB1, io.WEB2)
+  override def write_enable = Seq(io.WEB1, io.WEB2)
 
   override def clocks: Seq[Bool] = Seq(io.CE)
 
@@ -59,7 +67,7 @@ private[composer] class BRAMTDP(latency: Int,
     if (
       p(ConstraintHintsKey).contains(ComposerConstraintHint.MemoryConstrained)
     ) {
-      val info = BRAMTDP.getMemoryResources(nRows, dataWidth, debugName, isSimple = false)
+      val info = BRAMTDP.getMemoryResources(nRows, dataWidth, debugName, isSimple = false, canMux = withWriteEnable)
       BRAMTDP.allocateBRAM(info.brams)
       BRAMTDP.allocateURAM(info.urams)
       (info.verilogAnnotations, info.fileNameAnnotation)
@@ -86,62 +94,47 @@ private[composer] class BRAMTDP(latency: Int,
   // We need keep hirarchy because in some rare circumstances, cross boundary optimization
   // prevents the memory from being inferred, and further, the memory is completely unrecongized,
   // mapped to a black box, and causes unrecoverable errors during logic synthesis... (Vivado 2022.1)
+
   val src =
     f"""
        |(* keep_hierarchy = "yes" *)
        |module $desiredName (
        |  input CE,
-       |  input WEB1,
-       |  input WEB2,
+       |  input [${weWidth - 1}:0] WEB1,
+       |  input [${weWidth - 1}:0] WEB2,
        |  input OEB1,
        |  input OEB2,
-       |  output reg [${dataWidth - 1}:0] O1,
+       |  output [${dataWidth - 1}:0] O1,
        |  input [${dataWidth - 1}:0] I1,
        |  input [${addrWidth - 1}:0] A1,
-       |  output reg [${dataWidth - 1}:0] O2,
+       |  output [${dataWidth - 1}:0] O2,
        |  input [${dataWidth - 1}:0] I2,
        |  input [${addrWidth - 1}:0] A2,
        |  input CSB1,
        |  input CSB2);
        |
        |$memoryAnnotations
-       |reg [${dataWidth - 1}:0] mem [${nRows - 1}:0];        // Memory Declaration
+       |reg [${adjDataW - 1}:0] mem [${weWidth - 1}:0] [${nRows - 1}:0];        // Memory Declaration
        |reg [${dataWidth - 1}:0] memreg1;
        |reg [${dataWidth - 1}:0] memreg2;
        |reg [${dataWidth - 1}:0] mem_pipe_reg1 [${latency - 1}:0];    // Pipelines for memory
        |reg [${dataWidth - 1}:0] mem_pipe_reg2 [${latency - 1}:0];    // Pipelines for memory
        |
-       |integer          i;
-       |always @ (posedge CE)
-       |begin
-       |  if(CSB1) begin
-       |    if (WEB1) begin
-       |      mem[A1] <= I1;
-       |    end else begin
-       |      memreg1 <= mem[A1];
-       |    end
-       |  end
-       |end
+       |genvar  gi;
+       |integer i;
        |
-       |always @ (posedge CE)
-       |begin
-       |  if(CSB2) begin
-       |    if (WEB2) begin
-       |      mem[A2] <= I2;
-       |    end else begin
-       |      memreg2 <= mem[A2];
-       |    end
-       |  end
-       |end
+       |${writeF("1", withWriteEnable, weWidth, dataWidth)}
+       |${writeF("2", withWriteEnable, weWidth, dataWidth)}
        |
        |always @ (posedge CE)
        |begin
        |  mem_pipe_reg1[0] <= memreg1;
        |  mem_pipe_reg2[0] <= memreg2;
        |  $mvR
-       |  O1 <= mem_pipe_reg1[$latency-1];
-       |  O2 <= mem_pipe_reg2[$latency-1];
        |end
+       |assign O1 = mem_pipe_reg1[$latency-1];
+       |assign O2 = mem_pipe_reg2[$latency-1];
+       |
        |endmodule
        |
        |""".stripMargin
@@ -174,7 +167,11 @@ object BRAMTDP {
   }
 
   // get bram and uram usage respectively for a given memory
-  def getMemoryResources(nRows: Int, dwidth: Int, debugName: String, isSimple: Boolean)(implicit p: Parameters): FPGAMemoryPrimitiveConsumer = {
+  def getMemoryResources(nRows: Int,
+                         dwidth: Int,
+                         debugName: String,
+                         isSimple: Boolean,
+                         canMux: Boolean)(implicit p: Parameters): FPGAMemoryPrimitiveConsumer = {
     def get_n_brams(widthRequested: Int, rowsRequested: Int): Int = {
       val w = get_bram_width(widthRequested, isSimple)
       val rows_per_bram = bram_width2rows(isSimple)(w)
@@ -191,20 +188,36 @@ object BRAMTDP {
       width_mult * row_consumption
     }
 
-    val useURAM = nRows >= 4 * 1024 && dwidth >= 64
-
-    if (nRows >= 4 * 1024 && dwidth < 64) {
-      if (!p(ComposerQuiet) && warningsIssued < 5) {
-        System.err.println(
-          s"  One of the memory modules ($debugName) has a data width less than 64 ($dwidth) but has a total\n" +
-            s"data capacity that makes it appropriate for URAM (applicable for Ultrascale+ devices)\n" +
-            s"This may lead to poor URAM cascading. Consider increasing the width if possible."
-        )
-        warningsIssued += 1
+    val isBigEnoughForURAM = nRows * dwidth >= 2 * 1024 * 64
+    val (useMux, canURAM, uRows, uWidth) = if (dwidth >= 64 || !(isBigEnoughForURAM && (dwidth % 8) == 0)) {
+      // For cases where we either fit naturally into URAM width or we're trivially unqualified, then just
+      // pass along the existing width/height
+      (None, dwidth >= 64 && isBigEnoughForURAM, nRows, dwidth)
+    } else {
+      // Otherwise, see if we can use byte-wise write enable to get away with a wider data bus
+      val mult = 1 << (Math.log10(72 / dwidth) / Math.log10(2)).floor.toInt
+      if (mult > 1) {
+        (Some(mult), true, (nRows.toFloat / mult).ceil.toInt, dwidth * mult)
+      } else {
+        (None, false, nRows, dwidth)
       }
     }
 
-    val uram_consumption = get_n_urams(dwidth, nRows)
+    // this warning is probably not useful anymore because of the above
+//    if (nRows >= 4 * 1024 && dwidth < 64) {
+//      if (!p(ComposerQuiet) && warningsIssued < 1) {
+//        System.err.println(
+//          s"At least one of the memory modules ($debugName) has a data width less than 64 ($dwidth) but has a total\n" +
+//            s"data capacity that makes it appropriate for URAM (applicable for Ultrascale+ devices)\n" +
+//            s"This may lead to poor URAM cascading. Consider one of the following optimizations.\n" +
+//            s"1. Increase the data width and manually mux the intended bits\n" +
+//            s"2. Enable write-enable muxing from the scratchpad configuration."
+//        )
+//        warningsIssued += 1
+//      }
+//    }
+
+    val uram_consumption = get_n_urams(uWidth, uRows)
     val bram_consumption = get_n_brams(dwidth, nRows)
     // appropriate data width and at least 90% capacity
     val (have_enough_uram, have_enough_bram) = p(PlatformKey) match {
@@ -213,23 +226,26 @@ object BRAMTDP {
           bram_used + bram_consumption <= pxm.nBRAMs)
       case _ => (true, true)
     }
-    val usage = if (useURAM && have_enough_uram) FPGAMemoryPrimitiveConsumer(0, uram_consumption, "(* ram_style = \"ultra\" *)", "_URAM")
-    else if (have_enough_bram) FPGAMemoryPrimitiveConsumer(bram_consumption, 0, "(* ram_style = \"block\" *)", "_BRAM")
-    else if (have_enough_uram) FPGAMemoryPrimitiveConsumer(0, uram_consumption, "(* ram_style = \"ultra\" *)", "_URAM")
-    else FPGAMemoryPrimitiveConsumer(0, 0, "", "")
+    val usage = if (canURAM && have_enough_uram)
+      FPGAMemoryPrimitiveConsumer(0, uram_consumption, useMux, "(* ram_style = \"ultra\" *)", "_URAM")
+    else if (have_enough_bram)
+      FPGAMemoryPrimitiveConsumer(bram_consumption, 0, None, "(* ram_style = \"block\" *)", "_BRAM")
+    else if (have_enough_uram)
+      FPGAMemoryPrimitiveConsumer(0, uram_consumption, None, "(* ram_style = \"ultra\" *)", "_URAM")
+    else FPGAMemoryPrimitiveConsumer(0, 0, None, "", "")
 
-    if (p.isInstanceOf[HasXilinxMem]){
+    if (p.isInstanceOf[HasXilinxMem]) {
       val pxm = p(PlatformKey).asInstanceOf[HasXilinxMem]
-      if (!have_enough_bram && !have_enough_uram)
-      System.err.println(
-        s"Memory module $debugName requires $bram_consumption BRAMs and $uram_consumption URAMs,\n" +
-          s" but only ${pxm.nBRAMs - bram_used} BRAMs and ${pxm.nURAMs - uram_used} URAMs\n" +
-          s"are available.")
-      if (!p(ComposerQuiet)) {
-        System.err.println(s"Using ${usage.brams} BRAMs and ${usage.urams} URAMs for $debugName: $nRows x $dwidth")
-        System.err.println(s"Total Usage - BRAM(${BRAMTDP.bram_used + usage.brams}/${pxm.nBRAMs}) URAM(${BRAMTDP.uram_used + usage.urams}/${pxm.nURAMs})")
+      if (!have_enough_bram && !have_enough_uram) {
+        System.err.println(
+          s"Memory module $debugName requires $bram_consumption BRAMs and $uram_consumption URAMs,\n" +
+            s" but only ${pxm.nBRAMs - bram_used} BRAMs and ${pxm.nURAMs - uram_used} URAMs\n" +
+            s"are available.")
+        if (!p(ComposerQuiet)) {
+          System.err.println(s"Using ${usage.brams} BRAMs and ${usage.urams} URAMs for $debugName: $nRows x $dwidth")
+          System.err.println(s"Total Usage - BRAM(${BRAMTDP.bram_used + usage.brams}/${pxm.nBRAMs}) URAM(${BRAMTDP.uram_used + usage.urams}/${pxm.nURAMs})")
+        }
       }
-
     }
 
     usage

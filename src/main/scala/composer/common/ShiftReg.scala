@@ -2,6 +2,7 @@ package composer.common
 
 import chisel3._
 import chisel3.util.RegEnable
+import freechips.rocketchip.diplomacy.ValName
 
 import scala.annotation.tailrec
 
@@ -10,18 +11,34 @@ import scala.annotation.tailrec
  * unexpected behavior, so I have these instead.
  */
 
-object ShiftReg {
+class ShiftReg[T <: Data](n: Int, gen: T) extends Module {
+  val io = IO(new Bundle {
+    val in = Input(gen)
+    val out = Output(gen)
+  })
+
   @tailrec
-  def apply[T <: Data](t: T, latency: Int): T = {
+  private def recurse(t: T, latency: Int): T = {
     if (latency == 0) t
-    else ShiftReg(RegNext(t), latency - 1)
+    else recurse(RegNext(t), latency - 1)
+  }
+
+  io.out := recurse(io.in, n)
+}
+
+object ShiftReg {
+  def apply[T <: Data](t: T, latency: Int)(implicit valName: ValName): T = {
+    val sr = Module(new ShiftReg[T](latency, t.cloneType))
+    sr.suggestName("shiftReg" + valName.name)
+    sr.io.in := t
+    sr.io.out
   }
 }
 
 object ShiftRegWithReset {
   def apply[T <: Data](t: T, latency: Int, resetVal: T): T = {
     if (latency == 0) t
-    else ShiftReg(RegNext(t, resetVal), latency - 1)
+    else ShiftRegWithReset(RegNext(t, resetVal), latency - 1, resetVal)
   }
 }
 

@@ -76,12 +76,14 @@ trait CChannelParams {
  * @param nChannels      number of memory access channels of this type
  * @param maxInFlightTxs maximum number of AXI/TileLink memory transactions can be inflight per reader module at once
  */
+
+
 case class CReadChannelParams(name: String,
                               dataBytes: Int,
                               nChannels: Int = 1,
-                              maxInFlightTxs: Int = 8,
+                              maxInFlightTxs: Option[Int] = None,
                               bufferSizeBytesMin: Option[Int] = None) extends CChannelParams {
-  require(maxInFlightTxs > 0, s"Max In Flight Transactions must be greater than 0. Got: $maxInFlightTxs")
+  require(maxInFlightTxs.getOrElse(1) > 0, s"Max In Flight Transactions must be greater than 0. Got: $maxInFlightTxs")
 }
 
 /**
@@ -99,7 +101,7 @@ case class CReadChannelParams(name: String,
 case class CWriteChannelParams(name: String,
                                dataBytes: Int,
                                nChannels: Int = 1,
-                               maxInFlightTxs: Int = 8,
+                               maxInFlightTxs: Option[Int] = None,
                                bufferSizeBytesMin: Option[Int] = None,
                                supplyBackwards: Boolean = false) extends CChannelParams {
 }
@@ -122,13 +124,14 @@ case class CScratchpadFeatures(readOnly: Boolean = false,
                                supportWriteback: Boolean = false,
                                supportMemRequest: Boolean = true,
                                specialization: CScratchpadSpecialization = CScratchpadSpecialization.flatPacked,
-                               nBanks: Int = 1)
+                               nBanks: Int = 1,
+                               writeEnableMuxing: Boolean = false)
 
 case class CScratchpadParams(name: String,
                              dataWidthBits: Number,
                              nDatas: Number,
                              nPorts: Int,
-                             latency: Number = 3,
+                             latency: Number = 2,
                              features: CScratchpadFeatures = CScratchpadFeatures()) extends CChannelParams {
   override val nChannels: Int = 1
 

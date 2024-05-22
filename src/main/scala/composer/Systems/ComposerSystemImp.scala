@@ -437,7 +437,7 @@ class ComposerSystemImp(val outer: ComposerSystem)(implicit p: Parameters) exten
       smod.mem_writer.foreach { case (_, a) =>
         DotGen.addEdge(cN, a)
       }
-      println(s"Connecting spad to $cN")
+//      println(s"Connecting spad to $cN")
     }
   }
   tieClocks()

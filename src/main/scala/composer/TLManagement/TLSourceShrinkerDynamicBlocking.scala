@@ -81,7 +81,8 @@ class TLSourceShrinkerDynamicBlocking(maxNIDs: Int)(implicit p: Parameters) exte
         val isTxContinuation = handlingLongWriteTx && prevSource === in.a.bits.source
         val longBeatCount = Reg(UInt(log2Up(platform.prefetchSourceMultiplicity).W))
 
-        in.a.ready := (((a_in_valid && out.a.fire) || (!a_in_valid)) && !full) || isTxContinuation
+        val canAcceptOnA = Mux(isTxContinuation, true.B, !full && ((a_in_valid && out.a.fire) || !a_in_valid))
+        in.a.ready := canAcceptOnA
 
         when(in.a.fire) {
           a_in := in.a.bits
@@ -111,7 +112,7 @@ class TLSourceShrinkerDynamicBlocking(maxNIDs: Int)(implicit p: Parameters) exte
           }
         }
         when(out.a.fire) {
-          a_in_valid := in.a.valid
+          a_in_valid := canAcceptOnA && in.a.valid
         }
 
         val d_in = Reg(in.d.bits)

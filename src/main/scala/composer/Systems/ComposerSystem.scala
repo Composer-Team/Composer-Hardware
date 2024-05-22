@@ -38,7 +38,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig,
             name = s"ReadChannel_sys${system_id}_core${core_id}_${para.name}$i",
             supportsGet = TransferSizes(blockBytes, blockBytes * platform.prefetchSourceMultiplicity),
             supportsProbe = TransferSizes(blockBytes, blockBytes * platform.prefetchSourceMultiplicity),
-            sourceId = IdRange(0, param.maxInFlightTxs)
+            sourceId = IdRange(0, param.maxInFlightTxs.getOrElse(platform.defaultReadTXConcurrency))
           ))))), dotName)
       })
     }
@@ -52,7 +52,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig,
           (TLClientNode(List(TLMasterPortParameters.v1(
             List(TLMasterParameters.v1(
               name = s"WriteChannel_sys${system_id}_core${core_id}_${para.name}$i",
-              sourceId = IdRange(0, para.maxInFlightTxs),
+              sourceId = IdRange(0, para.maxInFlightTxs.getOrElse(platform.defaultWriteTXConcurrency)),
               supportsPutFull = TransferSizes(1, p(CacheBlockBytes)),
               supportsPutPartial = TransferSizes(1, p(CacheBlockBytes)),
               supportsProbe = TransferSizes(1, p(CacheBlockBytes))))))), dotName)
@@ -73,8 +73,8 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig,
                                     inc: Int = 0, slr_id: Int,
                                     prefix: String,
                                     xbarDegree: Int,
-                                    finalDegree: Int): Seq[(TLIdentityNode, String)] = {
-    CLogger.log(f"Synching together nodes on slr ${slr_id} of type $prefix with depth ${inc}")
+                                    finalDegree: Int): Seq[(TLNode, String)] = {
+//    CLogger.log(f"Synching together nodes on slr ${slr_id} of type $prefix with depth ${inc}")
 
     def help(a: Seq[Seq[(TLNode, String)]]): Seq[(TLNode, String)] = {
       a.zipWithIndex.map { case (r, g_idx) =>
@@ -96,7 +96,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig,
       }
     }
 
-    def mapToEndpoint(x: TLNode, xName: String): (TLIdentityNode, String) = {
+    def mapToEndpoint(x: TLNode, xName: String): (TLNode, String) = {
       val memory_endpoint_identity = TLIdentityNode()
       val epDot = DotGen.addNode(s"${systemParams.name}.node2EPmap", slr_id, imaginary = true)
       DotGen.addEdge(xName, epDot)
@@ -106,7 +106,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig,
 
     if (grp.isEmpty) Seq()
     else if (grp.length <= finalDegree) {
-      grp.map(a => mapToEndpoint(a._1, a._2))
+      grp
     } else {
       val groups = grp.grouped(xbarDegree)
       val endpoints = help(groups.toSeq)
@@ -243,7 +243,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig,
         if (reduction.isEmpty) List()
         else if (from == to) reduction
         else {
-          CLogger.log(s"Creating XBar between SLRs ${DieName.getSLRFromIdx(from)} and ${DieName.getSLRFromIdx(to)}")
+//          CLogger.log(s"Creating XBar between SLRs ${DieName.getSLRFromIdx(from)} and ${DieName.getSLRFromIdx(to)}")
           val canal = LazyModuleWithFloorplan(new TLXbar(), slr_id = from, name = s"slrRed_${prefix}xb_sys${systemParams.name}_slr${from}_${node_ctr}")
           val canaldN = DotGen.addNode(f"${systemParams.name}.canal.xbar", from)
           reduction foreach { a =>
@@ -259,7 +259,7 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig,
           val dbuf = LazyModuleWithFloorplan(new TLBuffer(), slr_id = to,
             name = s"__slrRed_${prefix}dbuf_sys${systemParams.name}_slr${from}to${to}_${node_ctr}")
           val dbufdN = DotGen.addBufferNode(f"${systemParams.name}.xSLRdest.${from}to${to}", to)
-          CLogger.log(f"Routing between SLRs: ${DieName.getSLRFromIdx(from)} -> ${DieName.getSLRFromIdx(to)} ($from -> $to)\n")
+//          CLogger.log(f"Routing between SLRs: ${DieName.getSLRFromIdx(from)} -> ${DieName.getSLRFromIdx(to)} ($from -> $to)\n")
           node_ctr += 1
           sbuf.node := canal.node
           DotGen.addEdge(canaldN, sbufdN)
@@ -289,13 +289,13 @@ class ComposerSystem(val systemParams: AcceleratorSystemConfig,
         else {
           val neighbors = (slr match {
             case x if x == memoryRoot =>
-              CLogger.log(f"Memory root trees to ${slr - 1} and ${slr + 1}")
+//              CLogger.log(f"Memory root trees to ${slr - 1} and ${slr + 1}")
               Seq(slr - 1, slr + 1)
             case x if x > memoryRoot =>
-              CLogger.log(f"\t$x trees to ${slr + 1}")
+//              CLogger.log(f"\t$x trees to ${slr + 1}")
               Seq(slr + 1)
             case x if x < memoryRoot =>
-              CLogger.log(f"\t$x trees to ${slr - 1}")
+//              CLogger.log(f"\t$x trees to ${slr - 1}")
               Seq(slr - 1)
           }) map { x => reduceFromTo(x, slr, treeOutMemoryBus(x)) }
 

@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
 import composer.Floorplanning.{ConstraintGeneration, LazyModuleWithSLRs}
+import composer.Generation.BuildMode.Simulation
 import composer._
 import composer.Generation._
 import composer.RoccHelpers.FrontBusHub
@@ -109,19 +110,23 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
 
   val (dma_port, dmaSourceBits) = platform match {
     case pWithDMA: Platform with PlatformHasSeparateDMA =>
-      val dma_node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
-        masters = Seq(AXI4MasterParameters(
-          name = "S01_AXI",
-          maxFlight = Some(2),
-          aligned = true,
-          id = IdRange(0, 1 << pWithDMA.DMAIDBits),
-        ))
-      )))
-      (Some(dma_node, DotGen.addPortNode("DMASep",
-        platform match {
-          case pmd: Platform with MultiDiePlatform => pmd.platformDies.indexWhere(_.frontBus)
-          case _ => -1
-        })), pWithDMA.DMAIDBits)
+      if (p(BuildModeKey) == BuildMode.Simulation) {
+        (None, 0)
+      } else {
+        val dma_node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+          masters = Seq(AXI4MasterParameters(
+            name = "S01_AXI",
+            maxFlight = Some(2),
+            aligned = true,
+            id = IdRange(0, 1 << pWithDMA.DMAIDBits),
+          ))
+        )))
+        (Some(dma_node, DotGen.addPortNode("DMASep",
+          platform match {
+            case pmd: Platform with MultiDiePlatform => pmd.platformDies.indexWhere(_.frontBus)
+            case _ => -1
+          })), pWithDMA.DMAIDBits)
+      }
     case _ => (None, 0)
   }
 
@@ -187,7 +192,7 @@ class ComposerTop(implicit p: Parameters) extends LazyModuleWithSLRs() {
       (tl2axi.axi_client, dN)
     }
   }
-  val mem_tops = if (platform.isInstanceOf[PlatformHasSeparateDMA]) {
+  val mem_tops = if (platform.isInstanceOf[PlatformHasSeparateDMA] && p(BuildModeKey) != Simulation) {
     if (p(ConstraintHintsKey).contains(ComposerConstraintHint.DistributeCoresAcrossSLRs)) {
       val full_mem_xbar = Seq.tabulate(nMemChannels)(idx =>
         (LazyModuleWithFloorplan(new AXI4Xbar(maxFlightPerId = p(MaxInFlightMemTxsPerSource)),
@@ -293,9 +298,11 @@ class TopImpl(outer: ComposerTop)(implicit p: Parameters) extends LazyModuleImp(
     // make incoming dma port and connect it
     platform match {
       case pWithDMA: PlatformHasSeparateDMA =>
-        val params = outer.AXI_MEM.get(0)._1.in(0)._1.params
-        val dma = IO(Flipped(AXI4Compat(params.copy(idBits = pWithDMA.DMAIDBits))))
-        AXI4Compat.connectCompatSlave(dma, outer.dma_port.get._1.out(0)._1)
+        if (p(BuildModeKey) != Simulation) {
+          val params = outer.AXI_MEM.get(0)._1.in(0)._1.params
+          val dma = IO(Flipped(AXI4Compat(params.copy(idBits = pWithDMA.DMAIDBits))))
+          AXI4Compat.connectCompatSlave(dma, outer.dma_port.get._1.out(0)._1)
+        }
       case _ => ;
     }
 

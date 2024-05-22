@@ -17,7 +17,7 @@ class ResetBridge[T <: Reset](dut: T, bridgeDelay: Int) extends RawModule {
     val reset = Input(dut.cloneType)
     val dut_reset = Output(dut.cloneType)
   })
-  withClock(io.clock) {
+  withClockAndReset(io.clock, false.B.asAsyncReset) {
     io.dut_reset := ShiftReg(io.reset, bridgeDelay)
   }
 }

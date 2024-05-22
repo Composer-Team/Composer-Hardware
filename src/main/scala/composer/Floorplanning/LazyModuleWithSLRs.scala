@@ -15,8 +15,8 @@ abstract class LazyModuleWithSLRs()(implicit p: Parameters) extends LazyModule {
 
   def LazyModuleWithFloorplan[T <: LazyModule](mod: => T, slr_id: Int, name: String): T = {
     val lm = LazyModule(mod)
-    if (!ConstraintGeneration.canDistributeOverSLRs()) return lm
     lm.suggestName(name)
+    if (!ConstraintGeneration.canDistributeOverSLRs()) return lm
     if (globalNameList.contains(name)) {
       throw new Exception(s"Name $name already exists in the globalNameList. Give this module($name) a name that will be globally unique")
     }
@@ -28,9 +28,9 @@ abstract class LazyModuleWithSLRs()(implicit p: Parameters) extends LazyModule {
   }
   def LazyModuleWithFloorplan[T <: LazyModule](mod: => T, slr_id: Int)(implicit valName: ValName): T = {
     val lm = LazyModule(mod)
-    if (!ConstraintGeneration.canDistributeOverSLRs()) return lm
     val name = baseName + "_" + valName.name
     lm.suggestName(name)
+    if (!ConstraintGeneration.canDistributeOverSLRs()) return lm
     if (globalNameList.contains(name)) {
       throw new Exception(s"Name $name already exists in the globalNameList. Give this module($name) a name that will be globally unique")
     }

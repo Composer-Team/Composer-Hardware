@@ -3,11 +3,12 @@ package composer.Generation.CPP
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
 import composer.ComposerParams._
+import composer.Generation.BuildMode.Simulation
 import composer.Generation.CPP.CommandParsing.customCommandToCpp
 import composer.Generation.CPP.TypeParsing.enumToCpp
 import composer.Generation.ComposerBuild
 import composer.Generation.CppGeneration._
-import composer.Platforms.PlatformHasSeparateDMA
+import composer.Platforms.{BuildModeKey, PlatformHasSeparateDMA}
 import composer.RoccHelpers.MCRFileMap
 import composer.Systems._
 import composer.platform
@@ -65,7 +66,7 @@ object Generation {
         s"""
            |static const uint64_t addrMask = 0x${addrSet.mask.toLong.toHexString};
            |""".stripMargin
-        , if (platform.isInstanceOf[PlatformHasSeparateDMA]) "#define COMPOSER_HAS_DMA" else "", {
+        , if (platform.isInstanceOf[PlatformHasSeparateDMA] && p(BuildModeKey) != Simulation) "#define COMPOSER_HAS_DMA" else "", {
         val strobeDtype = getVerilatorDtype(platform.extMem.master.beatBytes)
         val addrWid = log2Up(platform.extMem.master.size)
         val addrDtype = getVerilatorDtype(addrWid)

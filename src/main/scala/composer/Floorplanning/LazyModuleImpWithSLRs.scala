@@ -17,14 +17,14 @@ class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters)
    */
   def ModuleWithSLR[T <: BaseModule](m: => T, real_slrid: Int)(implicit valName: ValName): T = {
     val mod = Module(m)
-    if (!ConstraintGeneration.canDistributeOverSLRs()) return mod
     val name = wrapper.baseName + "_" + valName.name + "_" + gl_id
+    gl_id = gl_id + 1
+    mod.suggestName(name)
+    if (!ConstraintGeneration.canDistributeOverSLRs()) return mod
     if (globalNameList.contains(name)) {
       throw new Exception(s"Name $name already exists in the globalNameList. Give this module($name) a name that will be globally unique")
     }
     globalNameList = name :: globalNameList
-    mod.suggestName(name)
-    gl_id = gl_id + 1
     ConstraintGeneration.addToSLR(name, real_slrid)
     clockMap = (mod, real_slrid) :: clockMap
     mod
@@ -32,12 +32,12 @@ class LazyModuleImpWithSLRs(wrapper: LazyModuleWithSLRs)(implicit p: Parameters)
 
   def ModuleWithSLR[T <: BaseModule](m: => T, real_slrid: Int, name: String)(implicit valName: ValName): T = {
     val mod = Module(m)
+    mod.suggestName(name)
     if (!ConstraintGeneration.canDistributeOverSLRs()) return mod
     if (globalNameList.contains(name)) {
       throw new Exception(s"Name $name already exists in the globalNameList. Give this module($name) a name that will be globally unique")
     }
     globalNameList = name :: globalNameList
-    mod.suggestName(name)
     gl_id = gl_id + 1
     ConstraintGeneration.addToSLR(name, real_slrid)
     clockMap = (mod, real_slrid) :: clockMap

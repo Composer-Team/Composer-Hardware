@@ -62,11 +62,12 @@ class SequentialWriter(nBytes: Int,
 
   val memory_latency = 3
   val write_buffer_io = Wire(Output(Decoupled(UInt(tl_outer.params.dataBits.W))))
-  val write_buffer = Memory(memory_latency, tl_outer.params.dataBits, q_size, 1, 1, 0, None)
+  val write_buffer = Memory(memory_latency, tl_outer.params.dataBits, q_size, 1, 1, 0)
   val write_buffer_occupancy = RegInit(0.U(log2Up(q_size + 1).W))
   val write_buffer_read_shift = RegInit(0.U(memory_latency.W))
   val burst_storage_occupancy = RegInit(0.U(log2Up(platform.prefetchSourceMultiplicity + 1).W))
   val raddr = RegInit(0.U(log2Up(q_size).W))
+  println("PREFETCH " + platform.prefetchSourceMultiplicity)
   val waddr = RegInit(0.U(log2Up(q_size).W))
   val (wb_widx, wb_ridx) = if (write_buffer.nWritePorts == 0) (0, 1) else (write_buffer.getWritePortIdx(0), write_buffer.getReadPortIdx(0))
 
@@ -148,11 +149,11 @@ class SequentialWriter(nBytes: Int,
   when(burst_inProgress) {
     tl_out.a.valid := true.B
     assert(burst_storage_io.deq.valid)
-    tl_out.a.bits := edge.Put(
-      sourceInProgress,
-      addrInProgress,
-      log2Up(platform.prefetchSourceMultiplicity * beatBytes).U,
-      burst_storage_io.deq.bits)._2
+    tl_out.a.bits.opcode := TLMessages.PutFullData
+    tl_out.a.bits.address := addrInProgress
+    tl_out.a.bits.size := log2Up(platform.prefetchSourceMultiplicity * beatBytes).U
+    tl_out.a.bits.data := burst_storage_io.deq.bits
+    tl_out.a.bits.mask := BigInt("1" * beatBytes, radix=2).U
     when(tl_out.a.fire) {
       burst_progress_count := burst_progress_count + 1.U
       when(burst_progress_count === (pfsm - 1).U) {
@@ -174,11 +175,11 @@ class SequentialWriter(nBytes: Int,
     val nextAddr = Cat(req_addr,
       0.U(log2Up(beatBytes).W))
 
-    tl_out.a.bits := edge.Put(
-      nextSource,
-      nextAddr,
-      Mux(isSmall, log2Up(beatBytes).U, log2Up(beatBytes * pfsm).U),
-      burst_storage_io.deq.bits)._2
+    tl_out.a.bits.data := burst_storage_io.deq.bits
+    tl_out.a.bits.size := Mux(isSmall, log2Up(beatBytes).U, log2Up(beatBytes * pfsm).U)
+    tl_out.a.bits.address := nextAddr
+    tl_out.a.bits.source := nextSource
+    tl_out.a.bits.opcode := TLMessages.PutFullData
     when(tl_out.a.fire) {
       sourceBusyBits(nextSource) := true.B
       sourceInProgress := nextSource

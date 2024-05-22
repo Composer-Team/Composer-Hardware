@@ -23,6 +23,7 @@ object AWSF1Platform {
     val res = os.proc("ssh", "ec2-user@" + ip, "ls", "~/aws-fpga").call()
     res.exitCode == 0
   }
+
   def initial_setup(ip: String): Unit = {
     val croot = sys.env("COMPOSER_ROOT")
     os.proc("rsync", "-azr", f"$croot/bin", f"ec2-user@$ip:~/bin").call()
@@ -41,12 +42,20 @@ class AWSF1Platform(memoryNChannels: Int,
     case _ => throw new Exception("Invalid clock recipe. Only supporting A0, A1, A2 for main clock right now.")
   }
 
+  override val defaultReadTXConcurrency = clockRateMHz match {
+    case 125 => 4
+    case 250 => 8
+    case 15 => 1
+  }
+
+  override val defaultWriteTXConcurrency: Int = defaultReadTXConcurrency
+
   override val platformDies = Seq(
     DieName("pblock_CL_bot", frontBus = true, resetRoot = true),
     DieName("pblock_CL_mid", memoryBus = true),
     DieName("pblock_CL_top"))
 
-  override val placementAffinity: Seq[Int] = Seq(2, 2, 3)
+  override val placementAffinity: Seq[Int] = Seq(3, 3, 4)
 
   override def postProcessorMacro(c: Config, paths: Seq[Path]): Unit = {
     if (c(BuildModeKey) == BuildMode.Synthesis) {
@@ -56,7 +65,7 @@ class AWSF1Platform(memoryNChannels: Int,
       os.makeDir.all(os.Path(ComposerBuild.composerGenDir) / "aws")
       os.remove.all(top_file)
       os.proc("touch", top_file.toString()).call()
-//      os.proc("cp", "-r", os.Path(ComposerBuild.composerGenDir) / "composer.build" / "*", aws_dir).call()
+      //      os.proc("cp", "-r", os.Path(ComposerBuild.composerGenDir) / "composer.build" / "*", aws_dir).call()
       os.copy.over(os.Path(ComposerBuild.composerGenDir) / "composer.build", aws_dir)
       os.move(os.Path(ComposerBuild.composerGenDir) / "aws" / "ComposerTop.v", top_file)
       os.walk(os.Path(ComposerBuild.composerGenDir)).foreach(
@@ -70,7 +79,7 @@ class AWSF1Platform(memoryNChannels: Int,
           f"$$::env(HOME)/build-dir/design/$rel_path"
       }
       os.write.over(os.Path(ComposerBuild.composerGenDir) / "aws" / "src_list.tcl",
-         f"set hdl_sources [list ${hdl_srcs.mkString(" \\\n")} ]")
+        f"set hdl_sources [list ${hdl_srcs.mkString(" \\\n")} ]")
       // write ip tcl
       val ip_tcl = os.Path(ComposerBuild.composerGenDir) / "aws" / "ip.tcl"
       os.write.over(ip_tcl,
@@ -79,13 +88,13 @@ class AWSF1Platform(memoryNChannels: Int,
           |exec rm -rf $ipDir/*
           |exec mkdir -p $ipDir
           |""".stripMargin + SynthScript(
-        "",
-        "",
-        "",
-        "",
-        clockRateMHz.toString,
-        precompile_dependencies = getTclMacros()
-      ).ip_script + "\nupdate_compile_order -fileset sources_1\n")
+          "",
+          "",
+          "",
+          "",
+          clockRateMHz.toString,
+          precompile_dependencies = getTclMacros()
+        ).ip_script + "\nupdate_compile_order -fileset sources_1\n")
 
       // get aws address from stdio input
       println("Compilation is done.")
@@ -98,7 +107,7 @@ class AWSF1Platform(memoryNChannels: Int,
           try {
             println("Transfering...")
             os.proc("ssh", f"ec2-user@$in", "rm", "-rf", "~/build-dir/generated-src/*")
-            os.proc("rsync", "--progress", "-avz", f"${ComposerBuild.composerGenDir}/aws/", f"ec2-user@$in:~/build-dir/generated-src/").call(
+            os.proc("rsync", "-avz", f"${ComposerBuild.composerGenDir}/aws/", f"ec2-user@$in:~/build-dir/generated-src/").call(
               stdout = os.Inherit
             )
           } catch {

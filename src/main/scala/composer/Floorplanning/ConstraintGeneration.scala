@@ -18,7 +18,7 @@ object ConstraintGeneration {
   private[composer] var slrMappings: List[(String, Int)] = List.empty
 
   def addToSLR(moduleName: String, slr: Int): Unit = {
-    println(moduleName)
+//    println(moduleName)
     require(!slrMappings.map(_._1).contains(moduleName), f"The module '$moduleName' has already been assigned to an SLR!")
     slrMappings = (moduleName, slr) :: slrMappings
   }

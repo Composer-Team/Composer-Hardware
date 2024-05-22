@@ -1,5 +1,6 @@
 package composer.Platforms.ASIC
 
+import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.experimental.BaseModule
@@ -18,8 +19,19 @@ import scala.annotation.tailrec
  * a memory cascade. To deal with this, such a compiler must provide its own search.
  */
 trait CanCompileMemories {
-  def getMemoryCascade(suggestedRows: Int, suggestedColumns: Int, nPorts: Int, latency: Int, reqFreqMHz: Int): Option[CascadeDescriptor]
+  def getMemoryCascade(suggestedRows: Int, suggestedColumns: Int, nPort: Int, latency: Int, reqFreqMHz: Int): Option[CascadeDescriptor]
 }
+
+trait SupportsWriteEnable {
+  def getWEMemoryCascade(suggestedRows: Int, suggestedColumns: Int, nPort: Int, latency: Int, reqFreqMHz: Int): Option[CascadeDescriptor]
+
+  def generateMemoryFactory(nPorts: Int, nRows: Int, nColumns: Int, withWE: Boolean)(implicit p: config.Parameters): () => BaseModule with HasMemoryInterface
+
+  def generateMemoryFactory(nPorts: Int, nRows: Int, nColumns: Int)(implicit p: config.Parameters): () => BaseModule with HasMemoryInterface =
+    generateMemoryFactory(nPorts, nRows, nColumns, withWE = false)
+
+}
+
 
 /**
  * The linkage of this memory compiler is to a static list of memories that we don't expect to have datasheets
@@ -99,12 +111,15 @@ private class C_ASIC_MemoryCascade(rows: Int,
                                    dataBits: Int,
                                    cascadeBits: Int,
                                    idx: Int,
-                                   nPorts: Int)(implicit p: Parameters) extends RawModule {
+                                   nPorts: Int,
+                                   withWE: Boolean)(implicit p: Parameters) extends RawModule {
   val totalAddr = log2Up(rows) + cascadeBits
-  val io = IO(new CMemoryIOBundle(0, 0, nPorts, totalAddr, dataBits) with withMemoryIOForwarding)
+  val io = IO(new CMemoryIOBundle(0, 0, nPorts, totalAddr, dataBits, withWE) with withMemoryIOForwarding)
   val mc = p(PlatformKey).asInstanceOf[Platform with HasMemoryCompiler].memoryCompiler
   withClockAndReset(io.clock.asClock, false.B.asAsyncReset) {
-    val mem = mc.generateMemoryFactory(nPorts, rows, dataBits)(p)()
+    val mem =
+      if (withWE) mc.asInstanceOf[SupportsWriteEnable].generateMemoryFactory(nPorts, rows, dataBits, withWE)(p)()
+      else mc.generateMemoryFactory(nPorts, rows, dataBits)(p)()
     mem.clocks.foreach(_ := io.clock)
     (0 until nPorts) foreach { port_idx =>
       val cascade_select = if (cascadeBits == 0) true.B else idx.U === io.addr(port_idx).head(cascadeBits)
@@ -148,10 +163,14 @@ object MemoryCompiler {
    *                  library and platform limited.
    * @param io        IO in the parent context. Needs to be a CMemoryIOBundle
    */
-  def buildSRAM(Latency: Int, dataWidth: Int, nRows: Int, nPorts: Int)(implicit io: CMemoryIOBundle, p: Parameters): Unit = {
+  def buildSRAM(Latency: Int, dataWidth: Int, nRows: Int, nPorts: Int, withWE: Boolean, allowFallBack: Boolean)(implicit io: CMemoryIOBundle, p: Parameters): Unit = {
     val (memory_chain_latency, preStage, postStage) = {
       def works(latency: Int): Boolean = {
-        mc.getMemoryCascade(nRows, dataWidth, nPorts, latency, p(PlatformKey).clockRateMHz).isDefined
+        if (withWE)
+          mc.asInstanceOf[MemoryCompiler with SupportsWriteEnable].getWEMemoryCascade(
+            nRows, dataWidth, nPorts, latency, p(PlatformKey).clockRateMHz).isDefined
+        else
+          mc.getMemoryCascade(nRows, dataWidth, nPorts, latency, p(PlatformKey).clockRateMHz).isDefined
       }
 
       def rn[T <: Data](x: T): T = {
@@ -178,21 +197,28 @@ object MemoryCompiler {
           mem.mio.write_enable(port_idx) := io.write_enable(port_idx)
           mem.mio.addr(port_idx) := io.addr(port_idx)
         }
-        composer.Generation.CLogger.log(s"Failed to find suitable SRAM configuration for ${nPorts}x${nRows}x${dataWidth} at L=${Latency}" +
-          s" Falling back to Register-based memory")
-        throw new Exception()
+        if (allowFallBack) {
+          composer.Generation.CLogger.log(s"Failed to find suitable SRAM configuration for ${nPorts}x${nRows}x${dataWidth} at L=${Latency}" +
+            s" Falling back to Register-based memory")
+          return
+        } else {
+          composer.Generation.CLogger.log(s"Failed to find suitable SRAM configuration for ${nPorts}x${nRows}x${dataWidth} at L=${Latency}")
+          throw new Exception()
+        }
       }
     }
-    val memoryStructure = mc.getMemoryCascade(nRows, dataWidth, nPorts, memory_chain_latency, p(PlatformKey).clockRateMHz).get
+    val memoryStructure = if (withWE)
+      mc.asInstanceOf[SupportsWriteEnable].getWEMemoryCascade(
+        nRows, dataWidth, nPorts, memory_chain_latency, p(PlatformKey).clockRateMHz).get
+    else mc.getMemoryCascade(nRows, dataWidth, nPorts, memory_chain_latency, p(PlatformKey).clockRateMHz).get
     val totalRowBits = log2Up(nRows)
     val cascadeRows = memoryStructure.depths
     val addressBases = cascadeRows.zip(cascadeRows.scan(0)(_ + _)).map {
       case (sz, sum) => sum >> log2Up(sz)
     }
 
-    def al_switch(a: Bool): Bool = {
-      if (mc.isActiveHighSignals) a else !a
-    }
+    def al_switch(a: UInt): UInt =
+      if (mc.isActiveHighSignals) a else (~a).asUInt
 
     val banks = Seq.tabulate(memoryStructure.bankWidths.length) { bank_idx =>
       val data_offset = (0 until bank_idx).map(memoryStructure.bankWidths(_)).sum
@@ -206,7 +232,8 @@ object MemoryCompiler {
             bank_width,
             Math.max(0, totalRowBits - log2Up(cascadeRows(idx))),
             addressBases(idx),
-            nPorts
+            nPorts,
+            withWE
           )
         )
         m.suggestName(s"mem_${nRows}x${dataWidth}x${nPorts}_l${memory_chain_latency}_c${bank_idx}_r${idx}}")

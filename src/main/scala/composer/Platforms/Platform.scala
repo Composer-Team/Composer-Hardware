@@ -66,6 +66,8 @@ abstract class Platform {
   // performance under some circumstances. If this is a parameter of interest, it is usually find in the memory
   // controller documentation.
   val prefetchSourceMultiplicity: Int = 16
+  val defaultReadTXConcurrency: Int = 4
+  val defaultWriteTXConcurrency: Int = 4
 
   // maximum memory crossbar fanout degree. Larger xbars will be broken up into multiple layers.
   // This can be tuned for platforms where congestion is a primary concern

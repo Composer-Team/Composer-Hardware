@@ -30,7 +30,7 @@ class KriaPlatform(val memoryNChannels: Int = 1,
 
   override def postProcessorMacro(c: Config, paths: Seq[Path]): Unit = {
     if (c(BuildModeKey) == BuildMode.Synthesis) {
-      println("tcl macros: " + getTclMacros().mkString("\n"))
+//      println("tcl macros: " + getTclMacros().mkString("\n"))
       val s = SynthScript(
         "composer",
         "output",

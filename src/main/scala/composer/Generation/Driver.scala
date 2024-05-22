@@ -145,7 +145,6 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
           // if you want to get annotation output for debugging, uncomment the following line
           new EmitAllModulesAnnotation(classOf[VerilogEmitter]),
           new TargetDirAnnotation(targetDir.toString()),
-          //          new OutputAnnotationFileAnnotation(targetDir.toString()),
           new TopModuleAnnotation(Class.forName("composer.Systems.ComposerTop")),
           Generation.Stage.ConfigsAnnotation(configWithBuildMode),
           CustomDefaultMemoryEmission(MemoryNoInit),
@@ -156,6 +155,7 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
       )
     )
 
+    os.remove.all(targetDir / "firrtl_black_box_resource_files.f")
     val chiselGeneratedSrcs = WalkPath(targetDir)
 
     // --------------- Verilog Annotators ---------------
@@ -189,6 +189,9 @@ class ComposerBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesi
         targetDir / "ComposerTop.v"
       )
     }
+
+    os.write.over(gsrc_dir / "cmake_srcs.cmake",
+      f"""set(SRCS ${movedSrcs.mkString("\n")}\n${chiselGeneratedSrcs.mkString("\n")})\n""")
 
     buildMode match {
       case bm: BuildMode.Tuning if !args.contains("--notune") =>

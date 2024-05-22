@@ -1,5 +1,6 @@
 package composer.Generation.Annotators
 
+import composer.Generation.CLogger
 import os.Path
 
 import scala.collection.parallel.CollectionConverters.ImmutableIterableIsParallelizable
@@ -37,7 +38,7 @@ object CrossBoundaryDisable {
     files.toList.par.foreach { file =>
       os.proc(sed_bin, "-i", f"-f" + os.pwd / "sed_script.sed", file).call()
     }
-    println(s"CrossBoundaryDisable took ${System.currentTimeMillis() - start_time} ms")
+    CLogger.log(s"CrossBoundaryDisable took ${System.currentTimeMillis() - start_time} ms")
 
   }
 
