@@ -36,7 +36,7 @@ class BeethovenChipStage extends Stage with Phase {
   private val pm = new PhaseManager(targets)
 
   override def run(annotations: AnnotationSeq): AnnotationSeq =
-    pm.transform(annotations ++ Seq(PrintFullStackTraceAnnotation, NoDCEAnnotation))
+    pm.transform(annotations)
 }
 
 object BeethovenBuild {

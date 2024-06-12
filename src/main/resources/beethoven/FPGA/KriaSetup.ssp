@@ -37,7 +37,7 @@ set_property -dict [list \\
     CONFIG.PSU__SAXIGP2__DATA_WIDTH {32} \\
     CONFIG.PSU__CRL_APB__PL0_REF_CTRL__FREQMHZ {${clock_rate}} \\
 ] [get_bd_cells soc]
-add_files composer.build/
+add_files beethoven.build/
 update_compile_order -fileset sources_1
 create_bd_cell -type module -reference ${top_module} top
 

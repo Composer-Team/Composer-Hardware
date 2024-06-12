@@ -30,7 +30,7 @@ ex_name = ex_opts[1]
 ex_opts = ex_opts[2:]
 # get perf counters also in JSON format from CAnnotations.json
 
-gen_dir = os.environ['COMPOSER_ROOT'] + "/Composer-Hardware/vsim/generated-src"
+gen_dir = os.environ['COMPOSER_ROOT'] + "/beethoven-Hardware/vsim/generated-src"
 with open(gen_dir + "/tunables.json", 'r') as f:
     params = json.load(f)
 
@@ -58,7 +58,7 @@ def objective(trial: opt.Trial):
     subprocess.Popen(["mkdir", "-p", trial_hw_dir]).wait()
     # run subprocess without blocking
     # build it in custom directory because it might take a long time and we don't want to block parallel building
-    # link composer.v to the generated composer.v when building the runtime because that's much quicker (block for that)
+    # link beethoven.v to the generated beethoven.v when building the runtime because that's much quicker (block for that)
     subprocess.Popen(['sbt', 'runMain ' + main_method + " --notune --target=" + trial_hw_dir + " " + assignments,
                       "-Dsbt.io.implicit.relative.glob.conversion=allow"],
                      cwd=hw_build_dir).wait()
@@ -66,11 +66,11 @@ def objective(trial: opt.Trial):
     # use debug build because it makes much faster and the performance isn't much different
     # build the runtime
     FileLock("lock").acquire()
-    os.remove(os.environ['COMPOSER_ROOT'] + "/Composer-Hardware/vsim/generated-src/composer.v")
-    subprocess.Popen(["ln", "-s", trial_hw_dir + "/composer.v",
-                      os.environ['COMPOSER_ROOT'] + "/Composer-Hardware/vsim/generated-src/composer.v"]).wait()
+    os.remove(os.environ['COMPOSER_ROOT'] + "/beethoven-Hardware/vsim/generated-src/beethoven.v")
+    subprocess.Popen(["ln", "-s", trial_hw_dir + "/beethoven.v",
+                      os.environ['COMPOSER_ROOT'] + "/beethoven-Hardware/vsim/generated-src/beethoven.v"]).wait()
 
-    subprocess.Popen(["cmake", os.environ['COMPOSER_ROOT'] + "/Composer-Runtime/", "-DTARGET=sim",
+    subprocess.Popen(["cmake", os.environ['COMPOSER_ROOT'] + "/beethoven-Runtime/", "-DTARGET=sim",
                       "-DCMAKE_BUILD_TYPE=Debug", "-DUSE_DRAMSIM=1", "-DUSE_VCD=1"], cwd=trial_runtime_dir).wait()
     FileLock("lock").release()
     subprocess.Popen(["make", "-j4"], cwd=trial_runtime_dir).wait()
@@ -78,7 +78,7 @@ def objective(trial: opt.Trial):
     subprocess.Popen(["cmake", ex_dir] + ex_opts, cwd=trial_exec_dir).wait()
     subprocess.Popen(["make", "-j4", ex_name], cwd=trial_exec_dir).wait()
     # run runtime
-    runtime = subprocess.Popen(["./ComposerRuntime"] + [f"--dump={d}" for d in all_perf_paths], cwd=trial_runtime_dir)
+    runtime = subprocess.Popen(["./beethovenRuntime"] + [f"--dump={d}" for d in all_perf_paths], cwd=trial_runtime_dir)
     time.sleep(1)
     # run the executable
     subprocess.Popen(["./" + ex_name], cwd=trial_exec_dir).wait()

@@ -9,7 +9,7 @@ lazy val beethoven =(project in file(".")).settings(
   organization := "edu.duke.cs.apex",
   libraryDependencies ++= Seq(
     "edu.berkeley.cs" %% "chisel3" % chiselVersion,
-    "edu.duke.cs.apex" %% "rocketchip-rocketchip-fork" % "0.1.14",
+    "edu.duke.cs.apex" %% "rocketchip-rocketchip-fork" % "0.1.11",
     "org.scalatra.scalate" %% "scalate-core" % "1.9.6",
     "org.slf4j" % "slf4j-api" % "2.0.9",
     "org.slf4j" % "slf4j-nop" % "2.0.9",
