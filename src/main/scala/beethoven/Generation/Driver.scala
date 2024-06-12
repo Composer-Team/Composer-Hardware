@@ -161,6 +161,7 @@ class BeethovenBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthes
     // --------------- Verilog Annotators ---------------
     //    KeepHierarchy(targetDir / "BeethovenTop.v")
 //    partitionModules foreach println
+    println("ALL THE FILES ARE IN " + targetDir)
     val movedSrcs = beethoven.Generation.Annotators.UniqueMv(sourceList, targetDir)
 
     ConstraintGeneration.slrMappings.foreach { slrMapping =>
