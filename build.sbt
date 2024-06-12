@@ -3,8 +3,8 @@ val chiselVersion = "3.5.6"
 
 ThisBuild / scalaVersion := "2.13.10"
 
-lazy val composer =(project in file(".")).settings(
-  name := "composer-hardware",
+lazy val beethoven =(project in file(".")).settings(
+  name := "beethoven-hardware",
   version := "SNAP19",
   organization := "edu.duke.cs.apex",
   libraryDependencies ++= Seq(
