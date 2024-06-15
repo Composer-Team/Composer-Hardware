@@ -25,7 +25,7 @@ object AWSF1Platform {
   }
 
   def initial_setup(ip: String): Unit = {
-    val croot = sys.env("COMPOSER_ROOT")
+    val croot = sys.env("BEETHOVEN_ROOT")
     os.proc("rsync", "-azr", f"$croot/bin", f"ec2-user@$ip:~/bin").call()
     os.proc("ssh", f"ec2-user@$ip", "~/bin/aws/scripts/initial_setup.sh").call()
   }

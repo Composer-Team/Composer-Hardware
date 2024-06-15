@@ -34,7 +34,7 @@ object Generation {
            |#endif
            |#define ALLOCATOR_SIZE_BYTES (0x${platform.physicalMemoryBytes.toHexString}L)
            |${if (!platform.hasDiscreteMemory) "#ifdef SIM" else ""}
-           |""".stripMargin + "#define COMPOSER_USE_CUSTOM_ALLOC\n" +
+           |""".stripMargin + "#define BEETHOVEN_USE_CUSTOM_ALLOC\n" +
           (if (!platform.hasDiscreteMemory) "#endif" else ""),
         s"const uint8_t beethovenNumAddrBits = ${log2Up(platform.extMem.master.size)};")
     }
@@ -66,7 +66,7 @@ object Generation {
         s"""
            |static const uint64_t addrMask = 0x${addrSet.mask.toLong.toHexString};
            |""".stripMargin
-        , if (platform.isInstanceOf[PlatformHasSeparateDMA] && p(BuildModeKey) != Simulation) "#define COMPOSER_HAS_DMA" else "", {
+        , if (platform.isInstanceOf[PlatformHasSeparateDMA] && p(BuildModeKey) != Simulation) "#define BEETHOVEN_HAS_DMA" else "", {
         val strobeDtype = getVerilatorDtype(platform.extMem.master.beatBytes)
         val addrWid = log2Up(platform.extMem.master.size)
         val addrDtype = getVerilatorDtype(addrWid)
@@ -100,8 +100,8 @@ object Generation {
          |#include <cassert>
          |#endif
          |
-         |#ifndef COMPOSER_ALLOCATOR_GEN
-         |#define COMPOSER_ALLOCATOR_GEN
+         |#ifndef BEETHOVEN_ALLOCATOR_GEN
+         |#define BEETHOVEN_ALLOCATOR_GEN
          |#define AXIL_BUS_WIDTH ${platform.frontBusBeatBytes * 8}
          |#define XLEN ${p(XLen)}
          |// allocator declarations backends that do not have discrete memory or for simulator

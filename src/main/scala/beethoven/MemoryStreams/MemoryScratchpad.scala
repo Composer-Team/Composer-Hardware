@@ -123,7 +123,8 @@ class ScratchpadImpl(csp: ScratchpadParams,
   val specialization = csp.features.specialization
   val supportWriteback = csp.features.supportWriteback
 
-  private val realNRows = Math.max((nDatas.toFloat / datasPerCacheLine).ceil.toInt, outer.channelWidthBytes * 8 / dataWidthBits)
+  private val realNRows = Math.max((nDatas.toFloat / datasPerCacheLine).ceil.toInt,
+    outer.channelWidthBytes * 8 / dataWidthBits)
   val memoryLengthBits = log2Up(realNRows * dataWidthBits) + 1
 
   private val maxTxLength = outer.channelWidthBytes

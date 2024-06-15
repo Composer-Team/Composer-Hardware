@@ -1,5 +1,6 @@
 package beethoven.Platforms.ASIC
 
+import beethoven.Generation.{BeethovenBuild, BuildMode}
 import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
@@ -9,7 +10,9 @@ import beethoven.MemoryStreams.RAM.SyncReadMemMem
 import beethoven.MemoryStreams._
 import beethoven.Platforms.ASIC.ProcessCorner.ProcessCorner
 import beethoven.Platforms.ASIC.ProcessTemp.ProcessTemp
+import beethoven.Platforms.ASIC.memoryCompiler.CanCompileMemories
 import beethoven.Platforms._
+import os.Path
 
 import scala.annotation.tailrec
 
@@ -18,9 +21,6 @@ import scala.annotation.tailrec
  * This in an important distinction because it makes it much harder to enumerate all of the memories in a search for
  * a memory cascade. To deal with this, such a compiler must provide its own search.
  */
-trait CanCompileMemories {
-  def getMemoryCascade(suggestedRows: Int, suggestedColumns: Int, nPort: Int, latency: Int, reqFreqMHz: Int): Option[CascadeDescriptor]
-}
 
 trait SupportsWriteEnable {
   def getWEMemoryCascade(suggestedRows: Int, suggestedColumns: Int, nPort: Int, latency: Int, reqFreqMHz: Int): Option[CascadeDescriptor]
@@ -40,7 +40,7 @@ trait SupportsWriteEnable {
 trait CannotCompileMemories extends CanCompileMemories {
   val availableMems: Map[Int, Seq[SD]]
 
-  def getMemoryCascade(suggestedRows: Int, suggestedColumns: Int, nPorts: Int, latency: Int, reqFreqMHz: Int = 0): Option[CascadeDescriptor] = {
+  override def getMemoryCascade(suggestedRows: Int, suggestedColumns: Int, nPorts: Int, latency: Int, reqFreqMHz: Int = 0): Option[CascadeDescriptor] = {
     // first figure out how deep we have to cascade.
     availableMems.get(nPorts) match {
       case Some(memSet) =>
@@ -107,6 +107,7 @@ abstract class MemoryCompiler {
   def generateMemoryFactory(nPorts: Int, nRows: Int, nColumns: Int)(implicit p: Parameters): () => BaseModule with HasMemoryInterface
 }
 
+
 private class C_ASIC_MemoryCascade(rows: Int,
                                    dataBits: Int,
                                    cascadeBits: Int,
@@ -146,6 +147,9 @@ private class C_ASIC_MemoryCascade(rows: Int,
 }
 
 object MemoryCompiler {
+  var libs: Map[(ProcessCorner, ProcessTemp), Seq[Path]] = Map.empty
+  var gds2: Seq[Path] = Seq.empty
+  var sram_paths: Seq[Path] = Seq.empty
 
   def mc(implicit p: Parameters) = p(PlatformKey).asInstanceOf[Platform with HasMemoryCompiler].memoryCompiler.asInstanceOf[MemoryCompiler with CanCompileMemories]
 

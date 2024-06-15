@@ -41,7 +41,7 @@ class BeethovenChipStage extends Stage with Phase {
 
 object BeethovenBuild {
   private val errorNoCR =
-    "Environment variables 'COMPOSER_ROOT' is not visible and no shell configuration file found.\n" +
+    "Environment variables 'BEETHOVEN_ROOT' is not visible and no shell configuration file found.\n" +
       " Please define or configure IDE to see this enviornment variable\n"
 
   private var crossBoundaryDisableList: Seq[String] = Seq.empty
@@ -69,13 +69,13 @@ object BeethovenBuild {
   }
 
   def beethovenRoot(): String = {
-    if (System.getenv("COMPOSER_ROOT") != null)
-      return System.getenv("COMPOSER_ROOT")
+    if (System.getenv("BEETHOVEN_ROOT") != null)
+      return System.getenv("BEETHOVEN_ROOT")
     val sh_full = System.getenv("SHELL")
     if (sh_full == null) throw new Exception(errorNoCR)
     val sh = sh_full.split("/").last
     val config = os.read(os.home / f".${sh}rc")
-    val pattern = Pattern.compile("export COMPOSER_ROOT=([a-zA-Z/.]*)")
+    val pattern = Pattern.compile("export BEETHOVEN_ROOT=([a-zA-Z/.]*)")
     val matcher = pattern.matcher(config)
     if (matcher.find()) matcher.group(0).split("=")(1).strip()
     else throw new Exception(errorNoCR)
@@ -126,6 +126,8 @@ class BeethovenBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthes
 
   final def main(args: Array[String]): Unit = {
     //    args.foreach(println(_))
+    println("Running with " + Runtime.getRuntime.freeMemory() + "B memory")
+    println(Runtime.getRuntime.maxMemory + "B")
     BuildArgs.args = Map.from(
       args.filter(str => str.length >= 2 && str.substring(0, 2) == "-D").map {
         opt =>
@@ -200,7 +202,7 @@ class BeethovenBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthes
           bm.cmakeOpts.reduce(_ + "." + _)
         }
         os.proc(Seq("python3",
-          System.getenv("COMPOSER_ROOT") + "/Beethoven-Hardware/scripts/tune.py",
+          System.getenv("BEETHOVEN_ROOT") + "/Beethoven-Hardware/scripts/tune.py",
           this.getClass.getCanonicalName,
           bm.hwBuildDir,
           bm.execCMAKEDir + "." + bm.execName + "." + opts)).call(
