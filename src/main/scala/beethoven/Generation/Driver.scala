@@ -158,13 +158,23 @@ class BeethovenBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthes
     )
 
     os.remove.all(targetDir / "firrtl_black_box_resource_files.f")
-    val chiselGeneratedSrcs = WalkPath(targetDir)
+    val allChiselGeneratedSrcs = WalkPath(targetDir)
+    val chiselGeneratedSrcs = allChiselGeneratedSrcs.filter(a => !a.toString().contains("ShiftReg") && !a.toString().contains("Queue"))
+    val shifts = allChiselGeneratedSrcs.filter(a => a.toString().contains("ShiftReg") || a.toString().contains("Queue"))
 
     // --------------- Verilog Annotators ---------------
     //    KeepHierarchy(targetDir / "BeethovenTop.v")
 //    partitionModules foreach println
     println("ALL THE FILES ARE IN " + targetDir)
-    val movedSrcs = beethoven.Generation.Annotators.UniqueMv(sourceList, targetDir)
+    println("shifts: " + shifts)
+    val movedSrcs = beethoven.Generation.Annotators.UniqueMv(sourceList, targetDir) :+ {
+      val s = targetDir / "BeethovenAllShifts.v"
+      val stxts = shifts.map(a => os.read(a))
+      os.write(s, stxts.mkString("\n\n"))
+      shifts.foreach(os.remove(_))
+      println(s"comnbining to ${s}")
+      s
+    }
 
     ConstraintGeneration.slrMappings.foreach { slrMapping =>
       crossBoundaryDisableList = crossBoundaryDisableList :+ slrMapping._1
