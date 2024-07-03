@@ -1,8 +1,11 @@
 package beethoven.common
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.diplomacy.NodeHandle
 
+import scala.annotation.tailrec
 import scala.collection.SeqMap
 
 /**
@@ -35,7 +38,7 @@ trait hasAccessibleUserSubRegions {
 object hasAccessibleUserSubRegions {
   def apply[T <: hasAccessibleUserSubRegions with Bundle](in: UInt, gen: T): T = {
     val a = Wire(gen)
-    a.fieldSubranges.foreach{ case (ele_name, (high, low)) =>
+    a.fieldSubranges.foreach { case (ele_name, (high, low)) =>
       val ele = a.elements(ele_name)
       ele match {
         case regions: hasAccessibleUserSubRegions =>
@@ -74,4 +77,30 @@ object splitIntoChunks {
 
 object Misc {
   def left_assign[T <: Data](tup: (T, T)): Unit = tup._1 := tup._2
+
+
+  /**
+   * given a list of terms and a list of dependencies, return a topological sort of the terms
+   * source: https://en.wikipedia.org/wiki/Topological_sorting
+   * Kahn's algorithm
+   *
+   * @param ins          the terms
+   * @param dependencies tuples of (a, b term), a depends on b
+   * @return
+   */
+  @tailrec
+  def topological_sort_depends(ins: List[String], dependencies: List[(String, String)], L: List[String] = List.empty): List[String] = {
+    val S = ins.filterNot(a => dependencies.exists(_._1 == a))
+    assert(S.nonEmpty, s"Cycle detected in dependencies: $dependencies")
+    val Sp = ins.filter(a => dependencies.exists(_._1 == a))
+    val Lp = L ++ S
+    val deps = dependencies.filterNot(a => S.contains(a._2))
+    if (Sp.isEmpty) {
+      Lp
+    } else {
+      topological_sort_depends(Sp, deps, Lp)
+    }
+  }
+
+  def round2Pow2(x: Int): Int = 1 << log2Up(x)
 }

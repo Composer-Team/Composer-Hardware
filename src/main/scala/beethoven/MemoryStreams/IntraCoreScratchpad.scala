@@ -5,14 +5,20 @@ import chisel3._
 import chisel3.util._
 import beethoven.common.ShiftReg
 import beethoven.Generation.Tune.Tunable
+import beethoven.Parameters.{AcceleratorSystemConfig, IntraCoreMemoryPortInConfig}
+import beethoven.Systems.getCommMemAddressSet
 import beethoven.platform
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 
-class MemWritePort(addrBits: Int, dataBits: Int) extends DecoupledIO(new Bundle() {
+class MemWritePort(addrBits: Int, dataBits: Int,
+                   val canSelectCore: Boolean,
+                   val canSelectChannel: Boolean)(implicit p: Parameters) extends DecoupledIO(new Bundle() {
   val data = UInt(dataBits.W)
   val addr = UInt(addrBits.W)
+  val core = if (canSelectCore) Some(UInt(beethoven.Systems.getCommMemCoreBits().W)) else None
+  val channel = if (canSelectChannel)  Some(UInt(beethoven.Systems.getCommMemChannelBits().W)) else None
 })
 
 /**
@@ -21,14 +27,17 @@ class MemWritePort(addrBits: Int, dataBits: Int) extends DecoupledIO(new Bundle(
  * @param dataWidthBits  the granularity of a single scratchpad read/write in bits
  * @param nDatas         number of data items in the scratchpad. Non-zero
  * @param latency        latency of a scratchpad access from the user interface. Current implementation only supports 1 or 2.
- * @param specialization How data is loaded from memory. Choose a specialization from CScratchpadSpecialization
+ * @param specialization How data is loaded from memory. Choose a specialization from ScratchpadSpecialization
  */
-class IntraCoreScratchpad(asMemorySlave: TLSlavePortParameters,
-                          dataWidthBits: Number,
+class IntraCoreScratchpad(dataWidthBits: Number,
                           nDatas: Number,
                           latency: Number,
                           readOnly: Boolean,
-                          nPorts: Int)(implicit p: Parameters) extends LazyModule {
+                          nPorts: Int,
+                          mp: IntraCoreMemoryPortInConfig,
+                          systemParams: AcceleratorSystemConfig,
+                          coreIdx: Int,
+                          channel_id: Int)(implicit p: Parameters) extends LazyModule {
   require(dataWidthBits.intValue() > 0)
   require(nDatas.intValue() > 0)
   lazy val module = new IntraCoreScratchpadImp(
@@ -40,13 +49,12 @@ class IntraCoreScratchpad(asMemorySlave: TLSlavePortParameters,
     this)
   val channelWidthBytes = platform.extMem.master.beatBytes
   val blockBytes = p(CacheBlockBytes)
-  val mem_slave_node = TLManagerNode(Seq(asMemorySlave))
-
-  dataWidthBits match {
-    case a: Tunable if !a.isIdentity =>
-      println(s"dataWidthBits is base tunable. Range is ${a.range._1}, ${a.range._2}")
-    case _ => ;
-  }
+  val mem_slave_node = TLManagerNode(Seq(TLSlavePortParameters.v1(
+    managers = Seq(TLSlaveParameters.v1(
+      address = Seq(getCommMemAddressSet(systemParams.name, coreIdx, mp.name, channel_id)),
+      regionType = RegionType.IDEMPOTENT,
+      supportsPutFull = TransferSizes(mp.dataWidthBits.intValue() / 8)
+    )), beatBytes = mp.dataWidthBits.intValue() / 8)))
 }
 
 class IntraCoreScratchpadImp(dataWidthBits: Int,
@@ -93,7 +101,7 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
     memory.write_enable(write_port) := false.B
     memory.data_in(write_port) := DontCare
 
-    IOs.zipWithIndex.foreach { case(io, idx) =>
+    IOs.zipWithIndex.foreach { case (io, idx) =>
       val port = memory.getReadWritePortIdx(idx + 1)
       memory.addr(port) := io.req.bits.addr
       memory.chip_select(port) := io.req.valid

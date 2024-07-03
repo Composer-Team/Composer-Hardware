@@ -8,7 +8,7 @@ package object Annotators {
   }
 
   private[Annotators] def get_os(): String = {
-    os.proc("uname").call().out.trim
+    os.proc("uname").call().out.trim()
   }
 
   private[Annotators] def get_sed_inline_opt(): Seq[String] = {

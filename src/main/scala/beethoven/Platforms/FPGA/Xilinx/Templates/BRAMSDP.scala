@@ -5,6 +5,7 @@ import chisel3.util.log2Up
 import chisel3._
 import beethoven.Generation.BeethovenBuild
 import beethoven.MemoryStreams.HasMemoryInterface
+import beethoven.Parameters.{BeethovenConstraintHint, ConstraintHintsKey}
 import beethoven._
 
 import java.io.FileWriter

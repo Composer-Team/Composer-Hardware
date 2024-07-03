@@ -2,17 +2,17 @@ package beethoven.Generation.CPP
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
-import beethoven.BeethovenParams._
 import beethoven.Generation.BuildMode.Simulation
 import beethoven.Generation.CPP.CommandParsing.customCommandToCpp
 import beethoven.Generation.CPP.TypeParsing.enumToCpp
 import beethoven.Generation.BeethovenBuild
 import beethoven.Generation.CppGeneration._
+import beethoven.Parameters.AcceleratorSystems
+import beethoven.Parameters.BeethovenParams.{CoreIDLengthKey, SystemIDLengthKey}
 import beethoven.Platforms.{BuildModeKey, PlatformHasSeparateDMA}
-import beethoven.RoccHelpers.MCRFileMap
+import beethoven.Protocol.RoCC.Helpers.MCRFileMap
 import beethoven.Systems._
-import beethoven.platform
-import freechips.rocketchip.subsystem.ExtMem
+import beethoven._
 import freechips.rocketchip.tile.XLen
 import os.Path
 
@@ -20,8 +20,8 @@ import java.io.FileWriter
 
 
 object Generation {
-  def genCPPHeader(cr: MCRFileMap, top: BeethovenTop)(implicit p: Parameters): Unit = {
-    val acc = top.accelerator_system.acc
+  def genCPPHeader(top: BeethovenTop)(implicit p: Parameters): Unit = {
+    val acc = p(AcceleratorSystems)
     // we might have multiple address spaces...
     val path = Path(BeethovenBuild.beethovenGenDir)
     os.makeDir.all(path)
@@ -41,9 +41,8 @@ object Generation {
     val defines = safe_join(user_defs map { deff => s"const ${deff.ty} ${deff.name} = ${deff.value};" })
     val enums = safe_join(user_enums map enumToCpp)
     val cpp_defs = safe_join(user_cpp_defs map { ppd => s"#define ${ppd.ty} ${ppd.value}" })
-    val mmios = safe_join(cr.getCRdef)
-    val system_ids = safe_join(acc.system_tups.filter(_._3.canReceiveSoftwareCommands) map { tup =>
-      s"const uint8_t ${tup._3.name}_ID = ${tup._2};"
+    val system_ids = safe_join(acc.filter(_.canReceiveSoftwareCommands) map { tup =>
+      s"const uint8_t ${tup.name}_ID = ${acc.indexWhere(_.name == tup.name)};"
     })
     val hooks_dec_def = hook_defs map customCommandToCpp _
     val commandDeclarations = safe_join(hooks_dec_def.map(_._1))
@@ -70,11 +69,11 @@ object Generation {
         val strobeDtype = getVerilatorDtype(platform.extMem.master.beatBytes)
         val addrWid = log2Up(platform.extMem.master.size)
         val addrDtype = getVerilatorDtype(addrWid)
-        val idDtype = getVerilatorDtype(top.AXI_MEM.get(0)._1.in(0)._1.ar.bits.id.getWidth)
+        val idDtype = getVerilatorDtype(top.AXI_MEM.get(0).in(0)._1.ar.bits.id.getWidth)
         s"#ifdef SIM\n" +
           s"#include <verilated.h>\n" +
           s"using BeethovenMemAddressSimDtype=$addrDtype;\n" +
-          s"using BeethovenStrobeSimDtype=$strobeDtype;\n" +
+//          s"using BeethovenStrobeSimDtype=$strobeDtype;\n" +
           s"using BeethovenMemIDDtype=$idDtype;\n" +
           s"#define DEFAULT_PL_CLOCK ${platform.clockRateMHz}\n" +
           (platform match {
@@ -118,7 +117,6 @@ object Generation {
          |static const uint8_t system_id_bits = $SystemIDLengthKey;
          |static const uint8_t core_id_bits = $CoreIDLengthKey;
          |static const beethoven::beethoven_pack_info pack_cfg(system_id_bits, core_id_bits);
-         |$mmios
          |$mmio_addr
          |// IDs to access systems directly through RoCC interface
          |$system_ids

@@ -64,7 +64,7 @@ object CppGeneration {
   }
 
   //noinspection ScalaUnusedSymbol
-  def exportChiselEnum(enum: chisel3.ChiselEnum): Unit = {
+  def exportChiselEnum(`enum`: chisel3.ChiselEnum): Unit = {
     if (!user_enums.contains(enum))
       user_enums = enum :: user_enums
   }

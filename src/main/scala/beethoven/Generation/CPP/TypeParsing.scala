@@ -1,7 +1,7 @@
 package beethoven.Generation.CPP
 
+import beethoven.common.Address
 import chisel3._
-import beethoven.Systems.AcceleratorCore.Address
 
 object TypeParsing {
   def getCType(dat: Data, name: String): String = {
@@ -29,7 +29,7 @@ object TypeParsing {
     }
 
     dat match {
-      case v: Vec[Data] =>
+      case v: Vec[_] =>
         val btype = getBaseType(v.head)
         f"std::vector<$btype>"
       case _ => getBaseType(dat)

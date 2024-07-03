@@ -50,13 +50,6 @@ class AWSF1Platform(memoryNChannels: Int,
 
   override val defaultWriteTXConcurrency: Int = defaultReadTXConcurrency
 
-  override val platformDies = Seq(
-    DieName("pblock_CL_bot", frontBus = true, resetRoot = true),
-    DieName("pblock_CL_mid", memoryBus = true),
-    DieName("pblock_CL_top"))
-
-  override val placementAffinity: Seq[Int] = Seq(3, 3, 4)
-
   override def postProcessorMacro(c: Config, paths: Seq[Path]): Unit = {
     if (c(BuildModeKey) == BuildMode.Synthesis) {
       // rename beethoven.v to beethoven.sv
@@ -124,6 +117,18 @@ class AWSF1Platform(memoryNChannels: Int,
       }
     }
   }
+
+  override val physicalInterfaces: List[PhysicalInterface] = List(
+    PhysicalHostInterface(0),
+    PhysicalMemoryInterface(1, 0)
+  ) ++ (if (memoryNChannels <= 1) List() else (1 until memoryNChannels).map(a => PhysicalMemoryInterface(a, a)))
+  override val physicalConnectivity: List[(Int, Int)] = List((0,1), (1,2))
+
+  override val physicalDevices: List[DeviceConfig] = List(
+    DeviceConfig(0, "pblock_CL_bot"),
+    DeviceConfig(1, "pblock_CL_mid"),
+    DeviceConfig(2, "pblock_CL_top")
+  )
 }
 
 case class tclMacro(cmd: String, xciPath: Path)

@@ -4,8 +4,8 @@ import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
 
-class CScratchpadPackedSubwordLoader(datOutWidth: Int, idxWidth: Int, wordSizeBits: Int, datsPerSubword: Int)(implicit p: Parameters)
-  extends CScratchpadLoader(datOutWidth, idxWidth, wordSizeBits) {
+class ScratchpadPackedSubwordLoader(datOutWidth: Int, idxWidth: Int, wordSizeBits: Int, datsPerSubword: Int)(implicit p: Parameters)
+  extends ScratchpadLoader(datOutWidth, idxWidth, wordSizeBits) {
   override val spEntriesPerBeat: Int = datsPerSubword
 
   if (datOutWidth == wordSizeBits) {

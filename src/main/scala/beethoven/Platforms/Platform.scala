@@ -8,6 +8,8 @@ import beethoven.Protocol.FrontBus.FrontBusProtocol
 import freechips.rocketchip.subsystem.{MasterPortParams, MemoryPortParams}
 import os.Path
 
+import scala.annotation.tailrec
+
 object PlatformType extends Enumeration {
   val FPGA, ASIC = Value
   type PlatformType = Value
@@ -85,14 +87,58 @@ abstract class Platform {
 
   val coreCommandLatency = 2
 
+  val memEndpointsPerDevice = 1
+
   def extMem: MemoryPortParams = MemoryPortParams(
-    master=MasterPortParams(
-      base=memorySpaceAddressBase,
-      size=memorySpaceSizeBytes,
+    master = MasterPortParams(
+      base = memorySpaceAddressBase,
+      size = memorySpaceSizeBytes,
       beatBytes = memoryControllerBeatBytes,
       idBits = memoryControllerIDBits
     ), nMemoryChannels = memoryNChannels
   )
+
+  // multi-die stuff
+
+  def placementAffinity: Map[Int, Double] = Map.from(physicalDevices.map { dev => (dev.identifier, 1.0 / physicalDevices.length) })
+
+  val physicalDevices: List[DeviceConfig]
+  val physicalInterfaces: List[PhysicalInterface]
+  val physicalConnectivity: List[(Int, Int)]
+
+  def getConnectivityFromDeviceID(id: Int): List[Int] = {
+    physicalConnectivity.filter(a => a._1 == id || a._2 == id).map {
+      case (x, a) if x == id => a
+      case (a, x) if x == id => a
+    }
+  }
+
+}
+
+abstract class PhysicalInterface {
+  val locationDeviceID: Int
+}
+
+case class PhysicalMemoryInterface(locationDeviceID: Int, channelIdx: Int) extends PhysicalInterface
+
+case class PhysicalHostInterface(locationDeviceID: Int) extends PhysicalInterface
+
+case class DeviceRequirements(memory: Boolean,
+                              sw_commands: Boolean,
+                              hw_commands_src: Boolean,
+                              ocmemory_src: Boolean,
+                              ocmemory_sink: Boolean) {
+  def ||(other: DeviceRequirements): DeviceRequirements = {
+    DeviceRequirements(memory || other.memory,
+      sw_commands || other.sw_commands,
+      hw_commands_src || other.hw_commands_src,
+      ocmemory_src || other.ocmemory_src,
+      ocmemory_sink || other.ocmemory_sink)
+  }
+}
+
+object DeviceRequirements {
+  val empty = DeviceRequirements(false, false, false, false, false)
 }
 
 trait HasXilinxMem {
@@ -101,29 +147,12 @@ trait HasXilinxMem {
 }
 
 
-trait MultiDiePlatform {
-  /**
-   * The dies are the physical units that the platform is divided into. Each die has a name and a set of
-   * properties that describe the physical characteristics of the die. The order of the dies should
-   * correspond to the physical connectivity: platformDies(0) is directly connected to platformDies(1).
-   * We do not currently support more complex connectivities, but this could just as well be added.
-   */
-  val platformDies: Seq[DieName]
-  /**
-   * The placement affinity is the relative fraction of cores that should be placed on each die.
-   * This is useful if you know that certain dies have existing IP that take up area on certain
-   * dies, making resource contention more of a problem there. By default, we assign an equal
-   * affinity to each die.
-   */
-  def placementAffinity: Seq[Int] = platformDies.map(_ => 1)
-}
-
 trait PlatformHasSeparateDMA {
   val DMAIDBits: Int
 }
 
 trait HasPostProccessorScript {
-  def postProcessorMacro(c: Config, paths: Seq[Path]): Unit
+  def postProcessorMacro(c: Config, paths: Seq[Path]): Unit = ???
 }
 
 trait HasMemoryCompiler {
@@ -131,4 +160,5 @@ trait HasMemoryCompiler {
 }
 
 case object BuildModeKey extends Field[BuildMode]
+
 case object PlatformKey extends Field[Platform]

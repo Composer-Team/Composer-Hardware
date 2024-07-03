@@ -3,7 +3,7 @@ package beethoven.common
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import beethoven.BeethovenParams.{CoreIDLengthKey, SystemIDLengthKey}
+import beethoven.Parameters.BeethovenParams.{CoreIDLengthKey, SystemIDLengthKey}
 import freechips.rocketchip.tile.{RoCCCommand, XLen}
 
 sealed abstract class AbstractAccelCommand extends Bundle with hasAccessibleUserSubRegions {
@@ -94,7 +94,8 @@ class AccelRoccCommand extends AbstractAccelCommand {
 
 
   def pack(bufferToPow2: Boolean = true, withRoutingPayload: Option[UInt] = None): UInt = {
-    val s = Cat(inst.rd, inst.core_id, inst.xd, inst.xs1, inst.xs2, inst.opcode, inst.system_id, inst.funct,
+    require(false, "Not implemented")
+    val s = Cat(inst.funct, inst.system_id, inst.opcode, inst.xs2, inst.xs1, inst.xd, inst.core_id, inst.rd,
       payload1, payload2)
     if (bufferToPow2) {
       val l = 1 << log2Up(s.getWidth)
@@ -129,6 +130,39 @@ object AccelRoccCommand {
     wr.payload1 := gen.rs1
     wr.payload2 := gen.rs2
     wr.inst.rd := gen.inst.rd
+    wr
+  }
+
+  def fromUInt(a: Vec[UInt]): AccelRoccCommand = {
+    val wr = Wire(new AccelRoccCommand)
+    wr.payload2 := Cat(a(3), a(4))
+    wr.payload1 := Cat(a(1), a(2))
+    val instuint = a(0)
+    //   ar[0] = opcode & 0x7F;
+    //  // 5 bits
+    //  ar[0] |= (((uint8_t) rrd & 0x1F) << 7);
+    //  // 1 bits
+    //  ar[0] |= ((xs2 & 0x1) << 12);
+    //  // 1 bits
+    //  ar[0] |= ((xs1 & 0x1) << 13);
+    //  // 1 bit
+    //  ar[0] |= ((xd & 0x1) << 14);
+    //  // 5 bits
+    //  ar[0] |= ((core_id & 0x1F) << 15);
+    //  // 5 bits
+    //  ar[0] |= (((core_id & 0x3E0) >> 5) << 20);
+    //  // 7 bits
+    //  uint32_t funct = ((system_id << 3) & 0x78) | (function & 0x7);
+    //  ar[0] |= ((funct & 0x7F) << 25);
+
+    wr.inst.opcode := instuint(6, 0)
+    wr.inst.rd := instuint(11, 7)
+    wr.inst.xs2 := instuint(12)
+    wr.inst.xs1 := instuint(13)
+    wr.inst.xd := instuint(14)
+    wr.inst.core_id := instuint(24, 15)
+    wr.inst.system_id := instuint(28, 25)
+    wr.inst.funct := instuint(31, 29)
     wr
   }
 }

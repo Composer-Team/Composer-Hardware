@@ -14,7 +14,7 @@ import firrtl._
 import firrtl.options._
 import firrtl.options.PhaseManager.PhaseDependency
 import firrtl.stage.RunFirrtlTransformAnnotation
-import firrtl.transforms.NoDCEAnnotation
+import firrtl.transforms.{NoConstantPropagationAnnotation, NoDCEAnnotation}
 import freechips.rocketchip.stage._
 import freechips.rocketchip.subsystem.ExtMem
 import os._
@@ -122,12 +122,10 @@ object BuildMode {
 }
 
 class BeethovenBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesis) {
-
-
   final def main(args: Array[String]): Unit = {
     //    args.foreach(println(_))
     println("Running with " + Runtime.getRuntime.freeMemory() + "B memory")
-    println(Runtime.getRuntime.maxMemory + "B")
+    println(Runtime.getRuntime.maxMemory.toString + "B")
     BuildArgs.args = Map.from(
       args.filter(str => str.length >= 2 && str.substring(0, 2) == "-D").map {
         opt =>
@@ -152,7 +150,8 @@ class BeethovenBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthes
           CustomDefaultMemoryEmission(MemoryNoInit),
           CustomDefaultRegisterEmission(useInitAsPreset = false, disableRandomization = true),
           RunFirrtlTransformAnnotation(new VerilogEmitter),
-          NoDCEAnnotation
+          NoDCEAnnotation,
+          NoConstantPropagationAnnotation
         )
       )
     )

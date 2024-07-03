@@ -20,7 +20,7 @@ case class KriaPlatform(memoryNChannels: Int = 1,
   override val frontBusAddressMask: Long = 0xffffL
   override val frontBusBeatBytes: Int = 4
   override val frontBusCanDriveMemory: Boolean = false
-  override val frontBusProtocol: FrontBusProtocol = new AXIFrontBusProtocol
+  override val frontBusProtocol: FrontBusProtocol = new AXIFrontBusProtocol(false)
 
   override val physicalMemoryBytes: Long = 4L << 30
   override val memorySpaceAddressBase: Long = 0x0
@@ -30,7 +30,6 @@ case class KriaPlatform(memoryNChannels: Int = 1,
 
   override def postProcessorMacro(c: Config, paths: Seq[Path]): Unit = {
     if (c(BuildModeKey) == BuildMode.Synthesis) {
-      //      println("tcl macros: " + getTclMacros().mkString("\n"))
       val s = SynthScript(
         "beethoven",
         "output",
@@ -43,4 +42,9 @@ case class KriaPlatform(memoryNChannels: Int = 1,
         s.setup + "\n" + s.run)
     }
   }
+
+  override val physicalDevices: List[DeviceConfig] = List(DeviceConfig(0, "SLR0"))
+  override val physicalInterfaces: List[PhysicalInterface] = List(PhysicalHostInterface(0),
+    PhysicalMemoryInterface(0, 0))
+  override val physicalConnectivity: List[(Int, Int)] = List.empty
 }

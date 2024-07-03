@@ -3,7 +3,7 @@ package beethoven.Generation.Stage
 import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3.RawModule
 import chisel3.stage.ChiselGeneratorAnnotation
-import firrtl.options.{Dependency, Phase, PreservesAll, StageOptions}
+import firrtl.options._
 import firrtl.options.Viewer.view
 import firrtl.AnnotationSeq
 import firrtl.annotations.NoTargetAnnotation
@@ -17,8 +17,8 @@ import freechips.rocketchip.util.HasRocketChipStageUtils
 
 case class ConfigsAnnotation(literalConfig: Config) extends NoTargetAnnotation
 
-class PreElaborationPass extends Phase with PreservesAll[Phase] with HasRocketChipStageUtils {
-
+class PreElaborationPass extends Phase with HasRocketChipStageUtils {
+  override def invalidates(a: Phase): Boolean = false
   override val prerequisites = Seq(Dependency[Checks])
   override val dependents = Seq(Dependency[chisel3.stage.phases.Elaborate])
 
@@ -36,7 +36,10 @@ class PreElaborationPass extends Phase with PreservesAll[Phase] with HasRocketCh
         .getConstructor(classOf[Parameters])
         .newInstance(config) match {
         case a: RawModule => a
-        case a: LazyModule => LazyModule(a).module
+        case a: LazyModule => {
+          val lm = LazyModule(a)
+          lm.module
+        }
       }
 
     ChiselGeneratorAnnotation(gen) +: annotations :+ RunFirrtlTransformAnnotation(new Flatten)

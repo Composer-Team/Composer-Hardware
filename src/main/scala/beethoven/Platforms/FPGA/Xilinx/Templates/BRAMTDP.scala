@@ -5,6 +5,7 @@ import chisel3.util._
 import chisel3._
 import beethoven.Generation.BeethovenBuild
 import beethoven.MemoryStreams.HasMemoryInterface
+import beethoven.Parameters.{BQuiet, BeethovenConstraintHint, ConstraintHintsKey}
 import beethoven.Platforms.{HasXilinxMem, Platform, PlatformKey}
 import beethoven._
 import beethoven.common.CLog2Up

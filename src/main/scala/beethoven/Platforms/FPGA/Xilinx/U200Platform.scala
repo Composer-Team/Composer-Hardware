@@ -4,7 +4,7 @@ import beethoven.Platforms.PlatformType.PlatformType
 import beethoven.Platforms._
 import beethoven.Protocol.FrontBus._
 
-class U200Platform(val memoryNChannels: Int) extends Platform with MultiDiePlatform {
+abstract class U200Platform(val memoryNChannels: Int) extends Platform {
 
   override val platformType: PlatformType = PlatformType.FPGA
   override val hasDiscreteMemory: Boolean = true
@@ -14,7 +14,7 @@ class U200Platform(val memoryNChannels: Int) extends Platform with MultiDiePlatf
   override val frontBusAddressMask: Long = 0xFFFF
   override val frontBusBeatBytes: Int = 4
   override val frontBusCanDriveMemory: Boolean = false
-  override val frontBusProtocol: FrontBusProtocol = new AXIFrontBusProtocol
+  override val frontBusProtocol: FrontBusProtocol = new AXIFrontBusProtocol(true)
 
   override val physicalMemoryBytes: Long = 0x400000000L
   override val memorySpaceAddressBase: Long = 0x0
@@ -26,9 +26,9 @@ class U200Platform(val memoryNChannels: Int) extends Platform with MultiDiePlatf
 
   override val clockRateMHz: Int = 300
 
-  override val platformDies: Seq[DieName] = Seq(
-    DieName("0", frontBus = true),
-    DieName("1", memoryBus = true),
-    DieName("2")
+  override val physicalDevices = List(
+    DeviceConfig(0, "SLR0"),
+    DeviceConfig(1, "SLR1"),
+    DeviceConfig(2, "SLR2")
   )
 }

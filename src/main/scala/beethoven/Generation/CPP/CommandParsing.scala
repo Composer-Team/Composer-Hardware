@@ -3,10 +3,9 @@ package beethoven.Generation.CPP
 import chipsalliance.rocketchip.config.Parameters
 import beethoven.common._
 import chisel3._
-import beethoven.AcceleratorSystems
+import beethoven.Parameters.AcceleratorSystems
 import beethoven.Generation.CPP.TypeParsing.getCType
 import beethoven.Generation.CppGeneration.HookDef
-import beethoven.Systems.AcceleratorCore.Address
 
 import scala.annotation.tailrec
 
@@ -73,7 +72,7 @@ object CommandParsing {
       }
 
       cc.elements(name) match {
-        case v: Vec[Data] =>
+        case v: Vec[_] =>
           unrollPayload(payloadId, blip,
             Seq.tabulate(v.length)(sidx => f"$access[$sidx]"),
             Seq.fill(v.length)(v.head.getWidth),

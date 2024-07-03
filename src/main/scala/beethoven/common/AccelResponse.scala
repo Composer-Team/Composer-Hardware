@@ -3,7 +3,7 @@ package beethoven.common
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import beethoven.BeethovenParams.{CoreIDLengthKey, SystemIDLengthKey}
+import beethoven.Parameters.BeethovenParams.{CoreIDLengthKey, SystemIDLengthKey}
 import freechips.rocketchip.tile.XLen
 
 import scala.language.experimental.macros
@@ -63,14 +63,14 @@ trait hasRoccResponseFields extends hasAccessibleUserSubRegions with hasDataFiel
   }
 }
 
-class AccelRoccUserResponse(implicit p: Parameters) extends AccelResponse("rocc_response") {
+class AccelRoccUserResponse extends AccelResponse("rocc_response") {
   override val reservedNames: Seq[String] = Seq("rd")
-  val data = UInt(p(XLen).W)
+  val data = UInt(64.W)
 
   override def getDataField: UInt = data
 }
 
-class AccelRoccResponse(implicit p: Parameters) extends AccelRoccUserResponse with hasRoccResponseFields {
+class AccelRoccResponse extends AccelRoccUserResponse with hasRoccResponseFields {
   override val reservedNames: Seq[String] = Seq("system_id", "core_id", "rd")
   val system_id = UInt(SystemIDLengthKey.W)
   val core_id = UInt(CoreIDLengthKey.W)

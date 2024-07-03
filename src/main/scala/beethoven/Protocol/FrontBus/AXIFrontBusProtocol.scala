@@ -1,17 +1,23 @@
 package beethoven.Protocol.FrontBus
 
+import beethoven.Floorplanning.DeviceContext
+import beethoven.Floorplanning.LazyModuleWithSLRs.LazyModuleWithFloorplan
+import beethoven.Generation.DotGen
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import beethoven.Platforms._
-import beethoven.Protocol.AXI4Compat
+import beethoven.Protocol.AXI.AXI4Compat
+import beethoven.Protocol.RoCC.Helpers.FrontBusHub
+import beethoven.Protocol.RoCC._
+import beethoven.platform
 import freechips.rocketchip.amba.axi4._
-import freechips.rocketchip.diplomacy.IdRange
+import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem.MasterPortParams
-import freechips.rocketchip.tilelink.TLIdentityNode
+import freechips.rocketchip.tilelink.{TLBuffer, TLIdentityNode}
 
-class AXIFrontBusProtocol extends FrontBusProtocol {
+class AXIFrontBusProtocol(withDMA: Boolean) extends FrontBusProtocol {
   override def deriveTopIOs(tlChainObj: Any, withClock: Clock, withActiveHighReset: Reset)(implicit p: Parameters): Unit = {
-    val port_cast = tlChainObj.asInstanceOf[AXI4MasterNode]
+    val (port_cast, dma_cast) = tlChainObj.asInstanceOf[(AXI4MasterNode, Option[AXI4MasterNode])]
     val ap = port_cast.out(0)._1.params
     val S00_AXI = IO(Flipped(new AXI4Compat(MasterPortParams(
       base = 0,
@@ -19,20 +25,53 @@ class AXIFrontBusProtocol extends FrontBusProtocol {
       beatBytes = ap.dataBits / 8,
       idBits = ap.idBits))))
     AXI4Compat.connectCompatSlave(S00_AXI, port_cast.out(0)._1)
+
+    val dma = if (withDMA) {
+      val dma = IO(Flipped(new AXI4Compat(MasterPortParams(
+        base = 0,
+        size = 1L << p(PlatformKey).frontBusAddressNBits,
+        beatBytes = dma_cast.get.out(0)._1.r.bits.data.getWidth,
+        idBits = 6))))
+      AXI4Compat.connectCompatSlave(dma, dma_cast.get.out(0)._1)
+      Some(dma)
+    } else None
+
   }
 
-  override def deriveTLSources(implicit p: Parameters): (Any, TLIdentityNode, Option[TLIdentityNode]) = {
-    val node = TLIdentityNode()
-    val axi_master = AXI4MasterNode(Seq(AXI4MasterPortParameters(
-      masters = Seq(AXI4MasterParameters(
-        name = "S00_AXI",
-        aligned = true,
-        maxFlight = Some(1),
-        id = IdRange(0, 1 << 16)
-      )),
-    )))
-    node :=  AXI4ToTL() :=  AXI4UserYanker(capMaxFlight = Some(4)) := AXI4Fragmenter() := AXI4IdIndexer(1) := axi_master
-    (axi_master, node, None)
+  override def deriveTLSources(implicit p: Parameters): (Any, RoccClientNode, Option[TLIdentityNode]) = {
+    DeviceContext.withDevice(platform.physicalInterfaces.find(_.isInstanceOf[PhysicalHostInterface]).get.locationDeviceID) {
+      val axi_master = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+        masters = Seq(AXI4MasterParameters(
+          name = "S00_AXI",
+          aligned = true,
+          maxFlight = Some(1),
+          id = IdRange(0, 1 << 16)
+        )),
+      )))
+      val fronthub = LazyModuleWithFloorplan(new FrontBusHub(), "zzfront6_axifronthub")
+      fronthub.tl_in :=
+        LazyModuleWithFloorplan(new AXI4ToTL(false), "zzfront5_axi4ToTL_front").node :=
+        LazyModuleWithFloorplan(new AXI4UserYanker(capMaxFlight = Some(1)), "zzfront4_axi4yank_front").node :=
+        LazyModuleWithFloorplan(new AXI4Buffer(), "zzfront3_axi4buffer_front").node :=
+        LazyModuleWithFloorplan(new AXI4Fragmenter(), "zzfront2_axi4fragment_front").node :=
+        LazyModuleWithFloorplan(new AXI4IdIndexer(1), "zzfront1_axi4idxer").node := axi_master
+
+
+      val (dma_node, dma_front) = if (withDMA) {
+        val node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+          masters = Seq(AXI4MasterParameters(
+            name = "S01_AXI",
+            maxFlight = Some(2),
+            aligned = true,
+            id = IdRange(0, 1 << 6),
+          ))
+        )))
+        val dma2tl = TLIdentityNode()
+        dma2tl := TLBuffer() := (LazyModuleWithFloorplan(new AXI4ToTL(false), "axi4ToTL_dma").node) := node
+        (Some(node), Some(dma2tl))
+      } else (None, None)
+      ((axi_master, dma_node), fronthub.rocc_out, dma_front)
+    }
   }
 }
 

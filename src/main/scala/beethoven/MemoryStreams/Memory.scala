@@ -249,7 +249,7 @@ object Memory {
           //          println("ASIC Mem")
           val cmem = Module(new CASICMemory(latency, dataWidth, nRows, nPorts, withWriteEnable, allowFallbackToRegister))
           cmem.suggestName(valName.name)
-          TransitName(cmem.io, cmem)
+          cmem.io
       }
     }
   }
