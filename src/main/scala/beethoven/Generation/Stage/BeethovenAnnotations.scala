@@ -3,10 +3,10 @@ package beethoven.Generation.Stage
 import chipsalliance.rocketchip.config.Config
 import beethoven.Generation
 import beethoven.Generation.BeethovenBuild
-import beethoven.Generation.BeethovenBuild.targetDir
 import firrtl.stage.RunFirrtlTransformAnnotation
 import firrtl.transforms.NoDCEAnnotation
-import firrtl.{AnnotationSeq, CustomDefaultMemoryEmission, CustomDefaultRegisterEmission, EmitAllModulesAnnotation, MemoryNoInit, TargetDirAnnotation, VerilogEmitter}
+import firrtl.options.TargetDirAnnotation
+import firrtl.{AnnotationSeq, CustomDefaultMemoryEmission, CustomDefaultRegisterEmission, EmitAllModulesAnnotation, MemoryNoInit, VerilogEmitter}
 import freechips.rocketchip.stage.TopModuleAnnotation
 import os.Path
 
