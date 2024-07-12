@@ -4,8 +4,8 @@ import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
 import beethoven.common.ShiftReg
-import beethoven.Generation.Tune.Tunable
 import beethoven.Parameters.{AcceleratorSystemConfig, IntraCoreMemoryPortInConfig}
+import beethoven.Protocol.tilelink.TLSlave.TLSlaveManagerNode
 import beethoven.Systems.getCommMemAddressSet
 import beethoven.platform
 import freechips.rocketchip.diplomacy._
@@ -18,17 +18,9 @@ class MemWritePort(addrBits: Int, dataBits: Int,
   val data = UInt(dataBits.W)
   val addr = UInt(addrBits.W)
   val core = if (canSelectCore) Some(UInt(beethoven.Systems.getCommMemCoreBits().W)) else None
-  val channel = if (canSelectChannel)  Some(UInt(beethoven.Systems.getCommMemChannelBits().W)) else None
+  val channel = if (canSelectChannel) Some(UInt(beethoven.Systems.getCommMemChannelBits().W)) else None
 })
 
-/**
- * Parameters that all scratchpad subtypes should support
- *
- * @param dataWidthBits  the granularity of a single scratchpad read/write in bits
- * @param nDatas         number of data items in the scratchpad. Non-zero
- * @param latency        latency of a scratchpad access from the user interface. Current implementation only supports 1 or 2.
- * @param specialization How data is loaded from memory. Choose a specialization from ScratchpadSpecialization
- */
 class IntraCoreScratchpad(dataWidthBits: Number,
                           nDatas: Number,
                           latency: Number,
@@ -49,12 +41,12 @@ class IntraCoreScratchpad(dataWidthBits: Number,
     this)
   val channelWidthBytes = platform.extMem.master.beatBytes
   val blockBytes = p(CacheBlockBytes)
-  val mem_slave_node = TLManagerNode(Seq(TLSlavePortParameters.v1(
+  val node = TLSlaveManagerNode(TLSlavePortParameters.v1(
     managers = Seq(TLSlaveParameters.v1(
-      address = Seq(getCommMemAddressSet(systemParams.name, coreIdx, mp.name, channel_id)),
+      address = Seq(getCommMemAddressSet(systemParams.name, coreIdx, mp, channel_id)),
       regionType = RegionType.IDEMPOTENT,
       supportsPutFull = TransferSizes(mp.dataWidthBits.intValue() / 8)
-    )), beatBytes = mp.dataWidthBits.intValue() / 8)))
+    )), beatBytes = mp.dataWidthBits.intValue() / 8))
 }
 
 class IntraCoreScratchpadImp(dataWidthBits: Int,
@@ -65,8 +57,7 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
                              outer: IntraCoreScratchpad) extends LazyModuleImp(outer) {
   private val scReqBits = log2Up(nDatas)
   val IOs = Seq.fill(nPorts)(IO(new ScratchpadDataPort(scReqBits, dataWidthBits)))
-  val (in, edge) = outer.mem_slave_node.in(0)
-  val responseQ = Queue(in.a.map(_.source), entries = 4)
+  val (in, edge) = outer.node.in(0)
   private val realNRows = nDatas
   private val memory = Memory(latency, dataWidth = dataWidthBits, nRows = realNRows, debugName = Some(outer.name),
     nReadPorts = if (readOnly) nPorts - 1 else 0,
@@ -113,19 +104,17 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
     }
   }
 
-  in.d <> responseQ.map { source => edge.AccessAck(source, log2Up(in.params.dataBits / 8).U) }
-
-  when(in.a.valid) {
+  when(in.tl.valid) {
     IOs.foreach {
       _.req.ready := false.B
     }
     val off = log2Up(dataWidthBits / 8)
-    val bot_addr = in.a.bits.address(log2Up(nDatas) - 1 + off, off)
+    val bot_addr = in.tl.bits.address(log2Up(nDatas) - 1 + off, off)
     memory.addr(write_port) := bot_addr
     memory.chip_select(write_port) := true.B
     memory.read_enable(write_port) := false.B
     memory.write_enable(write_port) := true.B
-    memory.data_in(write_port) := in.a.bits.data
+    memory.data_in(write_port) := in.tl.bits.data
   }
 }
 

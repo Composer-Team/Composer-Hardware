@@ -2,8 +2,10 @@ package beethoven
 
 import beethoven.Floorplanning.DeviceContext
 import beethoven.Floorplanning.LazyModuleWithSLRs.LazyModuleWithFloorplan
+import beethoven.Parameters.IntraCoreMemoryPortInConfig.IntraCoreCommunicationDegree
 import beethoven.Parameters.{AcceleratorSystems, IntraCoreMemoryPortInConfig}
 import beethoven.Protocol.RoCC.{RoccBuffer, RoccCompositeXbar, RoccFanin, RoccFanout, RoccIdentityNode, RoccNode}
+import beethoven.common.CLog2Up
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util.{Cat, log2Up}
@@ -42,22 +44,38 @@ package object Systems {
 
   def getCommMemSpaceBits()(implicit p: Parameters): Int = {
     val configs = p(AcceleratorSystems)
-    val params = configs.flatMap(_.memoryChannelParams.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig])).map(_.asInstanceOf[IntraCoreMemoryPortInConfig])
+    val params = configs.flatMap(_.memoryChannelConfig.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig])).map(_.asInstanceOf[IntraCoreMemoryPortInConfig])
     val biggest_on_chip_comm_mem = params.map { mp => mp.nDatas * mp.nChannels * mp.dataWidthBits / 8 }.max
     log2Up(biggest_on_chip_comm_mem)
   }
 
   def getCommMemCoreBits()(implicit p: Parameters): Int = {
     val configs = p(AcceleratorSystems)
-    val max_cores = configs.map(_.nCores).max
+    val max_cores = configs.filter(_.memoryChannelConfig.exists(_.isInstanceOf[IntraCoreMemoryPortInConfig])).map(co =>
+      co.memoryChannelConfig.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig]).map {
+        case icm: IntraCoreMemoryPortInConfig =>
+          icm.communicationDegree match {
+            case IntraCoreCommunicationDegree.BroadcastAllCores | IntraCoreCommunicationDegree.BroadcastAllCoresChannels => 1
+            case _ => co.nCores
+          }
+      }.max
+    ).max
     log2Up(max_cores)
   }
 
   def getCommMemChannelBits()(implicit p: Parameters): Int = {
     // figure out memory space for on-chip memory comms
     val configs = p(AcceleratorSystems)
-    val params = configs.flatMap(_.memoryChannelParams.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig])).map(_.asInstanceOf[IntraCoreMemoryPortInConfig])
-    val max_channels = params.map(_.nChannels).max
+    val max_channels = configs.filter(_.memoryChannelConfig.exists(_.isInstanceOf[IntraCoreMemoryPortInConfig])).map(co =>
+      co.memoryChannelConfig.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig]).map {
+        case icm: IntraCoreMemoryPortInConfig =>
+          icm.communicationDegree match {
+            case IntraCoreCommunicationDegree.BroadcastAllCoresChannels | IntraCoreCommunicationDegree.BroadcastAllChannels => 1
+            case _ => co.nCores
+          }
+      }.max
+    ).max
+
     log2Up(max_channels)
   }
 
@@ -65,14 +83,14 @@ package object Systems {
   def getCommMemAddress(sys: String, core: Any, endpoint: String, channel: Any, spaceAddr: UInt)(implicit p: Parameters): UInt = {
     // figure out memory space for on-chip memory comms
     val configs = p(AcceleratorSystems)
-    val max_endpoints_per_core = configs.map(_.memoryChannelParams.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig]).map(_.asInstanceOf[IntraCoreMemoryPortInConfig])).map(_.length).max
+    val max_endpoints_per_core = configs.map(_.memoryChannelConfig.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig]).map(_.asInstanceOf[IntraCoreMemoryPortInConfig])).map(_.length).max
 
     val space_bits = getCommMemSpaceBits()
     val channel_bits = getCommMemChannelBits()
     val endpoint_bits = log2Up(max_endpoints_per_core)
     val core_bits = getCommMemCoreBits()
 
-    val endpoint_idx = configs.find(_.name == sys).get.memoryChannelParams.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig]).indexWhere(_.name == endpoint)
+    val endpoint_idx = configs.find(_.name == sys).get.memoryChannelConfig.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig]).indexWhere(_.name == endpoint)
     val sys_idx = configs.indexWhere(_.name == sys)
     require(spaceAddr.getWidth == space_bits)
     // sys, core, endpoint, channel, space
@@ -86,24 +104,36 @@ package object Systems {
       }, spaceAddr)
   }
 
-  def getCommMemAddressSet(sys: String, core: Int, endpoint: String, channel: Int)(implicit p: Parameters): AddressSet = {
+  def getCommMemAddressSet(sys: String, core: Int, endpoint: IntraCoreMemoryPortInConfig, channel: Int)(implicit p: Parameters): AddressSet = {
     // figure out memory space for on-chip memory comms
+    val name = endpoint.name
     val configs = p(AcceleratorSystems)
-    val max_endpoints_per_core = configs.map(_.memoryChannelParams.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig]).map(_.asInstanceOf[IntraCoreMemoryPortInConfig])).map(_.length).max
+    val max_endpoints_per_core = configs.map(_.memoryChannelConfig.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig]).map(_.asInstanceOf[IntraCoreMemoryPortInConfig])).map(_.length).max
 
     val space_bits = getCommMemSpaceBits()
     val channel_bits = getCommMemChannelBits()
     val endpoint_bits = log2Up(max_endpoints_per_core)
     val core_bits = getCommMemCoreBits()
 
-    val endpoint_idx = configs.find(_.name == sys).get.memoryChannelParams.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig]).indexWhere(_.name == endpoint)
+    val endpoint_idx = configs.find(_.name == sys).get.memoryChannelConfig.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig]).indexWhere(_.name == name)
     val sys_idx = configs.indexWhere(_.name == sys)
     // sys, core, endpoint, channel, space
+
+    val core_fix = endpoint.communicationDegree match {
+      case IntraCoreCommunicationDegree.BroadcastAllCoresChannels | IntraCoreCommunicationDegree.BroadcastAllCores => 0
+      case _ => core
+    }
+
+    val channel_fix = endpoint.communicationDegree match {
+      case IntraCoreCommunicationDegree.BroadcastAllCoresChannels | IntraCoreCommunicationDegree.BroadcastAllChannels => 0
+      case _ => channel
+    }
+
     AddressSet(
       (sys_idx << (space_bits + channel_bits + endpoint_bits + core_bits)) |
-        (core << (space_bits + channel_bits + endpoint_bits)) |
-        (endpoint_idx << (space_bits + channel_bits)) |
-        (channel << space_bits), (1 << space_bits) - 1)
+        (endpoint_idx << (space_bits + channel_bits + core_bits)) |
+        (core_fix << (space_bits + channel_bits)) |
+        (channel_fix << space_bits), (1 << space_bits) - 1)
   }
 
   @tailrec
@@ -212,6 +242,55 @@ package object Systems {
                                                                             buffer_depth: Int = 1)(implicit p: Parameters): T =
     extend_eles_via_protocol_node(Seq(ele), make_buffer, assign, buffer_depth)(p)(0)
 
+
+  def create_cross_chip_network[T <: NodeHandle[_, _, _, _, _, _, _, _]](sources: List[(T, Int)],
+                                                                         devices_with_sinks: List[Int],
+                                                                         make_buffer: () => T,
+                                                                         make_xbar: () => T,
+                                                                         assign: (Seq[T], T) => Unit,
+                                                                        )(implicit p: Parameters): Map[Int, List[T]] = {
+    val connectivity = platform.physicalConnectivity
+    val devices = platform.physicalDevices.map(_.identifier)
+    if (connectivity.nonEmpty) {
+      val root_source = connectivity.find(a => !connectivity.exists(_._2 == a._1)).get._1
+      val root_sink = connectivity.find(a => !connectivity.exists(_._1 == a._2)).get._2
+      assert(connectivity.forall(a => (a._1 == root_source) || connectivity.exists(b => b._2 == a._1)), "Connectivity graph must be a SUG")
+      assert(connectivity.forall(a => (a._2 == root_sink) || connectivity.exists(b => b._1 == a._2)), "Connectivity graph must be a SUG")
+    }
+
+    var idx = 0
+    val carry_inits = Map.from(devices.map { did =>
+      val carries = sources.filter(_._2 == did).map { b =>
+        val tidx = idx
+        idx = idx + 1
+        (b._1, List(tidx))
+      }
+      (did, carries)
+    })
+    val commit_inits = Map.from(devices.map { did =>
+      val commits = List.empty[(T, List[Int])]
+      (did, commits)
+    })
+    val fpass = topological_xbarReduce_over_SUG(
+      devices,
+      connectivity,
+      carry_inits,
+      commit_inits,
+      make_buffer,
+      make_xbar,
+      assign)(p, devices_with_sinks)
+    val bpass = topological_xbarReduce_over_SUG(
+      devices,
+      connectivity.map(_.swap),
+      carry_inits,
+      fpass,
+      make_buffer,
+      make_xbar,
+      assign)(p, devices_with_sinks)
+
+    bpass.map { case (k, v) => (k, v.map(_._1)) }
+  }
+
   /**
    * ----------- PROBLEM SETUP ----------
    * The problem: We have a set of sources and a set of sinks, each scattered over potentially
@@ -298,7 +377,7 @@ package object Systems {
    * [2] https://en.wikipedia.org/wiki/Shortest_path_problem#Directed_graph
    */
   @tailrec
-  def topological_xbarReduce_over_SUG[T <: NodeHandle[_, _, _, _, _, _, _, _]](devices: Seq[Int],
+  private def topological_xbarReduce_over_SUG[T <: NodeHandle[_, _, _, _, _, _, _, _]](devices: Seq[Int],
                                                                                connectivity: Seq[(Int, Int)],
                                                                                carries: Map[Int, List[(T, List[Int])]],
                                                                                commits: Map[Int, List[(T, List[Int])]],
@@ -347,8 +426,8 @@ package object Systems {
       commits
     } else {
       // for each root in the carry list, consider pushing into commits only if the root exists on a device with memory
-      val commit_updates = roots.filter(a =>
-        carries.contains(a) && devicesWithSinks.contains(a)).map {
+      val pushable_roots = roots.filter(a => carries.contains(a) && devicesWithSinks.contains(a))
+      val commit_updates = pushable_roots.map {
         root =>
           // for each carry terminal, consider pushing into commits by intersecting the sourceTrees currently in commits
           // with the sourceTree of the carry terminal
@@ -365,7 +444,8 @@ package object Systems {
       val new_commits = update_map(commits, commit_updates)
       // for each root in the carry list, consider moving the terms to the next device's carry list. This should
       // only be done if a memory device is reachable from the next device according to the connectivity list
-      val carry_updates: List[(Int, List[(T, List[Int])])] = roots.filter(a => carries.contains(a) && sink_reachable_from_neighbor(a)).toList.map {
+      val carry_updates: List[(Int, List[(T, List[Int])])] = roots.filter(a =>
+        carries.get(a).exists(b => b.nonEmpty) && sink_reachable_from_neighbor(a)).toList.map {
         root =>
           val carry_terms = carries(root)
           // reduce terms via tree
@@ -394,11 +474,20 @@ package object Systems {
     }
   }
 
-  def reverse_connectivity(conn: List[(Int, Int)]): List[(Int, Int)] = conn.map(a => (a._2, a._1))
+  private var tl_xbar_id = 0
+  private var tl_buffer_id = 0
 
-  def make_tl_xbar()(implicit p: Parameters): TLNode = LazyModuleWithFloorplan(new TLXbar()).node
+  def make_tl_xbar()(implicit p: Parameters): TLNode = LazyModuleWithFloorplan(new TLXbar(), {
+    val id = tl_xbar_id
+    tl_xbar_id = tl_xbar_id + 1
+    f"zzanonymous_tlxbar_$id"
+  }).node
 
-  def make_tl_buffer()(implicit p: Parameters): TLNode = LazyModuleWithFloorplan(new TLBuffer()).node
+  def make_tl_buffer()(implicit p: Parameters): TLNode = LazyModuleWithFloorplan(new TLBuffer(), {
+    val id = tl_buffer_id
+    tl_buffer_id = tl_buffer_id + 1
+    f"zzanonymous_tlbuffer_$id"
+  }).node
 
   def tl_assign[T <: TLNode](from: Seq[T], to: T)(implicit p: Parameters): Unit = {
     from.foreach(a => to := a)
@@ -409,7 +498,12 @@ package object Systems {
     q
   }
 
-  def make_rocc_buffer()(implicit p: Parameters): RoccNode = LazyModuleWithFloorplan(new RoccBuffer()).node
+  private var rocc_buffer_id = 0
+  def make_rocc_buffer()(implicit p: Parameters): RoccNode = LazyModuleWithFloorplan(new RoccBuffer(), {
+    val id = rocc_buffer_id
+    rocc_buffer_id = rocc_buffer_id + 1
+    f"zzanonymous_roccbuffer_$id"
+  }).node
 
   def rocc_assign[T <: RoccNode](from: Seq[T], to: T)(implicit p: Parameters): Unit = {
     from.foreach(a => to := a)

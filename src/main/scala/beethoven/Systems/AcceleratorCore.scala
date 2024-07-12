@@ -5,28 +5,31 @@ import chisel3._
 import chisel3.util._
 import beethoven.MemoryStreams._
 import beethoven.Parameters.BeethovenParams.CoreIDLengthKey
-import beethoven.Parameters.{AcceleratorSystems, IntraCoreCommunicationDegree, IntraCoreMemoryPortInConfig, ReadChannelConfig, ScratchpadConfig, WriteChannelConfig}
+import beethoven.Parameters.IntraCoreMemoryPortInConfig._
+import beethoven.Parameters._
 import beethoven.Protocol.RoCC.{RoccExchange, RoccManagerNode}
 import beethoven.Protocol.tilelink.MultiBeatCommandEmitter
-import beethoven.Systems.AcceleratorCore.systemOpCodeMap
+import beethoven.Systems.AcceleratorCore.{commandExpectsResponse, systemOpCodeMap}
 import beethoven.common._
+import freechips.rocketchip.tilelink.{TLBundle, TLBundleA, TLBundleD}
 
 import scala.language.implicitConversions
 
-class CustomIO[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2) extends Bundle {
-  val req: DecoupledIO[T1] = DecoupledIO(bundleIn)
-  val resp: DecoupledIO[T2] = Flipped(DecoupledIO(bundleOut))
+class CustomIO[T1 <: AccelCommand, T2 <: AccelResponse](bundleIn: T1, bundleOut: T2, respExists: Boolean) extends Bundle {
+  private[beethoven] val _req: DecoupledIO[T1] = DecoupledIO(bundleIn)
+  private[beethoven] val _resp: Option[DecoupledIO[T2]] = if (respExists) Some(Flipped(DecoupledIO(bundleOut))) else None
+
+  def req: DecoupledIO[T1] = _req
+
+  def resp: DecoupledIO[T2] = if (respExists) _resp.get else
+    throw new Exception("Tried to access the response bundle for a command that doesn't exist.\n" +
+      s"Check the definition of your IO for this command/response port (${bundleIn.commandName})")
 }
 
 private[beethoven] object CustomCommandUsage extends Enumeration {
   //noinspection ScalaUnusedSymbol
   type custom_usage = Value
   val unused, default, custom = Value
-}
-
-class CustomIOWithRouting[T1 <: Bundle, T2 <: Bundle](bundleIn: T1, bundleOut: T2) extends Bundle {
-  val req: DecoupledIOWithCRouting[T1] = DecoupledIOWithCRouting(bundleIn)
-  val resp: DecoupledIO[T2] = Flipped(DecoupledIO(bundleOut))
 }
 
 class DataChannelIO(dWidth: Int) extends Bundle {
@@ -37,15 +40,16 @@ class DataChannelIO(dWidth: Int) extends Bundle {
 object AcceleratorCore {
   private var systemOpCodeMap = List[(String, String, Int)]()
 
+  private var commandExpectsResponse: List[(String, String, Boolean)] = List.empty
+
   implicit def addressToUInt(addr: Address): UInt = addr.address
 }
 
 object OuterKey extends Field[AcceleratorSystem]
-object RoccEndpointKey extends Field[RoccManagerNode]
 
 class AcceleratorCore(implicit p: Parameters) extends Module {
   val outer: AcceleratorSystem = p(OuterKey)
-  val io_declaration =  IO(Flipped(new RoccExchange))
+  val io_declaration = IO(Flipped(new RoccExchange))
   io_declaration.resp.valid := false.B
   io_declaration.resp.bits := DontCare
   io_declaration.req.ready := false.B
@@ -65,28 +69,30 @@ class AcceleratorCore(implicit p: Parameters) extends Module {
   }
 
   def getIntraCoreMemOut(name: String, core_idx: Int = 0): Seq[MemWritePort] = {
-    val params = try {
-      outer.intraCoreMemMasters.find(_._1.name == name).get
+    val (params, match_params) = try {
+      val q = outer.intraCoreMemMasters.find(_._1.name == name).get
+      val r = p(AcceleratorSystems).find(_.name == q._1.toSystem).get.memoryChannelConfig.find(_.name == q._1.toMemoryPort).get.asInstanceOf[IntraCoreMemoryPortInConfig]
+      (q, r)
     } catch {
       case e: Exception =>
         System.err.println("You may be trying to access a intra core mem port by the wrong name. Check your config.")
         throw e
     }
+    val ports = intra_mem_outs(params._1)
 
-    params._2(core_idx).out.zipWithIndex.map { case ((port, edge), channelIdx) =>
+    ports.zipWithIndex.map { case (port: TLBundle, channelIdx) =>
       val w = Wire(new MemWritePort(getCommMemSpaceBits(), port.params.dataBits,
-        canSelectCore = params._1.commStyle == IntraCoreCommunicationDegree.PointToPoint,
-        canSelectChannel = params._1.commStyle != IntraCoreCommunicationDegree.BroadcastAllCoresChannels
+        canSelectCore = has_core_select(match_params.communicationDegree),
+        canSelectChannel = has_channel_select(match_params.communicationDegree)
       ))
-      w.suggestName(s"intraCoreWritePort_for$name" + "_" + channelIdx)
+      w.suggestName(s"intraCoreWritePort_for$name" + "_ch" + channelIdx)
       port.a.valid := w.valid
       w.ready := port.a.ready
-      port.a.bits := edge.Put(
-        fromSource = 0.U,
-        toAddress = getCommMemAddress (params._1.toSystem, w.bits.core.getOrElse(0), params._1.toMemoryPort, w.bits.channel.getOrElse(0), w.bits.addr),
-        lgSize = CLog2Up(port.params.dataBits / 8).U,
-        data = w.bits.data
-      )._2
+      port.a.bits.source := 0.U
+      port.a.bits.address := getCommMemAddress(params._1.toSystem, w.bits.core.getOrElse(0), params._1.toMemoryPort, w.bits.channel.getOrElse(0), w.bits.addr)
+      port.a.bits.size := CLog2Up(port.params.dataBits / 8).U
+      port.a.bits.data := w.bits.data
+
       port.d.ready := true.B
       w
     }
@@ -158,6 +164,17 @@ class AcceleratorCore(implicit p: Parameters) extends Module {
     })
   })
 
+  val intra_mem_outs = Map.from(outer.memParams.filter(_.isInstanceOf[IntraCoreMemoryPortOutConfig]).map {
+    case mp: IntraCoreMemoryPortOutConfig =>
+      (mp, {
+        (0 until mp.nChannels).map { channel_idx: Int =>
+          val io = IO(new TLBundle(outer.intraCoreMemMasters(0)._2(0).out(0)._1.params))
+          io.suggestName(f"intra_mem_out_to${mp.toSystem}_${mp.toMemoryPort}_ch${channel_idx}")
+          io
+        }
+      })
+  })
+
 
   /**
    * Declare reader module implementations associated with a certain channel name.
@@ -205,7 +222,7 @@ class AcceleratorCore(implicit p: Parameters) extends Module {
   }
 
   def BeethovenIO[T1 <: AccelCommand](bundleIn: T1): CustomIO[T1, AccelRoccUserResponse] = {
-    BeethovenIO[T1, AccelRoccUserResponse](bundleIn, new AccelRoccUserResponse)
+    BeethovenIO[T1, AccelRoccUserResponse](bundleIn, InvalidAccelResponse())
   }
 
   def getSystemID(name: String): UInt = p(AcceleratorSystems).indexWhere(_.name == name).U
@@ -223,36 +240,40 @@ class AcceleratorCore(implicit p: Parameters) extends Module {
     } else {
       systemOpCodeMap.filter(a => a._1 == outer.systemParams.name && a._2 == bundleIn.commandName)(0)._3
     }
-    val beethovenCustomCommandManager = Module(new BeethovenCommandBundler[T1, T2](
-      bundleIn, bundleOut, outer, opCode))
-    beethovenCustomCommandManager.cio.cmd.req.bits := DontCare
-    beethovenCustomCommandManager.cio.cmd.req.valid := false.B
 
-    beethovenCustomCommandManager.suggestName(outer.systemParams.name + "CustomCommand")
-    val thisCommandInFlight = RegInit(false.B)
-    beethovenCustomCommandManager.io.resp.bits.rd := 0.U
-
-    when(io_declaration.req.bits.inst.funct === opCode.U) {
-      beethovenCustomCommandManager.cio.cmd.req <> io_declaration.req
-      when(io_declaration.req.fire) {
-        thisCommandInFlight := io_declaration.req.bits.inst.xd
-      }
+    if (commandExpectsResponse.exists(a => outer.systemParams.name == a._1 && bundleIn.commandName == a._2)) {
+    } else {
+      commandExpectsResponse = (outer.systemParams.name, bundleIn.commandName, !bundleOut.isInstanceOf[InvalidAccelResponse]) :: commandExpectsResponse
     }
 
-    when(thisCommandInFlight) {
-      io_declaration.resp <> beethovenCustomCommandManager.cio.cmd.resp
-      when(io_declaration.resp.fire) {
-        thisCommandInFlight := false.B
-      }
-    }.otherwise {
-      beethovenCustomCommandManager.cio.cmd.resp.ready := false.B
+
+    val beethovenCustomCommandManager = Module(new BeethovenCommandBundler[T1, T2](
+      bundleIn, bundleOut, outer, !bundleOut.isInstanceOf[InvalidAccelResponse], opCode))
+    beethovenCustomCommandManager.cio.req.bits := DontCare
+    beethovenCustomCommandManager.cio.req.valid := false.B
+    beethovenCustomCommandManager.cio.resp.ready := false.B
+    if (!bundleOut.isInstanceOf[InvalidAccelResponse]) {
+      beethovenCustomCommandManager.io.resp.valid := false.B
+      beethovenCustomCommandManager.io.resp.bits.rd := DontCare
+    }
+
+    beethovenCustomCommandManager.suggestName(outer.systemParams.name + "CustomCommand")
+
+    when(io_declaration.req.bits.inst.funct === opCode.U) {
+      beethovenCustomCommandManager.cio.req <> io_declaration.req
+    }
+
+    when (beethovenCustomCommandManager.io_am_active) {
+      io_declaration.resp.valid := beethovenCustomCommandManager.cio.resp.valid
+      io_declaration.resp.bits := beethovenCustomCommandManager.cio.resp.bits
+      beethovenCustomCommandManager.cio.resp.ready := io_declaration.resp.ready
     }
 
     nCommands = nCommands + 1
     beethovenCustomCommandManager.io
   }
 
-  def BeethovenIO(): RoccExchange = {
+  def RoccBeethovenIO(): RoccExchange = {
     if (using_custom == CustomCommandUsage.custom) {
       throw new Exception("Cannot use io after generating a custom io")
     }
@@ -274,25 +295,29 @@ class AcceleratorCore(implicit p: Parameters) extends Module {
   }
 
   val beethoven_rocc_exchanges = outer.systemParams.canIssueCoreCommandsTo.map { target =>
-    (target, IO(new RoccExchange()))
+    (target, {
+      val io = IO(new RoccExchange())
+      io.suggestName(f"externalCommandInterface_to${target}")
+      io
+    })
   }
 
-//  val beethoven_command_ios_ = Map.from(outer.systemParams.canIssueCoreCommandsTo.map { name =>
-//    (name, IO(Decoupled(new TLClientModuleIO())))
-//  })
-//
-//  val beethoven_response_ios_ = Map.from(outer.systemParams.canIssueCoreCommandsTo.map { target =>
-//    (target, {
-//      val io = IO(Flipped(Decoupled(new AccelRoccResponse())))
-//      io.suggestName(s"BeethovenIntraCoreResponsePort_$target")
-//      io
-//    })
-//  })
+  //  val beethoven_command_ios_ = Map.from(outer.systemParams.canIssueCoreCommandsTo.map { name =>
+  //    (name, IO(Decoupled(new TLClientModuleIO())))
+  //  })
+  //
+  //  val beethoven_response_ios_ = Map.from(outer.systemParams.canIssueCoreCommandsTo.map { target =>
+  //    (target, {
+  //      val io = IO(Flipped(Decoupled(new AccelRoccResponse())))
+  //      io.suggestName(s"BeethovenIntraCoreResponsePort_$target")
+  //      io
+  //    })
+  //  })
 
   class IntraCoreIO[Tcmd <: AccelCommand, Tresp <: AccelResponse](genCmd: Tcmd, genResp: Tresp) extends Bundle {
     val req = Decoupled(new Bundle {
-      val payload = genCmd.cloneType
-      val target_core_idx = UInt(CoreIDLengthKey.W)
+      val payload: Tcmd = genCmd.cloneType
+      val target_core_idx: UInt = UInt(CoreIDLengthKey.W)
     })
     val resp = Flipped(Decoupled(genResp.cloneType))
   }
@@ -305,10 +330,14 @@ class AcceleratorCore(implicit p: Parameters) extends Module {
       case Nil => throw new Exception(s"Could not find opcode for $cmdName in $targetSys")
       case _ => systemOpCodeMap.filter(a => a._1 == targetSys && a._2 == cmdName).head._3
     }
-    val emitter = Module(new MultiBeatCommandEmitter(cmdGen, opcode))
+    val expectResponse = commandExpectsResponse.filter(a => a._1 == targetSys && a._2 == cmdName) match {
+      case Nil => throw new Exception(s"Could not find response expectation for $cmdName in $targetSys")
+      case _ => commandExpectsResponse.filter(a => a._1 == targetSys && a._2 == cmdName).head._3
+    }
+    val emitter = Module(new MultiBeatCommandEmitter[T](cmdGen, expectResponse, opcode))
     emitter.out <> target_exchange._2.req
-
-    emitter.in <> sys_io.req
+    emitter.in.valid := sys_io.req.valid
+    emitter.in.bits <> sys_io.req.bits.payload
     emitter.in.bits.__core_id := sys_io.req.bits.target_core_idx
     emitter.in.bits.__system_id := getSystemID(targetSys)
     sys_io.resp.valid := target_exchange._2.resp.valid
@@ -328,9 +357,9 @@ class AcceleratorCore(implicit p: Parameters) extends Module {
 //    case _ => BeethovenIO()
 //  }
 //
-//  val readerParams = systemParams.memoryChannelParams.filter(_.isInstanceOf[ReadChannelConfig]).map(_.asInstanceOf[ReadChannelConfig])
-//  val writerParams = systemParams.memoryChannelParams.filter(_.isInstanceOf[WriteChannelConfig]).map(_.asInstanceOf[WriteChannelConfig])
-//  val spParams = systemParams.memoryChannelParams.filter(_.isInstanceOf[ScratchpadConfig]).map(_.asInstanceOf[ScratchpadConfig])
+//  val readerParams = systemParams.memoryChannelConfig.filter(_.isInstanceOf[ReadChannelConfig]).map(_.asInstanceOf[ReadChannelConfig])
+//  val writerParams = systemParams.memoryChannelConfig.filter(_.isInstanceOf[WriteChannelConfig]).map(_.asInstanceOf[WriteChannelConfig])
+//  val spParams = systemParams.memoryChannelConfig.filter(_.isInstanceOf[ScratchpadConfig]).map(_.asInstanceOf[ScratchpadConfig])
 //
 //  val rrio = readerParams.map(pr => getReaderModules(pr.name))
 //  val writerIOs = writerParams.map(pr => getWriterModules(pr.name))

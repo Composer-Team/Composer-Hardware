@@ -8,7 +8,6 @@ import beethoven.Floorplanning.ConstraintGeneration
 import beethoven.Generation.BuildMode
 import beethoven._
 import beethoven.Systems.BeethovenTop._
-import beethoven.Generation.Tune.Tunable
 import beethoven.Parameters._
 import beethoven.Platforms._
 import beethoven.Protocol.AXI.AXI4Compat
@@ -93,7 +92,9 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
         )))))
     val indexer = LazyModule(new TLSourceShrinkerDynamicBlocking(4))
     splitter.in_node := indexer.node := frontDMA_joined.get
-    (Some(splitter.read_out), Some(splitter.write_out))
+    val read_out = TLXbar() := TLBuffer() := splitter.read_out
+    val write_out = TLXbar() := TLBuffer() := splitter.write_out
+    (Some(read_out), Some(write_out))
   } else (None, None)
 
 
@@ -130,63 +131,40 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
 
   // deal with memory interconnect
   {
-    var cnt = 1
-    val r_map = {
-      val uncondensed = devices.flatMap { d =>
-        val on_chip = d.r_nodes.map(b => {
-          val r = (d.deviceId, (b, List(cnt)))
-          cnt = cnt + 1
-          r
-        })
-        val off_chip = if (frontDMA_r.isDefined && platform.physicalInterfaces.find(_.isInstanceOf[PhysicalHostInterface]).get.locationDeviceID == d.deviceId)
-          Seq((d.deviceId, (frontDMA_r.get, List(0))))
-        else Seq()
-        on_chip ++ off_chip
+    val r_map = devices.flatMap { d =>
+      val on_chip = d.r_nodes.map(b => (b, d.deviceId))
+      val off_chip = if (frontDMA_r.isDefined && platform.physicalInterfaces.find(_.isInstanceOf[PhysicalHostInterface]).get.locationDeviceID == d.deviceId) {
+        Seq((frontDMA_r.get, d.deviceId))
+      } else {
+        Seq()
       }
-      Map.from(devices.map(d => (d.deviceId, uncondensed.filter(_._1 == d.deviceId).map(_._2))))
+      on_chip ++ off_chip
     }
 
-    val w_map = {
-      val uncondensed = devices.flatMap { d =>
-        val on_chip = d.w_nodes.map(b => {
-          val r = (d.deviceId, (b, List(cnt)))
-          cnt = cnt + 1
-          r
-        })
-        val off_chip = if (frontDMA_w.isDefined && platform.physicalInterfaces.find(_.isInstanceOf[PhysicalHostInterface]).get.locationDeviceID == d.deviceId)
-          Seq((d.deviceId, (frontDMA_w.get, List(0))))
-        else Seq()
-        on_chip ++ off_chip
-      }
-      Map.from(devices.map(d => (d.deviceId, uncondensed.filter(_._1 == d.deviceId).map(_._2))))
+    val w_map = devices.flatMap { d =>
+      val on_chip = d.w_nodes.map(b => (b, d.deviceId))
+      val off_chip = if (frontDMA_w.isDefined && platform.physicalInterfaces.find(_.isInstanceOf[PhysicalHostInterface]).get.locationDeviceID == d.deviceId)
+        Seq((frontDMA_w.get, d.deviceId))
+      else Seq()
+      on_chip ++ off_chip
     }
 
-    val mem_sinks = platform.physicalInterfaces.filter(_.isInstanceOf[PhysicalMemoryInterface]).map(_.locationDeviceID)
+    val mem_sinks = platform.physicalInterfaces.filter(_.isInstanceOf[PhysicalMemoryInterface]).map(_.locationDeviceID).distinct
 
     val Seq(r_commits, w_commits) = Seq(r_map, w_map).map { carry_init =>
-      val fpass = topological_xbarReduce_over_SUG(
-        devices = platform.physicalDevices.map(_.identifier),
-        connectivity = platform.physicalConnectivity,
-        carries = carry_init,
-        commits = Map.from(mem_sinks.map(a => (a, List.empty))),
-        make_buffer = make_tl_buffer,
-        make_xbar = make_tl_xbar,
-        assign = tl_assign)(p, mem_sinks)
-      topological_xbarReduce_over_SUG(
-        platform.physicalDevices.map(_.identifier),
-        connectivity = reverse_connectivity(platform.physicalConnectivity),
-        carries = carry_init,
-        commits = fpass,
-        make_buffer = make_tl_buffer,
-        make_xbar = make_tl_xbar,
-        assign = tl_assign)(p, mem_sinks)
+      create_cross_chip_network(
+        sources = carry_init,
+        mem_sinks,
+        make_tl_buffer,
+        make_tl_xbar,
+        tl_assign)
     }
     platform.physicalInterfaces.foreach {
       case pmi: PhysicalMemoryInterface =>
         val mem = (AXI_MEM.get)(pmi.channelIdx)
         val sTLToAXI = LazyModuleWithFloorplan(new TLToAXI4SRW(), pmi.locationDeviceID).node
         Seq(r_commits, w_commits) foreach (commit_set =>
-          xbar_tree_reduce_sources(commit_set(pmi.locationDeviceID).map(_._1), platform.xbarMaxDegree, 1,
+          xbar_tree_reduce_sources(commit_set(pmi.locationDeviceID), platform.xbarMaxDegree, 1,
             make_tl_xbar,
             make_tl_buffer,
             (s: Seq[TLNode], t: TLNode) => tl_assign(s, t)(p))
@@ -200,42 +178,23 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
   {
     // the sinks consist of the host interface and any system that can emit commands
     // the sources consist of all systems
-    var srocc_id = 0
-    val emitters_per_device = devices.map { sd =>
+    val emitters_per_device = devices.flatMap { sd =>
       val device_has_host = platform.physicalInterfaces.filter(_.locationDeviceID == sd.deviceId).exists(_.isInstanceOf[PhysicalHostInterface])
-      (sd.deviceId, (if (device_has_host) List(rocc_front) else List()) ++ sd.source_rocc)
-    }.map { a =>
-      (a._1, a._2.map { b =>
-        val q = srocc_id
-        srocc_id = srocc_id + 1
-        (b, List(q))
-      })
+      (if (device_has_host) List((rocc_front, sd.deviceId)) else List()) ++ (sd.source_rocc.map(a => (a, sd.deviceId)))
     }
 
     val devices_with_sinks = devices.map { sd => sd.deviceId }
 
-    val carry_init = Map.from(emitters_per_device)
-
-    val fpass = topological_xbarReduce_over_SUG(
-      platform.physicalDevices.map(_.identifier),
-      platform.physicalConnectivity,
-      carry_init,
-      Map.from(devices_with_sinks.map((_, List.empty))),
-      make_rocc_buffer,
-      make_rocc_xbar,
-      rocc_assign)(p, devices_with_sinks)
-    val net = topological_xbarReduce_over_SUG(
-      platform.physicalDevices.map(_.identifier),
-      reverse_connectivity(platform.physicalConnectivity),
-      carry_init,
-      fpass,
-      make_rocc_buffer,
-      make_rocc_xbar,
-      rocc_assign)(p, devices_with_sinks)
+    val net = create_cross_chip_network(
+      sources = emitters_per_device,
+      devices_with_sinks = devices_with_sinks,
+      make_buffer = make_rocc_buffer,
+      make_xbar = make_rocc_xbar,
+      assign = rocc_assign)
     // push the commands to the devices
     devices.foreach { sd =>
       val sink = sd.host_rocc
-      val sources = net(sd.deviceId).map(_._1)
+      val sources = net(sd.deviceId)
       val source_unit = xbar_tree_reduce_sources(sources, platform.xbarMaxDegree, 1, make_rocc_xbar, make_rocc_buffer,
         (a: Seq[RoccNode], b: RoccNode) => rocc_assign(a, b)(p))(p)(0)
       sink := source_unit
@@ -245,32 +204,16 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
   // on chip memory transfers
   {
     val devices_with_sinks = devices.filter(_.incoming_mem.nonEmpty).map { sd => sd.deviceId }
-    var cnt = 0
-    val carry_init = Map.from(devices.map(d => (d.deviceId, d.outgoing_mem)).map { case (a, b) => (a, b.map(c => {
-      val r = (c, List(cnt))
-      cnt = cnt + 1
-      r
-    }).toList)
-    })
-    val fpass = topological_xbarReduce_over_SUG(
-      platform.physicalDevices.map(_.identifier),
-      platform.physicalConnectivity,
-      carry_init,
-      Map.from(devices_with_sinks.map((_, List.empty))),
-      make_tl_buffer,
-      make_tl_xbar,
-      tl_assign)(p, devices_with_sinks)
-    val net = topological_xbarReduce_over_SUG(
-      platform.physicalDevices.map(_.identifier),
-      reverse_connectivity(platform.physicalConnectivity),
-      carry_init,
-      fpass,
-      make_tl_buffer,
-      make_tl_xbar,
-      tl_assign)(p, devices_with_sinks)
+
+    val net = create_cross_chip_network(
+      sources = devices.flatMap(d => d.incoming_mem.map(b => (b, d.deviceId))),
+      devices_with_sinks = devices_with_sinks,
+      make_buffer = make_tl_buffer,
+      make_xbar = make_tl_xbar,
+      assign = tl_assign)
     devices_with_sinks.foreach { sd =>
       val sinks = xbar_tree_reduce_sinks(devices.find(_.deviceId == sd).get.incoming_mem, platform.xbarMaxDegree, platform.memEndpointsPerDevice, make_tl_xbar, make_tl_buffer, tl_assign)(p)
-      val sources = net(sd).map(_._1)
+      val sources = net(sd)
       sources.foreach { source =>
         sinks.foreach { sink =>
           sink := source
@@ -294,7 +237,6 @@ class TopImpl(outer: BeethovenTop)(implicit p: Parameters) extends LazyModuleImp
       io
     }
     val ins = dram_ports.map(_.in(0))
-    //  val axi4_mem = IO(HeterogeneousBag.fromNode(dram_ports.in))
     (M00_AXI zip ins) foreach { case (i, (o, _)) =>
       AXI4Compat.connectCompatMaster(i, o)
     }
@@ -311,7 +253,4 @@ class TopImpl(outer: BeethovenTop)(implicit p: Parameters) extends LazyModuleImp
   Generation.CPP.Generation.genCPPHeader(outer)
   if (p(BuildModeKey) == BuildMode.Synthesis)
     ConstraintGeneration.writeConstraints()
-  if (p(BuildModeKey).isInstanceOf[BuildMode.Tuning]) {
-    Tunable.exportNames()
-  }
 }

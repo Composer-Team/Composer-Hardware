@@ -1,17 +1,41 @@
 package beethoven.Generation.CPP
 
-import chipsalliance.rocketchip.config.Parameters
-import chisel3._
 import beethoven.Generation.CPP.CommandParsing.bundlesAreEquivalentEnough
 import beethoven.Generation.CPP.TypeParsing.getCType
-import beethoven.common.{AccelResponse, AccelRoccUserResponse}
+import beethoven.common.{AccelResponse, AccelRoccUserResponse, EmptyAccelResponse, InvalidAccelResponse}
 
 object ResponseParsing {
   private[beethoven] case class BeethovenResponseDeclarations(name: String, dec: String, definition: String)
+  private var have_declared_empty = false
 
-  def getResponseDeclaration(resp: AccelResponse, sysName: String)(implicit p: Parameters): BeethovenResponseDeclarations = {
-    if (bundlesAreEquivalentEnough(resp, new AccelRoccUserResponse()))
-      return BeethovenResponseDeclarations("beethoven::rocc_response", "", "")
+  def getResponseDeclaration(resp: AccelResponse, sysName: String): Option[BeethovenResponseDeclarations] = {
+    resp match {
+      case _: EmptyAccelResponse =>
+        return Some(BeethovenResponseDeclarations("bool",
+          f"""
+             |template<> bool beethoven::response_handle<bool>::get();
+             |#ifndef BAREMETAL
+             |template<> std::optional<bool> beethoven::response_handle<bool>::try_get();
+             |#endif
+             |""".stripMargin,
+          f"""
+             |template<> bool beethoven::response_handle<bool>::get() {
+             |  rg.get();
+             |  return true;
+             |}
+             |
+             |template<> std::optional<bool> beethoven::response_handle<bool>::try_get() {
+             |  auto r = rg.try_get();
+             |  if (!r.has_value()) return {};
+             |  else return true;
+             |}
+             |
+             |""".stripMargin))
+      case _: InvalidAccelResponse => return None
+      case _ => if (bundlesAreEquivalentEnough(resp, new AccelRoccUserResponse()))
+        return Some(BeethovenResponseDeclarations("beethoven::rocc_response", "", ""))
+    }
+
 
     // otherwise we have a custom type
     val structName = f"$sysName::${resp.responseName}"
@@ -86,6 +110,6 @@ object ResponseParsing {
          |#endif
          |
          |""".stripMargin
-    BeethovenResponseDeclarations(structName, dec, definition)
+    Some(BeethovenResponseDeclarations(structName, dec, definition))
   }
 }

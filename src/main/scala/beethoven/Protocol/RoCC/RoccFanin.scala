@@ -21,7 +21,6 @@ class RoccFanin(implicit p: Parameters) extends LazyModule {
     val ins = node.in
     val out = node.out(0)
     if (ins.length == 1) {
-      println("SIMPLE")
       val ir = ins(0)._1.req
       val or = out._1.req
       ir.ready := or.ready
@@ -62,6 +61,11 @@ class RoccFanin(implicit p: Parameters) extends LazyModule {
 }
 
 object RoccFanin {
-  def apply()(implicit p: Parameters): RoccNexusNode = LazyModuleWithFloorplan(new RoccFanin()).node
+  private var rocc_fanin_idx = 0
+  def apply()(implicit p: Parameters): RoccNexusNode = LazyModuleWithFloorplan(new RoccFanin(), {
+    val id = rocc_fanin_idx
+    rocc_fanin_idx += 1
+    s"zzrocc_fanin_$id"
+  }).node
   def apply(name: String)(implicit p: Parameters): RoccNexusNode = LazyModuleWithFloorplan(new RoccFanin(), name).node
 }

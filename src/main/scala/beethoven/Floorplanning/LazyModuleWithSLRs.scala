@@ -16,14 +16,6 @@ object LazyModuleWithSLRs {
     }
   }
 
-  def LazyModuleWithFloorplan[T <: LazyModule](mod: T): T = {
-    DeviceContext.currentDevice match {
-      case None => val lm = LazyModule(mod)
-        lm
-      case Some(s) => LazyModuleWithFloorplan(mod, s)
-    }
-  }
-
   def LazyModuleWithFloorplan[T <: LazyModule](mod: T, slr_id: Int, name: String): T = {
     val lm = LazyModule(mod)
     lm.suggestName(name)

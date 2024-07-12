@@ -132,5 +132,10 @@ class AXIToRocc(implicit p: Parameters) extends LazyModule {
 }
 
 object AXIToRocc {
-  def apply()(implicit p: Parameters): AXIToRoccNode = LazyModuleWithFloorplan(new AXIToRocc()).node
+  private var axi_to_rocc_idx = 0
+  def apply()(implicit p: Parameters): AXIToRoccNode = LazyModuleWithFloorplan(new AXIToRocc(), {
+    val id = axi_to_rocc_idx
+    axi_to_rocc_idx += 1
+    f"AXIToRocc$id"
+  }).node
 }

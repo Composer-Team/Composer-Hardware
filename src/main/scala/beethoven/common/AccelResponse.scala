@@ -49,6 +49,10 @@ class AccelResponse(val responseName: String) extends Bundle with hasAccessibleU
   }
 }
 
+private[beethoven] case class InvalidAccelResponse() extends AccelRoccUserResponse
+
+case class EmptyAccelResponse() extends AccelResponse("empty")
+
 trait hasRoccResponseFields extends hasAccessibleUserSubRegions with hasDataField {
   val system_id: UInt
 

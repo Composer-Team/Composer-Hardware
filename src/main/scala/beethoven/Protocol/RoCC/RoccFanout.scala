@@ -70,6 +70,11 @@ class RoccFanout(implicit p: Parameters) extends LazyModule {
 }
 
 object RoccFanout {
-  def apply()(implicit p: Parameters): RoccNexusNode = LazyModuleWithFloorplan(new RoccFanout()).node
+  private var rocc_fanout_idx = 0
+  def apply()(implicit p: Parameters): RoccNexusNode = LazyModuleWithFloorplan(new RoccFanout(), {
+    val id = rocc_fanout_idx
+    rocc_fanout_idx += 1
+    s"zzrocc_fanout_$id"
+  }).node
   def apply(name: String)(implicit p: Parameters): RoccNexusNode = LazyModuleWithFloorplan(new RoccFanout(), name).node
 }

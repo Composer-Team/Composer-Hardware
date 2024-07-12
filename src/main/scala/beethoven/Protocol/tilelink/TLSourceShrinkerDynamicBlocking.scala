@@ -1,8 +1,8 @@
 // See LICENSE.SiFive for license details.
 
 package beethoven.Protocol.tilelink
-
 import Chisel._
+import beethoven.Protocol.tilelink.TLSlave
 import chipsalliance.rocketchip.config._
 import beethoven.platform
 import freechips.rocketchip.diplomacy._

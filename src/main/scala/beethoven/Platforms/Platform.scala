@@ -106,6 +106,14 @@ abstract class Platform {
   val physicalInterfaces: List[PhysicalInterface]
   val physicalConnectivity: List[(Int, Int)]
 
+  private[beethoven] def platformCheck(): Unit = {
+    assert(physicalInterfaces.exists(_.isInstanceOf[PhysicalHostInterface]),
+      "Platform must have at least one host interface")
+    assert(physicalInterfaces.exists(_.isInstanceOf[PhysicalMemoryInterface]),
+      "Platform must have at least one memory interface")
+    assert(physicalDevices.nonEmpty, "Platform must have at least one device")
+  }
+
   def getConnectivityFromDeviceID(id: Int): List[Int] = {
     physicalConnectivity.filter(a => a._1 == id || a._2 == id).map {
       case (x, a) if x == id => a

@@ -7,7 +7,7 @@ case class AcceleratorSystemConfig(nCores: Int,
                                    /** In elements, per write channel, scaled by the number of bytes
                                      */
                                    moduleConstructor: ModuleConstructor,
-                                   memoryChannelParams: List[MemChannelConfig] = List(),
+                                   memoryChannelConfig: List[MemChannelConfig] = List(),
                                    canReceiveSoftwareCommands: Boolean = true,
                                    canIssueCoreCommandsTo: Seq[String] = Seq.empty,
                                    canSendDataTo: Seq[String] = Seq.empty

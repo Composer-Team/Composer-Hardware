@@ -4,7 +4,7 @@ import chipsalliance.rocketchip.config._
 import chisel3.stage._
 import beethoven.Floorplanning.ConstraintGeneration
 import beethoven.Generation.Annotators.AnnotateXilinxInterface.XilinxInterface
-import beethoven.Generation
+import beethoven.{Generation, platform}
 import beethoven.Generation.Annotators.{CrossBoundaryDisable, WalkPath}
 import beethoven.Generation.BeethovenBuild._
 import beethoven.Platforms.FPGA.Xilinx.AWSF1Platform
@@ -29,7 +29,6 @@ class BeethovenChipStage extends Stage with Phase {
     Dependency[chisel3.stage.phases.Checks],
     Dependency[chisel3.stage.phases.MaybeAspectPhase],
     Dependency[chisel3.stage.phases.Convert], // convert chirrtl to firrtl
-    Dependency[beethoven.Generation.Stage.ExportCSymbolPhase],
     Dependency[firrtl.stage.phases.Compiler]
   )
 
@@ -113,19 +112,14 @@ object BuildMode {
 
   case object Simulation extends BuildMode
 
-  case class Tuning(hwBuildDir: String,
-                    execCMAKEDir: String,
-                    execName: String,
-                    cmakeOpts: Seq[String] = Seq()) extends BuildMode
-
   case object Training extends BuildMode
 }
 
 class BeethovenBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthesis) {
   final def main(args: Array[String]): Unit = {
     //    args.foreach(println(_))
-    println("Running with " + Runtime.getRuntime.freeMemory() + "B memory")
-    println(Runtime.getRuntime.maxMemory.toString + "B")
+//    println("Running with " + Runtime.getRuntime.freeMemory() + "B memory")
+//    println(Runtime.getRuntime.maxMemory.toString + "B")
     BuildArgs.args = Map.from(
       args.filter(str => str.length >= 2 && str.substring(0, 2) == "-D").map {
         opt =>
@@ -139,6 +133,8 @@ class BeethovenBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthes
     val configWithBuildMode = new Config(config.alterPartial {
       case BuildModeKey => buildMode
     })
+    platform(configWithBuildMode).platformCheck()
+
     new BeethovenChipStage().transform(
       AnnotationSeq(
         Seq(
@@ -164,14 +160,11 @@ class BeethovenBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthes
     // --------------- Verilog Annotators ---------------
     //    KeepHierarchy(targetDir / "BeethovenTop.v")
 //    partitionModules foreach println
-    println("ALL THE FILES ARE IN " + targetDir)
-    println("shifts: " + shifts)
     val movedSrcs = beethoven.Generation.Annotators.UniqueMv(sourceList, targetDir) :+ {
       val s = targetDir / "BeethovenAllShifts.v"
       val stxts = shifts.map(a => os.read(a))
       os.write(s, stxts.mkString("\n\n"))
       shifts.foreach(os.remove(_))
-      println(s"comnbining to ${s}")
       s
     }
 
@@ -206,17 +199,6 @@ class BeethovenBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthes
       f"""set(SRCS ${movedSrcs.mkString("\n")}\n${chiselGeneratedSrcs.mkString("\n")})\n""")
 
     buildMode match {
-      case bm: BuildMode.Tuning if !args.contains("--notune") =>
-        val opts = if (bm.cmakeOpts.length == 1) bm.cmakeOpts(0) else {
-          bm.cmakeOpts.reduce(_ + "." + _)
-        }
-        os.proc(Seq("python3",
-          System.getenv("BEETHOVEN_ROOT") + "/Beethoven-Hardware/scripts/tune.py",
-          this.getClass.getCanonicalName,
-          bm.hwBuildDir,
-          bm.execCMAKEDir + "." + bm.execName + "." + opts)).call(
-          stdout = os.Inherit
-        )
       case BuildMode.Synthesis =>
         config(PlatformKey) match {
           case pwpp: Platform with HasPostProccessorScript =>

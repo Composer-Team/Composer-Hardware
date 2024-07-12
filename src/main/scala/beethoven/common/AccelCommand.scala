@@ -50,7 +50,6 @@ class AccelCommand(val commandName: String) extends AbstractAccelCommand {
 
   def getSystemID: UInt = __system_id
 
-
   private[beethoven] def getRoccPayload(idx: UInt): (UInt, UInt)  = {
     val beats = VecInit(this.getRoccBeats)
     val xlen = 64
@@ -164,16 +163,6 @@ object AccelRoccCommand {
     wr.inst.system_id := instuint(28, 25)
     wr.inst.funct := instuint(31, 29)
     wr
-  }
-}
-
-class DecoupledIOWithCRouting[+T <: Data](gen: T) extends DecoupledIO[T](gen) {
-  val expectResponse = Output(Bool())
-}
-
-object DecoupledIOWithCRouting {
-  def apply[T <: Data](gen: T): DecoupledIOWithCRouting[T] = {
-    new DecoupledIOWithCRouting[T](gen)
   }
 }
 

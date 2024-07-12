@@ -17,7 +17,12 @@ class RoccBuffer(val nEntries: Int = 2)(implicit p: Parameters) extends LazyModu
 }
 
 object RoccBuffer {
-  def apply()(implicit p: Parameters): RoCCBufferNode = LazyModuleWithFloorplan(new RoccBuffer()).node
+  private var rocc_buffer_idx = 0
+  def apply()(implicit p: Parameters): RoCCBufferNode = LazyModuleWithFloorplan(new RoccBuffer(), {
+    val id = rocc_buffer_idx
+    rocc_buffer_idx += 1
+    s"rocc_buffer_$id"
+  }).node
   def apply(name: String)(implicit p: Parameters): RoCCBufferNode = {
     LazyModuleWithFloorplan(new RoccBuffer(), name).node
   }

@@ -3,11 +3,9 @@ package beethoven.MemoryStreams
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
-import beethoven.Generation.DotGen
 import beethoven._
 import beethoven.MemoryStreams.Loaders.ScratchpadPackedSubwordLoader
 import beethoven.common.{Address, CLog2Up, ShiftReg, splitIntoChunks}
-import beethoven.Generation.Tune._
 import beethoven.MemoryStreams.MemoryScratchpad.has_warned
 import beethoven.Parameters.ScratchpadConfig
 import freechips.rocketchip.diplomacy._
@@ -45,6 +43,12 @@ class ScratchpadDataPort(val scReqBits: Int, val dataWidthBits: Int) extends Scr
       this.read(toAddr)
     }
     this.req.fire
+  }
+}
+
+object ScratchpadDataPort {
+  def apply(other: ScratchpadDataPort): ScratchpadDataPort = {
+    new ScratchpadDataPort(other.scReqBits, other.dataWidthBits)
   }
 }
 
@@ -102,12 +106,6 @@ class MemoryScratchpad(csp: ScratchpadConfig)(implicit p: Parameters) extends La
       )),
       channelBytes = TLChannelBeatBytes(channelWidthBytes)))))
   } else None
-
-  csp.dataWidthBits match {
-    case a: Tunable if !a.isIdentity =>
-      println(s"dataWidthBits is base tunable. Range is ${a.range._1}, ${a.range._2}")
-    case _ => ;
-  }
 }
 
 class ScratchpadImpl(csp: ScratchpadConfig,
@@ -172,6 +170,7 @@ class ScratchpadImpl(csp: ScratchpadConfig,
       mem.data_in(portIdx) := io.req.bits.data
     }
     val datsOut = VecInit(memory.map(_.data_out(portIdx)))
+    io.req.ready := true.B
     io.res.bits := datsOut(memIdxDelay)
     io.res.valid := ShiftReg(io.req.valid && !io.req.bits.write_enable, latency)
   }

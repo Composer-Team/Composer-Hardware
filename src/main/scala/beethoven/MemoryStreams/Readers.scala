@@ -6,7 +6,6 @@ import chisel3.util._
 import beethoven.Systems.DataChannelIO
 import beethoven.common.{CLog2Up, ShiftReg}
 import beethoven.Generation._
-import beethoven.Generation.Tune._
 import beethoven.Platforms._
 import beethoven.platform
 import freechips.rocketchip.tilelink._
@@ -212,7 +211,6 @@ class SequentialReader(val dWidth: Int,
   val allocatingBig = WireInit(false.B)
   val allocatingSmall = WireInit(false.B)
 
-
   switch(state) {
     is(s_idle) {
       when(io.req.fire) {
@@ -246,16 +244,6 @@ class SequentialReader(val dWidth: Int,
         }
       }.otherwise {
         val haveRoomToAlloc = rowsAvailableToAlloc >= slots_per_alloc.U
-//        val dist2Roof = (prefetchRows - 1).U - prefetch_writeIdx
-//        if (hasOneSource) {
-//          haveRoomToAlloc := prefetch_readIdx === prefetch_writeIdx
-//        } else {
-//          when(dist2Roof < slots_per_alloc.U) {
-//            haveRoomToAlloc := prefetch_readIdx > (slots_per_alloc.U - dist2Roof) && (prefetch_readIdx < prefetch_writeIdx)
-//          }.otherwise {
-//            haveRoomToAlloc := (prefetch_readIdx > prefetch_writeIdx + slots_per_alloc.U) || (prefetch_readIdx <= prefetch_writeIdx)
-//          }
-//        }
         tl_reg.io.enq.valid := sourceAvailable && haveRoomToAlloc
         tl_reg.io.enq.bits := tl_edge.Get(
           fromSource = chosenSource,
@@ -356,16 +344,4 @@ class SequentialReader(val dWidth: Int,
     }
   }
   io.req.ready := !(state =/= s_idle || reads_in_flight > 0.U || (prefetch_readIdx =/= prefetch_writeIdx) || queue_occupancy =/= 0.U)
-
-  if (p(BuildModeKey).isInstanceOf[BuildMode.Tuning]) {
-    val tx_cycles = PerfCounter(Reg(UInt(64.W)), designObjective = new MinimizeObjective)
-    val tx_counter = Reg(UInt(64.W))
-    tx_counter := tx_counter + 1.U
-    when(io.req.fire) {
-      tx_counter := 0.U
-    }
-    when(io.req.ready && !RegNext(io.req.ready)) {
-      tx_cycles := tx_counter
-    }
-  }
 }

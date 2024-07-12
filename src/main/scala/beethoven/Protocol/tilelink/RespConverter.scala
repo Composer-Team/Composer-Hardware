@@ -1,13 +1,8 @@
 package beethoven.Protocol.tilelink
-
+import beethoven.Protocol.tilelink.TLSlave
 import chisel3._
 import chisel3.util._
-import beethoven.common.{
-  AccelRoccResponse,
-  AccelResponse,
-  hasAccessibleUserSubRegions,
-  hasDataField
-}
+import beethoven.common.{AccelResponse, AccelRoccResponse, hasAccessibleUserSubRegions, hasDataField}
 
 class RespConverter[
     outT <: AccelResponse,
