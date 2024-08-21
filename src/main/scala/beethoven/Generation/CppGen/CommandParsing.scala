@@ -99,7 +99,7 @@ object CommandParsing {
              |""".stripMargin
           val definition =
             f"""
-               |$sysName::${hookDef.cc.commandName}(uint16_t core_id$signature) {
+               |void $sysName::${hookDef.cc.commandName}(uint16_t core_id$signature) {
                |#ifndef BAREMETAL
                |  assert(core_id < ${p(AcceleratorSystems).filter(_.name == sysName)(0).nCores});
                |#endif

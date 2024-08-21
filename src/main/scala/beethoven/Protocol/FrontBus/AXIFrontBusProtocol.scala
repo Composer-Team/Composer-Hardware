@@ -53,7 +53,7 @@ class AXIFrontBusProtocol(withDMA: Boolean) extends FrontBusProtocol {
         LazyModuleWithFloorplan(new AXI4ToTL(false), "zzfront5_axi4ToTL_front").node :=
         LazyModuleWithFloorplan(new AXI4UserYanker(capMaxFlight = Some(1)), "zzfront4_axi4yank_front").node :=
         LazyModuleWithFloorplan(new AXI4Buffer(), "zzfront3_axi4buffer_front").node :=
-        LazyModuleWithFloorplan(new AXI4Fragmenter(), "zzfront2_axi4fragment_front").node :=
+//        LazyModuleWithFloorplan(new AXI4Fragmenter(), "zzfront2_axi4fragment_front").node :=
         LazyModuleWithFloorplan(new AXI4IdIndexer(1), "zzfront1_axi4idxer").node := axi_master
 
 

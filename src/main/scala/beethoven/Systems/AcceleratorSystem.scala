@@ -57,6 +57,7 @@ class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameter
         param.make,
         slr_id = core2slr(coreIdx),
         name = s"${systemParams.name}_core${coreIdx}_${param.name}")
+
       (param, mod)
   })
 
@@ -163,7 +164,7 @@ class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameter
 
       val tl_head = TLIdentityNode()
       val tl2slave = TLToTLSlave()
-      sunk_cores(0) := TLSlaveBuffer() := tl2slave := tl_head
+      sunk_cores(0) := TLSlaveBuffer() := tl2slave := TLWidthWidget(platform.interCoreMemBusWidthBytes) := tl_head
       (para, tl_head)
     }.toList
     val node = if (squish.isEmpty) {
@@ -188,10 +189,11 @@ class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameter
       val memMasters = Seq.fill(otherSystemParams.nCores)(TLClientNode(Seq.fill(mp.nChannels)(TLMasterPortParameters.v1(
         clients = Seq(TLMasterParameters.v1(
           f"intraCoreMemPortOut_${mp.toSystem}_to_${mp.toMemoryPort}",
-          supportsProbe = TransferSizes(otherSPParams.dataWidthBits.intValue() / 8),
-          supportsPutFull = TransferSizes(otherSPParams.dataWidthBits.intValue() / 8)
+          supportsProbe = TransferSizes(Math.max(otherSPParams.dataWidthBits.intValue() / 8, platform.interCoreMemBusWidthBytes)),
+          supportsPutFull = TransferSizes(Math.max(otherSPParams.dataWidthBits.intValue() / 8, platform.interCoreMemBusWidthBytes))
         ))))))
-      (mp, memMasters)
+      val masterShrunk = memMasters.map(TLWidthWidget(otherSPParams.dataWidthBits/8) := _)
+      (mp, memMasters, masterShrunk)
   }
 
   val Seq(r_nodes, w_nodes) = Seq(readerNodes, writerNodes).map { all_nodes =>

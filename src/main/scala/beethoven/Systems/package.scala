@@ -28,13 +28,13 @@ package object Systems {
     }
   }
 
-  def core2slr(coreIdx: Int)(implicit p: Parameters): Int = {
+  private[beethoven] def core2slr(coreIdx: Int)(implicit p: Parameters): Int = {
     val deviceIdxs = platform.physicalDevices.map(_.identifier)
     val allocations = recursivelyDecide(deviceIdxs.map(a => (a, 0, 0.0)), coreIdx)
     allocations.indexOf(allocations.min)
   }
 
-  def slr2ncores(deviceId: Int, totalCores: Int)(implicit p: Parameters): (Int, Int) = {
+  private[beethoven] def slr2ncores(deviceId: Int, totalCores: Int)(implicit p: Parameters): (Int, Int) = {
     val deviceIdxs = platform.physicalDevices.map(_.identifier)
     val allocations = recursivelyDecide(deviceIdxs.map(a => (a, 0, 0.0)), totalCores)
     val sumUp = (0 until deviceId).map(b => allocations.find(_._1 == b).get._2).sum
@@ -42,14 +42,14 @@ package object Systems {
   }
 
 
-  def getCommMemSpaceBits()(implicit p: Parameters): Int = {
+  private[beethoven] def getCommMemSpaceBits()(implicit p: Parameters): Int = {
     val configs = p(AcceleratorSystems)
     val params = configs.flatMap(_.memoryChannelConfig.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig])).map(_.asInstanceOf[IntraCoreMemoryPortInConfig])
     val biggest_on_chip_comm_mem = params.map { mp => mp.nDatas * mp.nChannels * mp.dataWidthBits / 8 }.max
     log2Up(biggest_on_chip_comm_mem)
   }
 
-  def getCommMemCoreBits()(implicit p: Parameters): Int = {
+  private[beethoven] def getCommMemCoreBits()(implicit p: Parameters): Int = {
     val configs = p(AcceleratorSystems)
     val max_cores = configs.filter(_.memoryChannelConfig.exists(_.isInstanceOf[IntraCoreMemoryPortInConfig])).map(co =>
       co.memoryChannelConfig.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig]).map {
@@ -63,7 +63,7 @@ package object Systems {
     log2Up(max_cores)
   }
 
-  def getCommMemChannelBits()(implicit p: Parameters): Int = {
+  private[beethoven] def getCommMemChannelBits()(implicit p: Parameters): Int = {
     // figure out memory space for on-chip memory comms
     val configs = p(AcceleratorSystems)
     val max_channels = configs.filter(_.memoryChannelConfig.exists(_.isInstanceOf[IntraCoreMemoryPortInConfig])).map(co =>
@@ -80,7 +80,7 @@ package object Systems {
   }
 
 
-  def getCommMemAddress(sys: String, core: Any, endpoint: String, channel: Any, spaceAddr: UInt)(implicit p: Parameters): UInt = {
+  private[beethoven] def getCommMemAddress(sys: String, core: Any, endpoint: String, channel: Any, spaceAddr: UInt, shamt: Int)(implicit p: Parameters): UInt = {
     // figure out memory space for on-chip memory comms
     val configs = p(AcceleratorSystems)
     val max_endpoints_per_core = configs.map(_.memoryChannelConfig.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig]).map(_.asInstanceOf[IntraCoreMemoryPortInConfig])).map(_.length).max
@@ -101,10 +101,10 @@ package object Systems {
       channel match {
         case a: Int => a.U(channel_bits.W)
         case a: UInt => a
-      }, spaceAddr)
+      }, spaceAddr << shamt)
   }
 
-  def getCommMemAddressSet(sys: String, core: Int, endpoint: IntraCoreMemoryPortInConfig, channel: Int)(implicit p: Parameters): AddressSet = {
+  private[beethoven] def getCommMemAddressSet(sys: String, core: Int, endpoint: IntraCoreMemoryPortInConfig, channel: Int)(implicit p: Parameters): AddressSet = {
     // figure out memory space for on-chip memory comms
     val name = endpoint.name
     val configs = p(AcceleratorSystems)
@@ -137,7 +137,7 @@ package object Systems {
   }
 
   @tailrec
-  def fanout_recursive(grp: Iterable[RoccNode], xbarDeg: Int)(implicit p: Parameters): RoccNode = {
+  private[beethoven] def fanout_recursive(grp: Iterable[RoccNode], xbarDeg: Int)(implicit p: Parameters): RoccNode = {
     grp match {
       case a :: Nil =>
         a
@@ -158,7 +158,7 @@ package object Systems {
   }
 
   @tailrec
-  def fanin_recursive(grp: Iterable[RoccNode], xbarDeg: Int, toDeg: Int)(implicit p: Parameters): Iterable[RoccNode] = {
+  private[beethoven] def fanin_recursive(grp: Iterable[RoccNode], xbarDeg: Int, toDeg: Int)(implicit p: Parameters): Iterable[RoccNode] = {
     if (grp.size <= toDeg) grp
     else {
       val groups = grp.grouped(xbarDeg).map { q =>
@@ -173,7 +173,7 @@ package object Systems {
   }
 
   @tailrec
-  def xbar_tree_reduce_sources[T](eles: Seq[T],
+  private[beethoven] def xbar_tree_reduce_sources[T](eles: Seq[T],
                                   xbarDeg: Int,
                                   toDeg: Int,
                                   make_xbar: () => T,
@@ -197,7 +197,7 @@ package object Systems {
 
 
   @tailrec
-  def xbar_tree_reduce_sinks[T <: NodeHandle[_, _, _, _, _, _, _, _]](eles: Seq[T],
+  private[beethoven] def xbar_tree_reduce_sinks[T <: NodeHandle[_, _, _, _, _, _, _, _]](eles: Seq[T],
                                                                       xbarDeg: Int,
                                                                       toDeg: Int,
                                                                       make_xbar: () => T,
@@ -208,7 +208,7 @@ package object Systems {
     } else {
       val groups = eles.grouped(xbarDeg).map { q =>
         val xbar = make_xbar()
-        eles.foreach { ele =>
+        q.foreach { ele =>
           val buff = make_buffer()
           assign_to(Seq(ele), buff)
           assign_to(Seq(buff), xbar)
@@ -221,7 +221,7 @@ package object Systems {
   }
 
   @tailrec
-  def extend_eles_via_protocol_node[T <: NodeHandle[_, _, _, _, _, _, _, _]](eles: Seq[T],
+  private[beethoven] def extend_eles_via_protocol_node[T <: NodeHandle[_, _, _, _, _, _, _, _]](eles: Seq[T],
                                                                              make_buffer: () => T,
                                                                              assign: (Seq[T], T) => Unit,
                                                                              buffer_depth: Int = 1)(implicit p: Parameters): Seq[T] = {
@@ -236,14 +236,14 @@ package object Systems {
     }
   }
 
-  def extend_ele_via_protocol_node[T <: NodeHandle[_, _, _, _, _, _, _, _]](ele: T,
+  private[beethoven] def extend_ele_via_protocol_node[T <: NodeHandle[_, _, _, _, _, _, _, _]](ele: T,
                                                                             make_buffer: () => T,
                                                                             assign: (Seq[T], T) => Unit,
                                                                             buffer_depth: Int = 1)(implicit p: Parameters): T =
     extend_eles_via_protocol_node(Seq(ele), make_buffer, assign, buffer_depth)(p)(0)
 
 
-  def create_cross_chip_network[T <: NodeHandle[_, _, _, _, _, _, _, _]](sources: List[(T, Int)],
+  private[beethoven] def create_cross_chip_network[T <: NodeHandle[_, _, _, _, _, _, _, _]](sources: List[(T, Int)],
                                                                          devices_with_sinks: List[Int],
                                                                          make_buffer: () => T,
                                                                          make_xbar: () => T,
@@ -435,7 +435,8 @@ package object Systems {
           val non_intersecting_terms = carry_terms.filter { tup =>
             commits(root).map { case (_, pterm) =>
               val intersect = pterm.intersect(tup._2)
-              assert(intersect.length == pterm.length || intersect.isEmpty, "Partial overlap in source trees implies that the graph is not strongly unambiguous")
+              assert(intersect.length == pterm.length || intersect.isEmpty,
+                "Partial overlap in source trees implies that the graph is not strongly unambiguous")
               intersect.isEmpty
             }.forall(identity)
           }
@@ -477,35 +478,35 @@ package object Systems {
   private var tl_xbar_id = 0
   private var tl_buffer_id = 0
 
-  def make_tl_xbar()(implicit p: Parameters): TLNode = LazyModuleWithFloorplan(new TLXbar(), {
+  private[beethoven] def make_tl_xbar()(implicit p: Parameters): TLNode = LazyModuleWithFloorplan(new TLXbar(), {
     val id = tl_xbar_id
     tl_xbar_id = tl_xbar_id + 1
     f"zzanonymous_tlxbar_$id"
   }).node
 
-  def make_tl_buffer()(implicit p: Parameters): TLNode = LazyModuleWithFloorplan(new TLBuffer(), {
+  private[beethoven] def make_tl_buffer()(implicit p: Parameters): TLNode = LazyModuleWithFloorplan(new TLBuffer(), {
     val id = tl_buffer_id
     tl_buffer_id = tl_buffer_id + 1
     f"zzanonymous_tlbuffer_$id"
   }).node
 
-  def tl_assign[T <: TLNode](from: Seq[T], to: T)(implicit p: Parameters): Unit = {
+  private[beethoven] def tl_assign[T <: TLNode](from: Seq[T], to: T)(implicit p: Parameters): Unit = {
     from.foreach(a => to := a)
   }
 
-  def make_rocc_xbar()(implicit p: Parameters): RoccNode = {
+  private[beethoven] def make_rocc_xbar()(implicit p: Parameters): RoccNode = {
     val q: RoccNode = LazyModuleWithFloorplan(new RoccCompositeXbar(), "RoccXbar").node
     q
   }
 
   private var rocc_buffer_id = 0
-  def make_rocc_buffer()(implicit p: Parameters): RoccNode = LazyModuleWithFloorplan(new RoccBuffer(), {
+  private[beethoven] def make_rocc_buffer()(implicit p: Parameters): RoccNode = LazyModuleWithFloorplan(new RoccBuffer(), {
     val id = rocc_buffer_id
     rocc_buffer_id = rocc_buffer_id + 1
     f"zzanonymous_roccbuffer_$id"
   }).node
 
-  def rocc_assign[T <: RoccNode](from: Seq[T], to: T)(implicit p: Parameters): Unit = {
+  private[beethoven] def rocc_assign[T <: RoccNode](from: Seq[T], to: T)(implicit p: Parameters): Unit = {
     from.foreach(a => to := a)
   }
 }

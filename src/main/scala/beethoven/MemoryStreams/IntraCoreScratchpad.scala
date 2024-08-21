@@ -12,7 +12,8 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 
-class MemWritePort(addrBits: Int, dataBits: Int,
+class MemWritePort(addrBits: Int,
+                   dataBits: Int,
                    val canSelectCore: Boolean,
                    val canSelectChannel: Boolean)(implicit p: Parameters) extends DecoupledIO(new Bundle() {
   val data = UInt(dataBits.W)

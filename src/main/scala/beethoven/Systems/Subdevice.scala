@@ -44,7 +44,7 @@ class Subdevice(val deviceId: Int)(implicit p: Parameters) extends LazyModule {
 
   val outgoing_mem = {
     val mems = submodules.flatMap(q => q.intraCoreMemMasters)
-    xbar_tree_reduce_sources[TLNode](mems.flatMap(_._2), platform.xbarMaxDegree, 1, make_tl_xbar, make_tl_buffer, tl_assign)
+    xbar_tree_reduce_sources[TLNode](mems.flatMap(_._3), platform.xbarMaxDegree, 1, make_tl_xbar, make_tl_buffer, tl_assign)
   }
 
 

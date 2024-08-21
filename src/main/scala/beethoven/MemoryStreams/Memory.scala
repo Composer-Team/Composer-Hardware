@@ -374,7 +374,7 @@ trait HasMemoryInterface {
 
 case class SD(dWidth: Int, nRows: Int)
 
-case class CascadeDescriptor(depths: Seq[Int], bankWidths: Seq[Int])
+case class SRAMArray(array: List[List[List[(Int, Int)]]], characteristics: Map[String, Any] = Map.empty)
 
 /**
  * ALL LOGIC IMPLEMENTED HERE MUST BE ACTIVE LOW

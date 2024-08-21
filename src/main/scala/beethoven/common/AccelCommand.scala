@@ -160,8 +160,8 @@ object AccelRoccCommand {
     wr.inst.xs1 := instuint(13)
     wr.inst.xd := instuint(14)
     wr.inst.core_id := instuint(24, 15)
-    wr.inst.system_id := instuint(28, 25)
-    wr.inst.funct := instuint(31, 29)
+    wr.inst.system_id := instuint(31, 28)
+    wr.inst.funct := instuint(27, 25)
     wr
   }
 }

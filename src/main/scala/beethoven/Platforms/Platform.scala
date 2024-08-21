@@ -2,7 +2,7 @@ package beethoven.Platforms
 
 import chipsalliance.rocketchip.config._
 import beethoven.Generation.BuildMode
-import beethoven.Platforms.ASIC.MemoryCompiler
+import beethoven.Platforms.ASIC.{MemoryCompiler, TechLib}
 import beethoven.Platforms.PlatformType.PlatformType
 import beethoven.Protocol.FrontBus.FrontBusProtocol
 import freechips.rocketchip.subsystem.{MasterPortParams, MemoryPortParams}
@@ -74,18 +74,15 @@ abstract class Platform {
   // maximum memory crossbar fanout degree. Larger xbars will be broken up into multiple layers.
   // This can be tuned for platforms where congestion is a primary concern
   val xbarMaxDegree = 2
-  // maximum number of logical memory channels will be used to cross across SLRs
-  val maxMemSLRcrossings = 1
   // maximum number of logical memory endpoints per system (read and write handled separately)
   val maxMemEndpointsPerSystem = 1
 
   val maxMemEndpointsPerCore = 1
 
   val interCoreMemReductionLatency = 1
+  val interCoreMemBusWidthBytes = 4
   val intraCoreInterSLRMemReductionLatency = 2
   val crossSLRLatency = 2 // Only used in FPGAs
-
-  val coreCommandLatency = 2
 
   val memEndpointsPerDevice = 1
 
@@ -161,6 +158,10 @@ trait PlatformHasSeparateDMA {
 
 trait HasPostProccessorScript {
   def postProcessorMacro(c: Config, paths: Seq[Path]): Unit = ???
+}
+
+trait HasTechLib {
+  val techLib: TechLib
 }
 
 trait HasMemoryCompiler {

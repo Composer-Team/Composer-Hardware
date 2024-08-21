@@ -39,7 +39,7 @@ case class DecoupledSourceEntry(node: DecoupledIO[UInt], name: String) extends M
 
 case class RegisterEntry(node: Data, name: String, permissions: Permissions) extends MCRMapEntry
 
-class MCRFileMap() {
+class MCRFileMap {
   // DO NOT put the MMIOs in the first page. For unified memory systems this will result in null pointer dereferences
   // not segfaulting
   private val name2addr = mutable.LinkedHashMap[String, Int]()

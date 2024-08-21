@@ -130,7 +130,7 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
   }) else None
 
   // deal with memory interconnect
-  {
+  val _ = {
     val r_map = devices.flatMap { d =>
       val on_chip = d.r_nodes.map(b => (b, d.deviceId))
       val off_chip = if (frontDMA_r.isDefined && platform.physicalInterfaces.find(_.isInstanceOf[PhysicalHostInterface]).get.locationDeviceID == d.deviceId) {
@@ -159,23 +159,31 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
         make_tl_xbar,
         tl_assign)
     }
-    platform.physicalInterfaces.foreach {
-      case pmi: PhysicalMemoryInterface =>
-        val mem = (AXI_MEM.get)(pmi.channelIdx)
-        val sTLToAXI = LazyModuleWithFloorplan(new TLToAXI4SRW(), pmi.locationDeviceID).node
-        Seq(r_commits, w_commits) foreach (commit_set =>
-          xbar_tree_reduce_sources(commit_set(pmi.locationDeviceID), platform.xbarMaxDegree, 1,
-            make_tl_xbar,
-            make_tl_buffer,
-            (s: Seq[TLNode], t: TLNode) => tl_assign(s, t)(p))
-            .foreach(sTLToAXI := TLSourceShrinkerDynamicBlocking(1 << platform.memoryControllerIDBits) := _))
-        mem := AXI4Buffer() := sTLToAXI
-      case _ => ;
+
+    def is_map_nonempty[K, T](m: Map[K, Iterable[T]]): Boolean = {
+      m.values.map(_.nonEmpty).reduce(_ || _)
+    }
+
+
+    if (is_map_nonempty(r_commits) || is_map_nonempty(w_commits)) {
+      platform.physicalInterfaces.foreach {
+        case pmi: PhysicalMemoryInterface =>
+          val mem = (AXI_MEM.get)(pmi.channelIdx)
+          val sTLToAXI = LazyModuleWithFloorplan(new TLToAXI4SRW(), pmi.locationDeviceID).node
+          Seq(r_commits, w_commits) foreach (commit_set =>
+            xbar_tree_reduce_sources(commit_set(pmi.locationDeviceID), platform.xbarMaxDegree, 1,
+              make_tl_xbar,
+              make_tl_buffer,
+              (s: Seq[TLNode], t: TLNode) => tl_assign(s, t)(p))
+              .foreach(sTLToAXI := TLSourceShrinkerDynamicBlocking(1 << platform.memoryControllerIDBits) := _))
+          mem := AXI4Buffer(BufferParams.default) := sTLToAXI
+        case _ => ;
+      }
     }
   }
 
   // commands
-  {
+  val _ = {
     // the sinks consist of the host interface and any system that can emit commands
     // the sources consist of all systems
     val emitters_per_device = devices.flatMap { sd =>
@@ -206,7 +214,7 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
     val devices_with_sinks = devices.filter(_.incoming_mem.nonEmpty).map { sd => sd.deviceId }
 
     val net = create_cross_chip_network(
-      sources = devices.flatMap(d => d.incoming_mem.map(b => (b, d.deviceId))),
+      sources = devices.flatMap(d => d.outgoing_mem.map(b => (b, d.deviceId))),
       devices_with_sinks = devices_with_sinks,
       make_buffer = make_tl_buffer,
       make_xbar = make_tl_xbar,

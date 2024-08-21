@@ -4,7 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
 import beethoven.Generation.BuildMode.Simulation
 import beethoven.Generation.CPP.CommandParsing.customCommandToCpp
-import beethoven.Generation.CPP.TypeParsing.enumToCpp
+import beethoven.Generation.CPP.TypeParsing.{enumToCpp, getCType}
 import beethoven.Generation.BeethovenBuild
 import beethoven.Generation.CppGeneration._
 import beethoven.Parameters.AcceleratorSystems
@@ -26,11 +26,12 @@ object Generation {
     val path = Path(BeethovenBuild.beethovenGenDir)
     os.makeDir.all(path)
 
+    val actualChannels = if (top.AXI_MEM.isDefined) platform.memoryNChannels else 0
     val (allocator, addrBits) = {
       (
         s"""
            |#ifdef SIM
-           |#define NUM_DDR_CHANNELS ${platform.memoryNChannels}
+           |#define NUM_DDR_CHANNELS ${actualChannels}
            |#endif
            |#define ALLOCATOR_SIZE_BYTES (0x${platform.physicalMemoryBytes.toHexString}L)
            |${if (!platform.hasDiscreteMemory) "#ifdef SIM" else ""}
@@ -60,28 +61,40 @@ object Generation {
           case _ => "ERROR"
         }
       }
+      def getSignedCIntType(width: Int): String = {
+        if (width <= 8) "int8_t"
+        else if (width <= 16) "int16_t"
+        else if (width <= 32) "int32_t"
+        else if (width <= 64) "int64_t"
+        else throw new Exception("Type is too big")
+      }
+      def getUnsignedCIntType(width: Int): String = "u" + getSignedCIntType(width)
 
       (
         s"""
            |static const uint64_t addrMask = 0x${addrSet.mask.toLong.toHexString};
            |""".stripMargin
         , if (platform.isInstanceOf[PlatformHasSeparateDMA] && p(BuildModeKey) != Simulation) "#define BEETHOVEN_HAS_DMA" else "", {
-        val strobeDtype = getVerilatorDtype(platform.extMem.master.beatBytes)
-        val addrWid = log2Up(platform.extMem.master.size)
-        val addrDtype = getVerilatorDtype(addrWid)
-        val idDtype = getVerilatorDtype(top.AXI_MEM.get(0).in(0)._1.ar.bits.id.getWidth)
-        s"#ifdef SIM\n" +
-          s"#include <verilated.h>\n" +
-          s"using BeethovenMemAddressSimDtype=$addrDtype;\n" +
-//          s"using BeethovenStrobeSimDtype=$strobeDtype;\n" +
-          s"using BeethovenMemIDDtype=$idDtype;\n" +
-          s"#define DEFAULT_PL_CLOCK ${platform.clockRateMHz}\n" +
-          (platform match {
-            case pWithDMA: PlatformHasSeparateDMA => s"using BeethovenDMAIDtype=${getVerilatorDtype(pWithDMA.DMAIDBits)};\n"
-            case _ => ""
-          }) +
-          s"#define DATA_BUS_WIDTH ${platform.extMem.master.beatBytes * 8}\n" +
-          s"#endif"
+        if (platform.memoryNChannels > 0 && top.AXI_MEM.isDefined) {
+          val strobeDtype = getVerilatorDtype(platform.extMem.master.beatBytes)
+          val addrWid = log2Up(platform.extMem.master.size)
+
+          val idDtype = getVerilatorDtype(top.AXI_MEM.get(0).in(0)._1.ar.bits.id.getWidth)
+          f"""
+             |#ifdef SIM
+             |#ifdef VERILATOR_VERSION
+             |#include <verilated.h>
+             |using BeethovenFrontBusAddr_t = ${getUnsignedCIntType(addrWid)};
+             |using BeethovenMemIDDtype=$idDtype;
+             |#endif
+             |#define DEFAULT_PL_CLOCK ${platform.clockRateMHz}
+             |${platform match {case pWithDMA: PlatformHasSeparateDMA => s"using BeethovenDMAIDtype=${getVerilatorDtype(pWithDMA.DMAIDBits)};"; case _ => ""}}
+             |#define DATA_BUS_WIDTH ${platform.extMem.master.beatBytes * 8}
+             |#endif
+             |""".stripMargin
+        } else {
+          s"#define DATA_BUS_WIDTH ${platform.extMem.master.beatBytes * 8}\n"
+        }
       })
     }
     val mmio_addr = "const uint64_t BeethovenMMIOOffset = 0x" + platform.frontBusBaseAddress.toHexString + "LL;"

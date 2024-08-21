@@ -6,8 +6,11 @@ import beethoven.Platforms.ASIC.MemoryCompiler.{gds2, libs, sram_paths}
 import beethoven.Platforms.ASIC.ProcessCorner.ProcessCorner
 import beethoven.Platforms.ASIC.ProcessTemp.ProcessTemp
 import beethoven.Platforms.ASIC.memoryCompiler.CanCompileMemories.getSRAMCharacteristics
+import beethoven.Platforms.ASIC.memoryCompiler.GMem.tMem
 import beethoven.Platforms._
+import beethoven.platform
 import chipsalliance.rocketchip.config
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.experimental.BaseModule
 import chisel3.util._
@@ -40,6 +43,9 @@ trait CanCompileMemories {
     val all = Seq(verilog, gds2, synopsys, ascii, vclef_fp)
   }
 
+  val maxRowDivs = 8
+  val sramTimingPessimism_ns: Double
+
   private val sramDatDir: Path = os.Path(BeethovenBuild.beethovenRoot()) / "sramDatGen"
   private val sramVerilogDir: Path = os.Path(BeethovenBuild.beethovenRoot()) / "sramVerilogGen"
   private val sramSynthDir: Path = os.Path(BeethovenBuild.beethovenRoot()) / "sramBuild"
@@ -57,10 +63,8 @@ trait CanCompileMemories {
   val generatorsSupported: Seq[Generator.Generator]
 
   val supportedCorners: Seq[(ProcessCorner, ProcessTemp)]
-  sram_paths = Seq.empty // Map.from(supportedCorners.map(q => (q, Seq.empty[Path])))
 
-
-  val pathSets = sram_paths.distinct.map { dir =>
+  lazy val pathSets = sram_paths.distinct.map { dir =>
     val base_name = dir.toString().split("/").last
     val corn = supportedCorners.map { case (c, t) =>
       val r = CanCompileMemories.getSRAMCharacteristics(pathWithCorner(sramDatDir, base_name, c, t, ".dat"))
@@ -92,8 +96,6 @@ trait CanCompileMemories {
 
   def wordIncrement(nMux: Int): Int
 
-
-
   def isLegalConfiguration(nPorts: Int,
                            nWords: Int,
                            nBits: Int,
@@ -105,6 +107,7 @@ trait CanCompileMemories {
                            useWE: Boolean = false
                           ): Boolean
 
+
   def generate(nPorts: Int,
                nWords: Int,
                nBits: Int,
@@ -114,7 +117,7 @@ trait CanCompileMemories {
                roots: (Path, String),
                useECC: Boolean = false,
                useWE: Boolean = false
-              ): Path = {
+              ): Map[String, Any] = {
     if (!isLegalConfiguration(nPorts, nWords, nBits, freqMHz, nMux, useGenerators, roots, useECC, useWE)) {
       throw new Exception("Illegal configuration")
     }
@@ -125,85 +128,192 @@ trait CanCompileMemories {
     val (rootDir, remotePrefix) = roots
     val name = get_inst_name(nPorts, nWords, nMux, nBits, useWE)
     val sram_base_dir = rootDir / name
+    var mapOut = Map[String, Any]("path" -> sram_base_dir)
     if (!os.exists(sram_base_dir)) {
       os.makeDir.all(sram_base_dir)
       useGenerators.map(_.toString.replace("_", "-")) foreach { gen =>
-        val (binPath, container) = nPorts match {
-          case 1 => ("sram_sp_hdc_svt_rvt_hvt", Seq("ssh", "vlsi"))
-          case 2 => ("sram_dp_hdc_svt_rvt_hvt", Seq("ssh", "vlsi"))
+        val binPath = nPorts match {
+          case 1 => "sram_sp_hdc_svt_rvt_hvt"
+          case 2 => "sram_dp_hdc_svt_rvt_hvt"
         }
-        val libArgs = if (gen.equals("synopsys")) f" -libname $name" else ""
 
-        val cmd = binPath + " " + f"$gen -mux $nMux -bits $nBits -words $nWords -write_mask ${if (useWE) "on" else "off"} -frequency $freqMHz -instname $name" +
-          (if (useECC) " -ecc" else "") + libArgs
+        val libArgs = if (gen.equals("synopsys"))
+          Seq(f"-libname", name) else Seq()
 
-        // currently, the installation on ubuntu is unstable - especially for the sram compiler. Run it remotely on the
-        // ECE vlsi node. Set up your ssh config to tunnel through to the machine via a node called `vlsi`
-        val remote_cmd = f"mkdir -p srams/$remotePrefix/$name; cd srams/$remotePrefix/$name; " + cmd
-        os.proc(container ++ Seq(remote_cmd)).call()
-        os.proc(s"rsync", "-ar", f"vlsi:~/srams/$remotePrefix/$name", rootDir).call(stdout = os.Inherit, stderr = os.Inherit)
+        val which = try {
+          os.proc("which", binPath).call().out.trim
+        } catch {
+          case _: Throwable => ""
+        }
+        if (!which.equals("")) {
+          // do the command on remote system
+          println(s"which is '${which}'")
+          val cmd = Seq(binPath,
+            gen,
+            "-mux", nMux.toString,
+            "-bits", nBits.toString,
+            "-words", nWords.toString,
+            "-write_mask", if (useWE) "on" else "off",
+            "-frequency", freqMHz.toString,
+            "-instname", name
+          )
+          os.proc(cmd).call(cwd = sram_base_dir, env = Map("_JAVA_OPTIONS" -> ""))
+          if (gen.equals("synopsys")) {
+            os.walk(sram_base_dir).filter(_.toString().split("\\.").last.equals("lib")).foreach { pth =>
+              val fname = pth.toString().split("/").last
+              val bn = pth.baseName
+              val remove_syn = bn.substring(0, bn.lastIndexOf("_"))
+              os.proc(Seq("lc_shell")).call(sram_base_dir, stdin = s"read_lib $fname; write_lib -format db $remove_syn; exit"
+              )
+            }
+          }
+        } else {
+          val cmd = Seq("ssh", "chriskjellqvist@oak",
+            f"cd remote; rm -rf * ; export _JAVA_OPTIONS=; " +
+              f"$binPath $gen -mux $nMux -bits $nBits -words $nWords " +
+              f"-write_mask ${if (useWE) "on" else "off"} -frequency $freqMHz -instname $name " +
+              (if (useECC) "-ecc " else " ") + libArgs.mkString(" "))
+          println(s"runnig ${cmd.mkString(" ")}")
+          os.makeDir.all(sram_base_dir)
+          os.proc(cmd).call(cwd = sram_base_dir, env = Map("_JAVA_OPTIONS" -> ""))
+          if (gen.equals("synopsys")) {
+            os.walk(sram_base_dir).filter(_.toString().split("\\.").last.equals("lib")).foreach { pth =>
+              val fname = pth.toString().split("/").last
+              val bn = pth.baseName
+              val remove_syn = bn.substring(0, bn.lastIndexOf("_"))
+              os.proc(Seq("ssh", "chriskjellqvist@oak", "lc_shell")).call(sram_base_dir, stdin = s"read_lib $fname; write_lib -format db $remove_syn; exit"
+              )
+            }
+          }
+          os.proc(s"rsync", "-ar", f"chriskjellqvist@oak:~/remote/*", sram_base_dir).call(stdout = os.Inherit, stderr = os.Inherit)
+        }
+        if (gen.equals("ascii")) {
+          // collect all of the fields of the worst case corner and put them in the map
 
-        if (gen.equals("synopsys")) {
-          os.walk(sram_base_dir).filter(_.toString().split("\\.").last.equals("lib")).foreach { pth =>
-            val fname = pth.toString().split("/").last
-            val bn = pth.baseName
-            val remove_syn = bn.substring(0, bn.lastIndexOf("_"))
-            os.proc(Seq(
-              "/data/install/snps_container/1.8/bin/snps_container",
-              "lc_shell",
-            )).call(sram_base_dir, stdin = s"read_lib $fname; write_lib -format db $remove_syn; exit"
-            )
+          // first, figure out which is the worst case corner by looking at tcyc0
+          val corners = supportedCorners.map { case (corner: ProcessCorner, temp: ProcessTemp) =>
+            val chars = getSRAMCharacteristics(pathWithCorner(sramDatDir, name, corner, temp, ".dat"))
+            (corner, temp, chars)
+          }
+          val worstCorner = if (corners.length == 1) corners(0) else corners.reduce { (a, b) =>
+            if (a._3("tcyc0") > b._3("tcyc0")) a else b
+          }
+
+          // now, put all of the fields in the map
+          worstCorner._3.foreach { case (k, v) =>
+            mapOut = mapOut.updated(k, v)
           }
         }
       }
+    } else {
+      val corners = supportedCorners.map { case (corner: ProcessCorner, temp: ProcessTemp) =>
+        val chars = getSRAMCharacteristics(pathWithCorner(sramDatDir, name, corner, temp, ".dat"))
+        (corner, temp, chars)
+      }
+      val worstCorner = if (corners.length == 1) corners(0) else corners.reduce { (a, b) =>
+        if (a._3("tcyc0") > b._3("tcyc0")) a else b
+      }
+
+      // now, put all of the fields in the map
+      worstCorner._3.foreach { case (k, v) =>
+        mapOut = mapOut.updated(k, v)
+      }
     }
-    sram_base_dir
+    mapOut
   }
 
-  def checkPassTiming(instname: String, freqMHz: Int): Boolean = {
+  private def checkPassTiming(instname: String, freqMHz: Int, rDivs: Int)(implicit p: Parameters): (Boolean, Map[String, Float]) = {
     val passes = supportedCorners map { case (corner: ProcessCorner, temp: ProcessTemp) =>
       val chars = getSRAMCharacteristics(pathWithCorner(sramDatDir, instname, corner, temp, ".dat"))
-      val t_ns_req = 1000.0 / freqMHz
-      //        println("Configuration for " + instname + " at " + freqMHz + " MHz is " + chars("tcyc0") + " ns vs required " + t_ns_req + " ns")
-      chars("tcyc0") <= t_ns_req
-    } reduce (_ && _)
-    //      println("______: pass timing? " + passes + " for " + instname + " at " + freqMHz + " MHz")
-    passes
+      // use geomy, because x dimension is _usually_ used for wide memories
+      val geomy = chars("geomy")
+      // ns/mm = ps/um
+      val ps_delay_from_route = (rDivs - 1) * (geomy * platform.asInstanceOf[HasTechLib].techLib.worstCaseNSperMM)
+      // multiply by two, because we'll have to route back and forth
+      val t_ns_req = (1000.0 - 2 * ps_delay_from_route - sramTimingPessimism_ns * 1000) / freqMHz
+      (chars("tcyc0") <= t_ns_req, chars)
+    }
+    val pass = passes.forall(_._1)
+    val worst_case_characteristics = passes.map(_._2).reduce((a, b) => if (a("tcyc0") > b("tcyc0")) a else b)
+    (pass, worst_case_characteristics)
   }
 
-  def getMemoryCascadeOpt(suggestedRows: Int, suggestedColumns: Int, nPorts: Int,
-                          latency: Int, freqMHz: Int, withWE: Boolean): Option[CascadeDescriptor] = {
+  def getMemoryCascadeOpt(suggestedRows: Int,
+                          suggestedColumns: Int,
+                          nPorts: Int,
+                          latency: Int,
+                          freqMHz: Int,
+                          withWE: Boolean)(implicit p: Parameters): Option[SRAMArray] = {
     if (latency < 1) return None
 
     // figure out rows first
     // minimize mux parameter unless we really need that many rows. Mux makes us multiplicatively wide and
     //   and makes timing harder
-    val rows_per_lat = 1 << chisel3.util.log2Up((suggestedRows.toFloat / latency).ceil.toInt)
-    val minMux = getMinMux(rows_per_lat, nPorts).getOrElse(return None)
-    val mb = maxBits(nPorts, minMux, useECC = false)
-    val nBanks = suggestedColumns.toFloat / mb
-    val cVec = Seq.fill(nBanks.toInt)(mb) ++
-      (if (nBanks.toInt.toFloat == nBanks) Seq() else Seq(suggestedColumns - mb * nBanks.toInt))
-    val widestWidth = cVec.max
-    val passPorts = nPorts > 0 && nPorts <= 2
-    val passMux = isPow2(minMux) && minMux >= 4 && minMux <= 32
-    val passWords = rows_per_lat <= maxWords(minMux) && rows_per_lat >= minWords(nPorts, minMux) && (rows_per_lat % wordIncrement(minMux)) == 0
-    if (!passPorts || !passMux || !passWords) return None
-    cVec.distinct.foreach { sram_width =>
-      generate(nPorts, rows_per_lat, sram_width, freqMHz, minMux, Seq(Generator.ascii), (sramDatDir, "dat"),
-        useECC = false,
-        useWE = withWE)
-      if (!checkPassTiming(get_inst_name(nPorts, rows_per_lat, minMux, sram_width, withWE), freqMHz))
-        return None
+    val opts = (1 to maxRowDivs).filter { rd =>
+      val rows_per_latdiv = 1 << chisel3.util.log2Up((suggestedRows.toFloat / latency / rd).ceil.toInt)
+      val minMuxValid = getMinMux(rows_per_latdiv, nPorts).isDefined
+      minMuxValid
+    }.flatMap { rDivs: Int =>
+      val rows_per_latdiv = 1 << chisel3.util.log2Up((suggestedRows.toFloat / latency / rDivs).ceil.toInt)
+      val minMux = getMinMux(rows_per_latdiv, nPorts).get
+      val mb = maxBits(nPorts, minMux, useECC = false)
+      val nBanks = suggestedColumns.toFloat / mb
+      val is_jagged = if (suggestedColumns < mb || suggestedColumns % mb != 0) true else false
+      val macroArray = {
+        val row = List.fill(nBanks.floor.toInt)((rows_per_latdiv, Math.min(mb, suggestedColumns))) ++
+          (if (is_jagged)
+            List((rows_per_latdiv, suggestedColumns % mb)) else {
+            List()
+          })
+        List.fill(latency)(List.fill(rDivs)(row))
+      }
+      val flatArray = macroArray.flatten.flatten
+      val passPorts = nPorts > 0 && nPorts <= 2
+      val passMux = isPow2(minMux) && minMux >= 4 && minMux <= 32
+      val passWords =
+        rows_per_latdiv <= maxWords(minMux) &&
+          rows_per_latdiv >= minWords(nPorts, minMux) &&
+          (rows_per_latdiv % wordIncrement(minMux)) == 0
+      if (!passPorts || !passMux || !passWords) {
+        System.err.println(s"Failed due to (#ports=${nPorts}, #mux=${minMux}, #words=${rows_per_latdiv}): (${!passPorts} ${!passMux} ${!passWords}")
+        None
+      } else {
+        val chars = Map.from(flatArray.distinct.map { case (sram_rows, sram_width) =>
+          generate(nPorts, sram_rows, sram_width, freqMHz, minMux, Seq(Generator.ascii), (sramDatDir, "dat"), useWE = withWE)
+          val (pass, wc_chars) = checkPassTiming(get_inst_name(nPorts, rows_per_latdiv, minMux, sram_width, withWE), rDivs, freqMHz)
+          if (!pass) {
+            System.err.println(s"Failure due to timing: ${wc_chars("t_cyc0")}")
+            ((sram_rows, sram_width), None)
+          }
+          else ((sram_rows, sram_width), Some(wc_chars))
+        })
+        if (chars.values.exists(_.isEmpty)) {
+          None
+        } else {
+          val area = flatArray.map { tup =>
+            val char = chars(tup).get
+            char("geomx") * char("geomy") / 1000 / 1000
+          }.product
+          Some(SRAMArray(macroArray, Map("area" -> area)))
+        }
+      }
     }
-
-    Some(CascadeDescriptor(Seq.fill(latency)(rows_per_lat), cVec))
+    if (opts.isEmpty) None
+    else Some(opts.minBy(_.characteristics("area").asInstanceOf[Float]))
   }
 
-  def getMemoryCascade(suggestedRows: Int, suggestedColumns: Int, nPort: Int, latency: Int, reqFreqMHz: Int): Option[CascadeDescriptor] =
+  def getSRAMArray(suggestedRows: Int,
+                   suggestedColumns: Int,
+                   nPort: Int,
+                   latency: Int,
+                   reqFreqMHz: Int)(implicit p: Parameters): Option[SRAMArray] =
     getMemoryCascadeOpt(suggestedRows, suggestedColumns, nPort, latency, reqFreqMHz, withWE = false)
 
-  def getWEMemoryCascade(suggestedRows: Int, suggestedColumns: Int, nPort: Int, latency: Int, reqFreqMHz: Int): Option[CascadeDescriptor] =
+  def getWESRAMArray(suggestedRows: Int,
+                     suggestedColumns: Int,
+                     nPort: Int,
+                     latency: Int,
+                     reqFreqMHz: Int)(implicit p: Parameters): Option[SRAMArray] =
     getMemoryCascadeOpt(suggestedRows, suggestedColumns, nPort, latency, reqFreqMHz, withWE = true)
 
 
@@ -316,19 +426,27 @@ trait CanCompileMemories {
         val path = generate(nPorts, nRows, nColumns, p(PlatformKey).clockRateMHz, nMux = minMux,
           useGenerators = Seq(Generator.verilog),
           roots = (sramVerilogDir, "verilog"),
-          useWE = withWE)
+          useWE = withWE)("path").asInstanceOf[Path]
         BeethovenBuild.addSource(path / f"$instname.v")
       case BuildMode.Synthesis =>
-        val path = generate(nPorts, nRows, nColumns, p(PlatformKey).clockRateMHz, nMux = minMux,
+        val map = generate(nPorts, nRows, nColumns, p(PlatformKey).clockRateMHz, nMux = minMux,
           useWE = withWE,
           useGenerators = Seq(Generator.synopsys, Generator.gds2, Generator.vclef_fp, Generator.verilog), roots = (sramSynthDir, "synth"))
         libs = libs.map { case (k, v) => (k, v :+ pathWithCorner(sramSynthDir, instname, k._1, k._2, ".lib")) }
         gds2 = gds2 :+ sramSynthDir / instname / (instname + ".gds2")
-        sram_paths = sram_paths :+ path
+
+        sram_paths = sram_paths :+ map("path").asInstanceOf[os.Path]
+        val x = map("geomx").asInstanceOf[Float]
+        val y = map("geomy").asInstanceOf[Float]
+        tMem = tMem + x * y
+        println("total memory is now " + tMem + s" with the addition of $x x $y")
     }
 
     () => Module(new SRAM_BBWrapper)
   }
+}
 
+object GMem {
+  var tMem: Double = 0.0
 }
 

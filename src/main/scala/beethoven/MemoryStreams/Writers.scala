@@ -30,7 +30,6 @@ class SequentialWriter(nBytes: Int,
                        minSizeBytes: Option[Int] = None)
                       (implicit p: Parameters) extends Module {
   override val desiredName = s"SequentialWriter_w${nBytes * 8}"
-  BeethovenBuild.requestModulePartition(this.desiredName)
   require(isPow2(nBytes))
   private val beatBytes = tl_outer.params.dataBits / 8
   private val addressBits = tl_outer.params.addressBits
@@ -67,7 +66,6 @@ class SequentialWriter(nBytes: Int,
   val write_buffer_read_shift = RegInit(0.U(memory_latency.W))
   val burst_storage_occupancy = RegInit(0.U(log2Up(platform.prefetchSourceMultiplicity + 1).W))
   val raddr = RegInit(0.U(log2Up(q_size).W))
-  println("PREFETCH " + platform.prefetchSourceMultiplicity)
   val waddr = RegInit(0.U(log2Up(q_size).W))
   val (wb_widx, wb_ridx) = if (write_buffer.nWritePorts == 0) (0, 1) else (write_buffer.getWritePortIdx(0), write_buffer.getReadPortIdx(0))
 

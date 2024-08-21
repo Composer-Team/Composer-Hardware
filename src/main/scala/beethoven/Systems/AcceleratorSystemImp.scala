@@ -6,25 +6,26 @@ import beethoven._
 import beethoven.Floorplanning.LazyModuleImpWithSLRs.ModuleWithFloorplan
 import beethoven.Generation._
 import beethoven.MemoryStreams._
-import beethoven.Parameters.ModuleBuilder
+import beethoven.Parameters.{BlackboxBuilderCustom, ModuleBuilder}
 import freechips.rocketchip.diplomacy.LazyModuleImp
 
 
 class AcceleratorSystemImp(val outer: AcceleratorSystem)(implicit p: Parameters) extends LazyModuleImp(outer) {
+  override val desiredName = f"System${outer.name}"
   val cores = Seq.tabulate(outer.nCores) { core_idx: Int =>
+    val altered = p.alterPartial {
+      case OuterKey => outer
+    }
     val impl = Module(outer.systemParams.moduleConstructor match {
-      case mb: ModuleBuilder => mb.constructor(p.alterPartial {
-        case OuterKey => outer
-      })
-      //      case bbc: BlackboxBuilderCustom => new AcceleratorBlackBoxCore(bbc)(p, outer.systemParams)
-      //      case bbb: BlackboxBuilderRocc => new AcceleratorBlackBoxCore(bbb)(p, outer.systemParams)
+      case mb: ModuleBuilder => mb.constructor(altered)
+      case bbc: BlackboxBuilderCustom => new AcceleratorBlackBoxCore(bbc)(altered, outer.systemParams)
     })
     impl.suggestName(f"System${outer.systemParams.name}_core${core_idx}_impl")
     impl
   }
 
 
-  BeethovenBuild.requestModulePartition(outer.systemParams.name)
+  BeethovenBuild.requestModulePartition(desiredName)
 
   /* handle all memory */
   cores.zipWithIndex.zip(outer.readers) foreach { case ((core, coreIdx), readSet) =>
@@ -70,7 +71,7 @@ class AcceleratorSystemImp(val outer: AcceleratorSystem)(implicit p: Parameters)
     }
   }
 
-  cores.zip(outer.intraCoreMemMasters) foreach { case (core, (mp, nodeseq)) =>
+  cores.zip(outer.intraCoreMemMasters) foreach { case (core, (mp, nodeseq, _)) =>
     core.intra_mem_outs(mp).zip(nodeseq).foreach { case (core_out, node) =>
       core_out <> node.out(0)._1
     }

@@ -197,6 +197,10 @@ class BeethovenBuild(config: => Config, buildMode: BuildMode = BuildMode.Synthes
 
     os.write.over(gsrc_dir / "cmake_srcs.cmake",
       f"""set(SRCS ${movedSrcs.mkString("\n")}\n${chiselGeneratedSrcs.mkString("\n")})\n""")
+    println("wrote to " + gsrc_dir / "vcs_srcs.in")
+    os.write.over(gsrc_dir / "vcs_srcs.in",
+      chiselGeneratedSrcs.mkString("\n") + "\n" + movedSrcs.mkString("\n"))
+    vcs.HarnessGenerator.generateHarness()
 
     buildMode match {
       case BuildMode.Synthesis =>
