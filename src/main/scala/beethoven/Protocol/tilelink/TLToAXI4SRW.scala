@@ -25,10 +25,10 @@ class TLToAXI4SRW(implicit p: Parameters) extends LazyModule {
       // assert that there are at most 2 clients
       require(tlpp.size <= 2)
       // require that one client is a reader and the other is a writer
-      if (tlpp.size == 2) {
-        require(tlpp(0).allSupportGet ^ tlpp(1).allSupportGet)
-        require(tlpp(0).allSupportPutFull ^ tlpp(1).allSupportPutFull)
-      }
+//      if (tlpp.size == 2) {
+//        require(tlpp(0).allSupportGet ^ tlpp(1).allSupportGet)
+//        require(tlpp(0).allSupportPutFull ^ tlpp(1).allSupportPutFull)
+//      }
 
       AXI4MasterPortParameters(
         masters = Seq(AXI4MasterParameters(

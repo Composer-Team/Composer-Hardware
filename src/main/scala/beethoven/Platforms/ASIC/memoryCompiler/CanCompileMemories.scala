@@ -130,6 +130,7 @@ trait CanCompileMemories {
     val sram_base_dir = rootDir / name
     var mapOut = Map[String, Any]("path" -> sram_base_dir)
     if (!os.exists(sram_base_dir)) {
+      println("main path")
       os.makeDir.all(sram_base_dir)
       useGenerators.map(_.toString.replace("_", "-")) foreach { gen =>
         val binPath = nPorts match {
@@ -206,6 +207,7 @@ trait CanCompileMemories {
         }
       }
     } else {
+      println("alt path")
       val corners = supportedCorners.map { case (corner: ProcessCorner, temp: ProcessTemp) =>
         val chars = getSRAMCharacteristics(pathWithCorner(sramDatDir, name, corner, temp, ".dat"))
         (corner, temp, chars)
@@ -436,7 +438,11 @@ trait CanCompileMemories {
         gds2 = gds2 :+ sramSynthDir / instname / (instname + ".gds2")
 
         sram_paths = sram_paths :+ map("path").asInstanceOf[os.Path]
-        val x = map("geomx").asInstanceOf[Float]
+        val x = try {
+          map("geomx").asInstanceOf[Float]
+        } catch {
+          case e => println(map); throw e
+        }
         val y = map("geomy").asInstanceOf[Float]
         tMem = tMem + x * y
         println("total memory is now " + tMem + s" with the addition of $x x $y")
