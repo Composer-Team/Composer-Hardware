@@ -3,10 +3,11 @@ package beethoven.Platforms.ASIC.memoryCompiler
 import beethoven.Generation._
 import beethoven.MemoryStreams._
 import beethoven.Platforms.ASIC.MemoryCompiler.{gds2, libs, sram_paths}
+import beethoven.Platforms.ASIC.{ProcessCorner, ProcessTemp}
 import beethoven.Platforms.ASIC.ProcessCorner.ProcessCorner
 import beethoven.Platforms.ASIC.ProcessTemp.ProcessTemp
 import beethoven.Platforms.ASIC.memoryCompiler.CanCompileMemories.getSRAMCharacteristics
-import beethoven.Platforms.ASIC.memoryCompiler.GMem.tMem
+import beethoven.Platforms.ASIC.memoryCompiler.GMem.{tCap, tMem, tPow}
 import beethoven.Platforms._
 import beethoven.platform
 import chipsalliance.rocketchip.config
@@ -51,7 +52,7 @@ trait CanCompileMemories {
   private val sramSynthDir: Path = os.Path(BeethovenBuild.beethovenRoot()) / "sramBuild"
 
 
-  def get_inst_name(nPorts: Int, nWords: Int, nMux: Int, nBits: Int, withWE: Boolean): String
+  def get_inst_name(nPorts: Int, nWords: Int, nMux: Int, nBits: Int, withWE: Boolean)(implicit p: Parameters): String
 
   def pathWithCorner(sram_base_dir: Path,
                      instname: String,
@@ -99,7 +100,6 @@ trait CanCompileMemories {
   def isLegalConfiguration(nPorts: Int,
                            nWords: Int,
                            nBits: Int,
-                           freqMHz: Int,
                            nMux: Int, // mux
                            useGenerators: Seq[Generator.Generator],
                            roots: (Path, String),
@@ -111,14 +111,13 @@ trait CanCompileMemories {
   def generate(nPorts: Int,
                nWords: Int,
                nBits: Int,
-               freqMHz: Int,
                nMux: Int, // mux
                useGenerators: Seq[Generator.Generator],
                roots: (Path, String),
                useECC: Boolean = false,
                useWE: Boolean = false
-              ): Map[String, Any] = {
-    if (!isLegalConfiguration(nPorts, nWords, nBits, freqMHz, nMux, useGenerators, roots, useECC, useWE)) {
+              )(implicit p: Parameters): Map[String, Any] = {
+    if (!isLegalConfiguration(nPorts, nWords, nBits, nMux, useGenerators, roots, useECC, useWE)) {
       throw new Exception("Illegal configuration")
     }
     val mb = maxBits(nPorts, nMux, useECC)
@@ -129,10 +128,13 @@ trait CanCompileMemories {
     val name = get_inst_name(nPorts, nWords, nMux, nBits, useWE)
     val sram_base_dir = rootDir / name
     var mapOut = Map[String, Any]("path" -> sram_base_dir)
+
+    val gens = (useGenerators ++ Seq(Generator.ascii)).distinct
+
     if (!os.exists(sram_base_dir)) {
       println("main path")
       os.makeDir.all(sram_base_dir)
-      useGenerators.map(_.toString.replace("_", "-")) foreach { gen =>
+      gens.map(_.toString.replace("_", "-")) foreach { gen =>
         val binPath = nPorts match {
           case 1 => "sram_sp_hdc_svt_rvt_hvt"
           case 2 => "sram_dp_hdc_svt_rvt_hvt"
@@ -155,7 +157,7 @@ trait CanCompileMemories {
             "-bits", nBits.toString,
             "-words", nWords.toString,
             "-write_mask", if (useWE) "on" else "off",
-            "-frequency", freqMHz.toString,
+            "-frequency", p(PlatformKey).clockRateMHz.toString,
             "-instname", name
           )
           os.proc(cmd).call(cwd = sram_base_dir, env = Map("_JAVA_OPTIONS" -> ""))
@@ -172,11 +174,12 @@ trait CanCompileMemories {
           val cmd = Seq("ssh", "chriskjellqvist@oak",
             f"cd remote; rm -rf * ; export _JAVA_OPTIONS=; " +
               f"$binPath $gen -mux $nMux -bits $nBits -words $nWords " +
-              f"-write_mask ${if (useWE) "on" else "off"} -frequency $freqMHz -instname $name " +
+              f"-write_mask ${if (useWE) "on" else "off"} -frequency ${p(PlatformKey).clockRateMHz} -instname $name " +
               (if (useECC) "-ecc " else " ") + libArgs.mkString(" "))
-          println(s"runnig ${cmd.mkString(" ")}")
+//          println(s"runnig ${cmd.mkString(" ")}")
           os.makeDir.all(sram_base_dir)
-          os.proc(cmd).call(cwd = sram_base_dir, env = Map("_JAVA_OPTIONS" -> ""))
+          // silence stderr
+          os.proc(cmd).call(cwd = sram_base_dir, env = Map("_JAVA_OPTIONS" -> ""), stderr = os.Pipe)
           if (gen.equals("synopsys")) {
             os.walk(sram_base_dir).filter(_.toString().split("\\.").last.equals("lib")).foreach { pth =>
               val fname = pth.toString().split("/").last
@@ -188,43 +191,34 @@ trait CanCompileMemories {
           }
           os.proc(s"rsync", "-ar", f"chriskjellqvist@oak:~/remote/*", sram_base_dir).call(stdout = os.Inherit, stderr = os.Inherit)
         }
-        if (gen.equals("ascii")) {
-          // collect all of the fields of the worst case corner and put them in the map
-
-          // first, figure out which is the worst case corner by looking at tcyc0
-          val corners = supportedCorners.map { case (corner: ProcessCorner, temp: ProcessTemp) =>
-            val chars = getSRAMCharacteristics(pathWithCorner(sramDatDir, name, corner, temp, ".dat"))
-            (corner, temp, chars)
-          }
-          val worstCorner = if (corners.length == 1) corners(0) else corners.reduce { (a, b) =>
-            if (a._3("tcyc0") > b._3("tcyc0")) a else b
-          }
-
-          // now, put all of the fields in the map
-          worstCorner._3.foreach { case (k, v) =>
-            mapOut = mapOut.updated(k, v)
-          }
-        }
-      }
-    } else {
-      println("alt path")
-      val corners = supportedCorners.map { case (corner: ProcessCorner, temp: ProcessTemp) =>
-        val chars = getSRAMCharacteristics(pathWithCorner(sramDatDir, name, corner, temp, ".dat"))
-        (corner, temp, chars)
-      }
-      val worstCorner = if (corners.length == 1) corners(0) else corners.reduce { (a, b) =>
-        if (a._3("tcyc0") > b._3("tcyc0")) a else b
-      }
-
-      // now, put all of the fields in the map
-      worstCorner._3.foreach { case (k, v) =>
-        mapOut = mapOut.updated(k, v)
       }
     }
+
+    val corners = supportedCorners.map { case (corner: ProcessCorner, temp: ProcessTemp) =>
+      val chars = getSRAMCharacteristics(pathWithCorner(sramDatDir, name, corner, temp, ".dat"))
+      (corner, temp, chars)
+    }
+    val worstCorner = if (corners.length == 1) corners(0) else corners.reduce { (a, b) =>
+      if (a._3("tcyc0") > b._3("tcyc0")) a else b
+    }
+//    val worstPowerCorner = corners.filter(a => a._1 == ProcessCorner.Typical && a._2 == ProcessTemp.C25) match {
+//      case a :: _ => a
+//      case _ => if (corners.length == 1) corners (0) else corners.reduce { (a, b) =>
+//        if (a._3("icc_p0") > b._3("icc_p0")) a else b
+//      }
+//    }
+    val worstPowerCorner = worstCorner
+
+    // now, put all of the fields in the map
+    worstCorner._3.foreach { case (k, v) =>
+      mapOut = mapOut.updated(k, v)
+    }
+    mapOut = mapOut.updatedWith("icc_p0")(_ => Some(worstPowerCorner._3("icc_p0")))
+
     mapOut
   }
 
-  private def checkPassTiming(instname: String, freqMHz: Int, rDivs: Int)(implicit p: Parameters): (Boolean, Map[String, Float]) = {
+  private def checkPassTiming(instname: String, rDivs: Int)(implicit p: Parameters): (Boolean, Map[String, Float]) = {
     val passes = supportedCorners map { case (corner: ProcessCorner, temp: ProcessTemp) =>
       val chars = getSRAMCharacteristics(pathWithCorner(sramDatDir, instname, corner, temp, ".dat"))
       // use geomy, because x dimension is _usually_ used for wide memories
@@ -232,7 +226,7 @@ trait CanCompileMemories {
       // ns/mm = ps/um
       val ps_delay_from_route = (rDivs - 1) * (geomy * platform.asInstanceOf[HasTechLib].techLib.worstCaseNSperMM)
       // multiply by two, because we'll have to route back and forth
-      val t_ns_req = (1000.0 - 2 * ps_delay_from_route - sramTimingPessimism_ns * 1000) / freqMHz
+      val t_ns_req = (1000.0 - 2 * ps_delay_from_route - sramTimingPessimism_ns * 1000) / p(PlatformKey).clockRateMHz
       (chars("tcyc0") <= t_ns_req, chars)
     }
     val pass = passes.forall(_._1)
@@ -244,7 +238,6 @@ trait CanCompileMemories {
                           suggestedColumns: Int,
                           nPorts: Int,
                           latency: Int,
-                          freqMHz: Int,
                           withWE: Boolean)(implicit p: Parameters): Option[SRAMArray] = {
     if (latency < 1) return None
 
@@ -277,14 +270,14 @@ trait CanCompileMemories {
           rows_per_latdiv >= minWords(nPorts, minMux) &&
           (rows_per_latdiv % wordIncrement(minMux)) == 0
       if (!passPorts || !passMux || !passWords) {
-        System.err.println(s"Failed due to (#ports=${nPorts}, #mux=${minMux}, #words=${rows_per_latdiv}): (${!passPorts} ${!passMux} ${!passWords}")
+//        System.err.println(s"Failed due to (#ports=${nPorts}, #mux=${minMux}, #words=${rows_per_latdiv}): (${!passPorts} ${!passMux} ${!passWords}")
         None
       } else {
         val chars = Map.from(flatArray.distinct.map { case (sram_rows, sram_width) =>
-          generate(nPorts, sram_rows, sram_width, freqMHz, minMux, Seq(Generator.ascii), (sramDatDir, "dat"), useWE = withWE)
-          val (pass, wc_chars) = checkPassTiming(get_inst_name(nPorts, rows_per_latdiv, minMux, sram_width, withWE), rDivs, freqMHz)
+          generate(nPorts, sram_rows, sram_width, minMux, Seq(Generator.ascii), (sramDatDir, "dat"), useWE = withWE)
+          val (pass, wc_chars) = checkPassTiming(get_inst_name(nPorts, rows_per_latdiv, minMux, sram_width, withWE), rDivs)
           if (!pass) {
-            System.err.println(s"Failure due to timing: ${wc_chars("t_cyc0")}")
+//            System.err.println(s"Failure due to timing: ${wc_chars("t_cyc0")}")
             ((sram_rows, sram_width), None)
           }
           else ((sram_rows, sram_width), Some(wc_chars))
@@ -293,8 +286,8 @@ trait CanCompileMemories {
           None
         } else {
           val area = flatArray.map { tup =>
-            val char = chars(tup).get
-            char("geomx") * char("geomy") / 1000 / 1000
+            val characteristics = chars(tup).get
+            characteristics("geomx") * characteristics("geomy") / 1000 / 1000
           }.product
           Some(SRAMArray(macroArray, Map("area" -> area)))
         }
@@ -307,16 +300,14 @@ trait CanCompileMemories {
   def getSRAMArray(suggestedRows: Int,
                    suggestedColumns: Int,
                    nPort: Int,
-                   latency: Int,
-                   reqFreqMHz: Int)(implicit p: Parameters): Option[SRAMArray] =
-    getMemoryCascadeOpt(suggestedRows, suggestedColumns, nPort, latency, reqFreqMHz, withWE = false)
+                   latency: Int)(implicit p: Parameters): Option[SRAMArray] =
+    getMemoryCascadeOpt(suggestedRows, suggestedColumns, nPort, latency, withWE = false)
 
   def getWESRAMArray(suggestedRows: Int,
                      suggestedColumns: Int,
                      nPort: Int,
-                     latency: Int,
-                     reqFreqMHz: Int)(implicit p: Parameters): Option[SRAMArray] =
-    getMemoryCascadeOpt(suggestedRows, suggestedColumns, nPort, latency, reqFreqMHz, withWE = true)
+                     latency: Int)(implicit p: Parameters): Option[SRAMArray] =
+    getMemoryCascadeOpt(suggestedRows, suggestedColumns, nPort, latency, withWE = true)
 
 
   def generateMemoryFactory(nPorts: Int,
@@ -425,27 +416,25 @@ trait CanCompileMemories {
     p(BuildModeKey) match {
       case BuildMode.Simulation =>
         // link in verilogs
-        val path = generate(nPorts, nRows, nColumns, p(PlatformKey).clockRateMHz, nMux = minMux,
+        val path = generate(nPorts, nRows, nColumns, nMux = minMux,
           useGenerators = Seq(Generator.verilog),
           roots = (sramVerilogDir, "verilog"),
-          useWE = withWE)("path").asInstanceOf[Path]
+          useWE = withWE)(p)("path").asInstanceOf[Path]
         BeethovenBuild.addSource(path / f"$instname.v")
       case BuildMode.Synthesis =>
-        val map = generate(nPorts, nRows, nColumns, p(PlatformKey).clockRateMHz, nMux = minMux,
+        val map = generate(nPorts, nRows, nColumns, nMux = minMux,
           useWE = withWE,
           useGenerators = Seq(Generator.synopsys, Generator.gds2, Generator.vclef_fp, Generator.verilog), roots = (sramSynthDir, "synth"))
         libs = libs.map { case (k, v) => (k, v :+ pathWithCorner(sramSynthDir, instname, k._1, k._2, ".lib")) }
         gds2 = gds2 :+ sramSynthDir / instname / (instname + ".gds2")
 
         sram_paths = sram_paths :+ map("path").asInstanceOf[os.Path]
-        val x = try {
-          map("geomx").asInstanceOf[Float]
-        } catch {
-          case e => println(map); throw e
-        }
+        val x = map("geomx").asInstanceOf[Float]
         val y = map("geomy").asInstanceOf[Float]
         tMem = tMem + x * y
-        println("total memory is now " + tMem + s" with the addition of $x x $y")
+        tPow = tPow + map("icc_p0").asInstanceOf[Float]
+        tCap = tCap + nRows * nColumns / 8
+        System.out.printf("\rTotal Mem: %.4f µm^2, Total MPow: %.4f mW, Total Capacity %.4fMB", tMem, tPow, tCap / 1024 / 1024)
     }
 
     () => Module(new SRAM_BBWrapper)
@@ -454,5 +443,7 @@ trait CanCompileMemories {
 
 object GMem {
   var tMem: Double = 0.0
+  var tPow: Double = 0.0
+  var tCap: Double = 0
 }
 

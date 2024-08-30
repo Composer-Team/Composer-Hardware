@@ -30,7 +30,7 @@ object CrossBoundaryDisable {
     files.toList.par.foreach { file =>
       os.proc(sed_bin, "-i", f"-f" + os.pwd / "sed_script.sed", file).call()
     }
-    CLogger.log(s"CrossBoundaryDisable took ${System.currentTimeMillis() - start_time} ms")
+//    CLogger.log(s"CrossBoundaryDisable took ${System.currentTimeMillis() - start_time} ms")
 
   }
 

@@ -26,7 +26,7 @@ object HarnessGenerator {
         inputs.map { i =>
           val widthMO = if (i.length == 2) 0 else {
             val ss = i(1)
-            println(i)
+//            println(i)
             ss.substring(1, ss.indexOf(":"))
           }
           f"  reg [$widthMO:0] ${i.last};\n"

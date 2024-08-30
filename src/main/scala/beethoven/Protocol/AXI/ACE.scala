@@ -22,7 +22,7 @@ class ACE(param: MasterPortParams) extends AXI4Compat(param, 16) {
   val awsnoop = Output(UInt(snoopWidth.W))
   val awdomain = Output(UInt(domainWidth.W))
   val awbar = Output(UInt(barWidth.W))
-  // This seems to only crop up in certain implementations?
+  // This seems to only crop up in certain implementations? AXI5
 //  val awunique = Output(Bool())
 
   override val rresp = Input(UInt(4.W))

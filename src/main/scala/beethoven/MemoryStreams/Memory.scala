@@ -247,7 +247,7 @@ object Memory {
           }
         case (PlatformType.ASIC, BuildMode.Synthesis) =>
           //          println("ASIC Mem")
-          val cmem = Module(new CASICMemory(latency, dataWidth, nRows, nPorts, withWriteEnable, allowFallbackToRegister))
+          val cmem = Module(new CASICMemory(latency, dataWidth, nRows, nPorts, withWriteEnable, allowFallbackToRegister, p(PlatformKey).clockRateMHz))
           cmem.suggestName(valName.name)
           cmem.io
       }
@@ -379,11 +379,11 @@ case class SRAMArray(array: List[List[List[(Int, Int)]]], characteristics: Map[S
 /**
  * ALL LOGIC IMPLEMENTED HERE MUST BE ACTIVE LOW
  */
-class CASICMemory(latency: Int, dataWidth: Int, nRowsSuggested: Int, nPorts: Int, withWE: Boolean, allowFallbackToRegisters: Boolean)(implicit p: Parameters)
+class CASICMemory(latency: Int, dataWidth: Int, nRowsSuggested: Int, nPorts: Int, withWE: Boolean, allowFallbackToRegisters: Boolean, freqMHz: Int)(implicit p: Parameters)
   extends RawModule
     with HasCMemoryIO {
   private val nRows = Math.max(nRowsSuggested, 4 * latency)
   override val desiredName = Memory.get_name(latency, dataWidth, nRows, 0, 0, nPorts)
   implicit val io = IO(new MemoryIOBundle(0, 0, nPorts, log2Up(nRows), dataWidth, withWE))
-  MemoryCompiler.buildSRAM(latency, dataWidth, nRows, nPorts, withWE, allowFallbackToRegisters)
+  MemoryCompiler.buildSRAM(latency, dataWidth, nRows, nPorts, withWE, allowFallbackToRegisters, freqMHz)
 }

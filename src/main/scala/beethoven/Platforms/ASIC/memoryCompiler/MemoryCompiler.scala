@@ -24,7 +24,7 @@ import scala.annotation.tailrec
  */
 
 trait SupportsWriteEnable {
-  def getWESRAMArray(suggestedRows: Int, suggestedColumns: Int, nPort: Int, latency: Int, reqFreqMHz: Int)(implicit p: Parameters): Option[SRAMArray]
+  def getWESRAMArray(suggestedRows: Int, suggestedColumns: Int, nPort: Int, latency: Int)(implicit p: Parameters): Option[SRAMArray]
 
   def generateMemoryFactory(nPorts: Int, nRows: Int, nColumns: Int, withWE: Boolean)(implicit p: config.Parameters): () => BaseModule with HasMemoryInterface
 
@@ -44,8 +44,7 @@ trait CannotCompileMemories extends CanCompileMemories {
   override def getSRAMArray(suggestedRows: Int,
                             suggestedColumns: Int,
                             nPorts: Int,
-                            latency: Int,
-                            reqFreqMHz: Int = 0)(implicit p: Parameters): Option[SRAMArray] = {
+                            latency: Int)(implicit p: Parameters): Option[SRAMArray] = {
     // first figure out how deep we have to cascade.
     availableMems.get(nPorts) match {
       case Some(memSet) =>
@@ -145,13 +144,13 @@ object MemoryCompiler {
    *                  library and platform limited.
    * @param io        IO in the parent context. Needs to be a CMemoryIOBundle
    */
-  def buildSRAM(Latency: Int, dataWidth: Int, nRows: Int, nPorts: Int, withWE: Boolean, allowFallBack: Boolean)(implicit io: MemoryIOBundle, p: Parameters): Unit = {
+  def buildSRAM(Latency: Int, dataWidth: Int, nRows: Int, nPorts: Int, withWE: Boolean, allowFallBack: Boolean, freqMHz: Int)(implicit io: MemoryIOBundle, p: Parameters): Unit = {
     def works(latency: Int): Option[(SRAMArray, Float)] = {
       if (withWE)
         mc.asInstanceOf[MemoryCompiler with SupportsWriteEnable].getWESRAMArray(
-          nRows, dataWidth, nPorts, latency, p(PlatformKey).clockRateMHz).map(a => (a, a.characteristics("area").asInstanceOf[Float]))
+          nRows, dataWidth, nPorts, latency).map(a => (a, a.characteristics("area").asInstanceOf[Float]))
       else
-        mc.getSRAMArray(nRows, dataWidth, nPorts, latency, p(PlatformKey).clockRateMHz).map(a => (a, a.characteristics("area").asInstanceOf[Float]))
+        mc.getSRAMArray(nRows, dataWidth, nPorts, latency).map(a => (a, a.characteristics("area").asInstanceOf[Float]))
     }
 
     def rn[T <: Data](x: T): T = {
@@ -170,8 +169,8 @@ object MemoryCompiler {
     }
     if (memOpts.isEmpty) {
       if (allowFallBack) {
-        beethoven.Generation.CLogger.log(s"Failed to find suitable SRAM configuration for ${nPorts}x${nRows}x${dataWidth} at L=${Latency}" +
-          s" Falling back to Register-based memory")
+//        beethoven.Generation.CLogger.log(s"Failed to find suitable SRAM configuration for ${nPorts}x${nRows}x${dataWidth} at L=${Latency}" +
+//          s" Falling back to Register-based memory")
         val mem = Module(new SyncReadMemMem(0, 0, nPorts, nRows, dataWidth, Latency))
         mem.mio.clock := io.clock
         mem.suggestName(s"mem_${nRows}x${dataWidth}x${nPorts}_l${Latency}")
@@ -186,8 +185,7 @@ object MemoryCompiler {
         }
         return
       } else {
-        beethoven.Generation.CLogger.log(s"Failed to find suitable SRAM configuration for ${nPorts}x${nRows}x${dataWidth} at L=${Latency}")
-        throw new Exception()
+        throw new Exception(s"Failed to find suitable SRAM configuration for ${nPorts}x${nRows}x${dataWidth} at L=${Latency}")
       }
     }
     val ((mem, area), pre, post) = memOpts.minBy(_._1._2)
