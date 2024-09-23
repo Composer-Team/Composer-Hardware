@@ -1,5 +1,6 @@
 package beethoven.Platforms.FPGA.Xilinx.Templates
 
+import beethoven.Floorplanning.DeviceContext
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
 import chisel3._
@@ -148,8 +149,8 @@ private[beethoven] class BRAMTDP(latency: Int,
 
 object BRAMTDP {
   private[beethoven] var warningsIssued = 0
-  private var bram_used = 0
-  private var uram_used = 0
+  private var bram_used: Map[Int, Int] = Map.empty
+  private var uram_used: Map[Int, Int] = Map.empty
 
   private val uram_dwidth = 72
   private val uram_nrows = 4 * 1024
@@ -221,10 +222,13 @@ object BRAMTDP {
     val uram_consumption = get_n_urams(uWidth, uRows)
     val bram_consumption = get_n_brams(dwidth, nRows)
     // appropriate data width and at least 90% capacity
+
+    val currentContext = DeviceContext.currentDevice.getOrElse(0)
+
     val (have_enough_uram, have_enough_bram) = p(PlatformKey) match {
       case pxm: Platform with HasXilinxMem =>
-        (uram_used + uram_consumption <= pxm.nURAMs,
-          bram_used + bram_consumption <= pxm.nBRAMs)
+        (uram_used.getOrElse(currentContext, 0) + uram_consumption <= pxm.nURAMs(currentContext),
+          bram_used.getOrElse(currentContext, 0) + bram_consumption <= pxm.nBRAMs(currentContext))
       case _ => (true, true)
     }
     val usage = if (canURAM && have_enough_uram)
@@ -235,16 +239,18 @@ object BRAMTDP {
       FPGAMemoryPrimitiveConsumer(0, uram_consumption, None, "(* ram_style = \"ultra\" *)", "_URAM")
     else FPGAMemoryPrimitiveConsumer(0, 0, None, "", "")
 
-    if (p.isInstanceOf[HasXilinxMem]) {
+    if (platform.isInstanceOf[HasXilinxMem]) {
       val pxm = p(PlatformKey).asInstanceOf[HasXilinxMem]
+      println(s"URAM (d$currentContext): ${uram_used.getOrElse(currentContext, 0)} / ${pxm.nURAMs(currentContext)}\t" +
+        f"BRAM (d$currentContext): ${bram_used.getOrElse(currentContext, 0)} / ${pxm.nBRAMs(currentContext)}")
       if (!have_enough_bram && !have_enough_uram) {
         System.err.println(
           s"Memory module $debugName requires $bram_consumption BRAMs and $uram_consumption URAMs,\n" +
-            s" but only ${pxm.nBRAMs - bram_used} BRAMs and ${pxm.nURAMs - uram_used} URAMs\n" +
+            s" but only ${pxm.nBRAMs(currentContext) - bram_used.getOrElse(currentContext, 0)} BRAMs and ${pxm.nURAMs(currentContext) - uram_used.getOrElse(currentContext, 0)} URAMs" +
             s"are available.")
         if (!p(BQuiet)) {
           System.err.println(s"Using ${usage.brams} BRAMs and ${usage.urams} URAMs for $debugName: $nRows x $dwidth")
-          System.err.println(s"Total Usage - BRAM(${BRAMTDP.bram_used + usage.brams}/${pxm.nBRAMs}) URAM(${BRAMTDP.uram_used + usage.urams}/${pxm.nURAMs})")
+          System.err.println(s"Total Usage - BRAM(${BRAMTDP.bram_used.getOrElse(currentContext, 0) + usage.brams}/${pxm.nBRAMs(currentContext)}) URAM(${BRAMTDP.uram_used.getOrElse(currentContext, 0) + usage.urams}/${pxm.nURAMs(currentContext)})")
         }
       }
     }
@@ -265,11 +271,15 @@ object BRAMTDP {
   })
 
   def allocateBRAM(nBRAM: Int): Unit = {
-    bram_used += nBRAM
+    val currentContext = DeviceContext.currentDevice.getOrElse(0)
+    bram_used = bram_used.updated(currentContext,
+      bram_used.getOrElse(currentContext, 0) + nBRAM)
   }
 
   def allocateURAM(nURAM: Int): Unit = {
-    uram_used += nURAM
+    val currentContext = DeviceContext.currentDevice.getOrElse(0)
+    uram_used = uram_used.updated(currentContext,
+      uram_used.getOrElse(currentContext, 0) + nURAM)
   }
 
 }

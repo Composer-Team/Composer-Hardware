@@ -4,7 +4,7 @@ import beethoven.Floorplanning.LazyModuleWithSLRs.LazyModuleWithFloorplan
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
-import beethoven.Floorplanning.ConstraintGeneration
+import beethoven.Floorplanning.{ConstraintGeneration, LazyModuleWithSLRs, ResetBridge}
 import beethoven.Generation.BuildMode
 import beethoven._
 import beethoven.Systems.BeethovenTop._
@@ -12,7 +12,7 @@ import beethoven.Parameters._
 import beethoven.Platforms._
 import beethoven.Protocol.AXI.AXI4Compat
 import beethoven.Protocol.RoCC.{RoccNode, TLToRocc}
-import beethoven.Protocol.tilelink.{TLRWFilter, TLSourceShrinkerDynamicBlocking, TLToAXI4SRW}
+import beethoven.Protocol.tilelink.{TLRWFilter, TLSourceShrinkerDynamicBlocking, TLSupportChecker, TLToAXI4SRW}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
@@ -97,7 +97,7 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
     (Some(read_out), Some(write_out))
   } else (None, None)
 
-
+  LazyModuleWithSLRs.freezeSLRPush = true
   // Generate accelerator SoC
   val devices = platform.physicalDevices.filter { dev =>
     // only consider devices that will have a core on it
@@ -108,6 +108,7 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
     }), dev.identifier, f"beethovenDevice${dev.identifier}")
     lm
   }
+  LazyModuleWithSLRs.freezeSLRPush = false
 
   val has_r_mem = devices.map(_.r_nodes.nonEmpty).reduce(_ || _) || frontDMA_joined.isDefined
   val has_w_mem = devices.map(_.w_nodes.nonEmpty).reduce(_ || _) || frontDMA_joined.isDefined
@@ -132,9 +133,15 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
   // deal with memory interconnect
   val _ = {
     val r_map = devices.flatMap { d =>
-      val on_chip = d.r_nodes.map(b => (b, d.deviceId))
+      val on_chip = d.r_nodes.map(b => (b, d.deviceId)).map { case (src, idx) =>
+        val checkProt = TLSupportChecker(a => a.master.allSupportGet.max > 0 ^ a.master.allSupportPutFull.max > 0, "Protocol Exclusive: rmap top")
+        checkProt := src
+        (checkProt, idx)
+      }
       val off_chip = if (frontDMA_r.isDefined && platform.physicalInterfaces.find(_.isInstanceOf[PhysicalHostInterface]).get.locationDeviceID == d.deviceId) {
-        Seq((frontDMA_r.get, d.deviceId))
+        val checkProt = TLSupportChecker(a => a.master.allSupportGet.max > 0 && a.master.allSupportPutFull.max == 0, "Protocol Exclusive: dma front r")
+        checkProt := frontDMA_r.get
+        Seq((checkProt, d.deviceId))
       } else {
         Seq()
       }
@@ -142,40 +149,66 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
     }
 
     val w_map = devices.flatMap { d =>
-      val on_chip = d.w_nodes.map(b => (b, d.deviceId))
-      val off_chip = if (frontDMA_w.isDefined && platform.physicalInterfaces.find(_.isInstanceOf[PhysicalHostInterface]).get.locationDeviceID == d.deviceId)
-        Seq((frontDMA_w.get, d.deviceId))
-      else Seq()
+      val on_chip = d.w_nodes.map(b => (b, d.deviceId)).map { case (src, idx) =>
+        val checkProt = TLSupportChecker(a => a.master.allSupportGet.max == 0 && a.master.allSupportPutFull.max > 0, "Protocol Exclusive: wmap top")
+        checkProt := src
+        (checkProt, idx)
+      }
+      val off_chip = if (frontDMA_w.isDefined && platform.physicalInterfaces.find(_.isInstanceOf[PhysicalHostInterface]).get.locationDeviceID == d.deviceId) {
+        val checkProt = TLSupportChecker(a => a.master.allSupportGet.max == 0 && a.master.allSupportPutFull.max > 0, "Protocol Exclusive: dma front w")
+        checkProt := frontDMA_w.get
+        Seq((checkProt, d.deviceId))
+      } else Seq()
       on_chip ++ off_chip
     }
 
     val mem_sinks = platform.physicalInterfaces.filter(_.isInstanceOf[PhysicalMemoryInterface]).map(_.locationDeviceID).distinct
 
     val Seq(r_commits, w_commits) = Seq(r_map, w_map).map { carry_init =>
-      create_cross_chip_network(
-        sources = carry_init,
+      val carry_checks = carry_init.map { case (src, i) =>
+        val checkProt = TLSupportChecker(a => a.master.allSupportGet.max > 0 ^ a.master.allSupportPutFull.max > 0, "Protocol exclusive: preCheck")
+        checkProt := src
+        (checkProt, i)
+      }
+      val f_net = create_cross_chip_network(
+        sources = carry_checks,
         mem_sinks,
         make_tl_buffer,
         make_tl_xbar,
         tl_assign)
+      f_net.map { case (k, v) =>
+        (k, v.map { src =>
+          val checkProt = TLSupportChecker(a => a.master.allSupportGet.max > 0 ^ a.master.allSupportPutFull.max > 0, "Protocol exclusive: postCheck")
+          checkProt := src
+          checkProt
+        })
+      }
     }
 
     def is_map_nonempty[K, T](m: Map[K, Iterable[T]]): Boolean = {
       m.values.map(_.nonEmpty).reduce(_ || _)
     }
 
-
     if (is_map_nonempty(r_commits) || is_map_nonempty(w_commits)) {
       platform.physicalInterfaces.foreach {
         case pmi: PhysicalMemoryInterface =>
           val mem = (AXI_MEM.get)(pmi.channelIdx)
           val sTLToAXI = LazyModuleWithFloorplan(new TLToAXI4SRW(), pmi.locationDeviceID).node
-          Seq(r_commits, w_commits) foreach (commit_set =>
-            xbar_tree_reduce_sources(commit_set(pmi.locationDeviceID), platform.xbarMaxDegree, 1,
+
+          Seq((r_commits, "r"), (w_commits, "w")) foreach { case (commit_set, ty) =>
+            val xbar_s = xbar_tree_reduce_sources(commit_set(pmi.locationDeviceID), platform.xbarMaxDegree, 1,
               make_tl_xbar,
               make_tl_buffer,
-              (s: Seq[TLNode], t: TLNode) => tl_assign(s, t)(p))
-              .foreach(sTLToAXI := TLSourceShrinkerDynamicBlocking(1 << platform.memoryControllerIDBits) := _))
+              (s: Seq[TLNode], t: TLNode) => tl_assign(s, t)(p))(p)(0)
+
+            def check(id: String): TLIdentityNode = ty match {
+              case "r" => TLSupportChecker.readCheck(f"Protocol Exclusive: check_r${id}")
+              case "w" => TLSupportChecker.writeCheck(f"Protocol Exclusive: check_w${id}")
+            }
+
+            sTLToAXI := check("post") := TLSourceShrinkerDynamicBlocking(1 << platform.memoryControllerIDBits) := check("pre") := xbar_s
+          }
+          //              .foreach(sTLToAXI := TLSourceShrinkerDynamicBlocking(1 << platform.memoryControllerIDBits) := _))
           mem := AXI4Buffer(BufferParams.default) := sTLToAXI
         case _ => ;
       }
@@ -191,7 +224,9 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
       (if (device_has_host) List((rocc_front, sd.deviceId)) else List()) ++ (sd.source_rocc.map(a => (a, sd.deviceId)))
     }
 
-    val devices_with_sinks = devices.map { sd => sd.deviceId }
+    val devices_with_sinks = devices.map { sd => sd.deviceId }.filter { sd =>
+      p(AcceleratorSystems).map(as => slr2ncores(sd, as.nCores)._1 > 0).fold(false)(_ || _)
+    }
 
     val net = create_cross_chip_network(
       sources = emitters_per_device,
@@ -231,6 +266,7 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
   }
 
 
+
   lazy val module = new TopImpl(this)
 }
 
@@ -261,4 +297,24 @@ class TopImpl(outer: BeethovenTop)(implicit p: Parameters) extends LazyModuleImp
   Generation.CPP.Generation.genCPPHeader(outer)
   if (p(BuildModeKey) == BuildMode.Synthesis)
     ConstraintGeneration.writeConstraints()
+
+  /**
+   * Reset propagation. After the top module has been created, we can find all of the submodules and on which SLR
+   * they belong.
+   */
+
+  // reset propagation
+  {
+    val devicesNeedingReset = (LazyModuleWithSLRs.toplevelObjectsPerSLR.map(_._1) ++
+      outer.devices.map {b: Subdevice => b.deviceId }).distinct
+    val resets =  devicesNeedingReset.map { a => (a, ResetBridge(reset, clock, 8)) }
+    outer.devices.foreach { dev =>
+      dev.module.reset := resets.find(_._1 == dev.deviceId).get._2
+    }
+    LazyModuleWithSLRs.toplevelObjectsPerSLR.foreach { case (idx, lm) =>
+      lm.module.asInstanceOf[Module].reset := resets.find(_._1 == idx).get._2
+    }
+
+  }
+
 }

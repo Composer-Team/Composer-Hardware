@@ -13,6 +13,8 @@ import beethoven.Platforms.{BuildModeKey, PlatformHasSeparateDMA}
 import beethoven.Protocol.RoCC.Helpers.MCRFileMap
 import beethoven.Systems._
 import beethoven._
+import beethoven.common.CLog2Up
+import freechips.rocketchip.subsystem.FrontBusKey
 import freechips.rocketchip.tile.XLen
 import os.Path
 
@@ -69,6 +71,8 @@ object Generation {
         else throw new Exception("Type is too big")
       }
       def getUnsignedCIntType(width: Int): String = "u" + getSignedCIntType(width)
+      val addrWid = log2Up(platform.extMem.master.size)
+      val frontBusWidth = CLog2Up(platform.frontBusAddressMask | platform.frontBusBaseAddress)
 
       (
         s"""
@@ -77,14 +81,13 @@ object Generation {
         , if (platform.isInstanceOf[PlatformHasSeparateDMA] && p(BuildModeKey) != Simulation) "#define BEETHOVEN_HAS_DMA" else "", {
         if (platform.memoryNChannels > 0 && top.AXI_MEM.isDefined) {
           val strobeDtype = getVerilatorDtype(platform.extMem.master.beatBytes)
-          val addrWid = log2Up(platform.extMem.master.size)
 
           val idDtype = getVerilatorDtype(top.AXI_MEM.get(0).in(0)._1.ar.bits.id.getWidth)
           f"""
              |#ifdef SIM
              |#ifdef VERILATOR_VERSION
              |#include <verilated.h>
-             |using BeethovenFrontBusAddr_t = ${getUnsignedCIntType(addrWid)};
+             |using BeethovenFrontBusAddr_t = ${getUnsignedCIntType(frontBusWidth)};
              |using BeethovenMemIDDtype=$idDtype;
              |#endif
              |#define DEFAULT_PL_CLOCK ${platform.clockRateMHz}
@@ -93,7 +96,18 @@ object Generation {
              |#endif
              |""".stripMargin
         } else {
-          s"#define DATA_BUS_WIDTH ${platform.extMem.master.beatBytes * 8}\n"
+          f"""
+             |#ifdef SIM
+             |#ifdef VERILATOR
+             |#include <verilated.h>
+             |using BeethovenFrontBusAddr_t = ${getUnsignedCIntType(frontBusWidth)};
+             |#endif
+             |#endif
+             |
+             |#define DATA_BUS_WIDTH ${platform.extMem.master.beatBytes * 8}
+             |#define DEFAULT_PL_CLOCK ${platform.clockRateMHz}
+             |
+             |""".stripMargin
         }
       })
     }

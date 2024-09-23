@@ -81,8 +81,13 @@ abstract class Platform {
 
   val interCoreMemReductionLatency = 1
   val interCoreMemBusWidthBytes = 4
-  val intraCoreInterSLRMemReductionLatency = 2
-  val crossSLRLatency = 2 // Only used in FPGAs
+
+  /**
+   * These default values should typically be fine.
+   */
+  val net_intraDeviceXbarLatencyPerLayer = 1
+  val net_intraDeviceXbarTopLatency = 1
+  val net_fpgaSLRBridgeLatency = 2
 
   val memEndpointsPerDevice = 1
 
@@ -147,8 +152,8 @@ object DeviceRequirements {
 }
 
 trait HasXilinxMem {
-  val nURAMs: Int
-  val nBRAMs: Int
+  val nURAMs: Map[Int, Int]
+  val nBRAMs: Map[Int, Int]
 }
 
 

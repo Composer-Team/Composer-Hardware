@@ -1,7 +1,9 @@
 package beethoven.Systems
 
+import beethoven.Floorplanning.{DeviceContext, ResetBridge}
 import beethoven.Parameters.AcceleratorSystems
 import beethoven.Protocol.RoCC.{RoccBuffer, RoccFanout, RoccIdentityNode}
+import beethoven.Protocol.tilelink.TLSupportChecker
 import beethoven.common.Misc
 import beethoven._
 import chipsalliance.rocketchip.config.Parameters
@@ -15,14 +17,37 @@ class Subdevice(val deviceId: Int)(implicit p: Parameters) extends LazyModule {
   val submodules = Misc.topological_sort_depends(configs.map(_.name), constructDependencies.flatten).map { name =>
     val config = configs.find(_.name == name).get
     val (n, offset) = slr2ncores(deviceId, config.nCores)
+    println(f"$n cores on device $deviceId")
     val lm = LazyModule(new AcceleratorSystem(n, offset)(p, config, deviceId))
     lm.suggestName(f"sd${deviceId}_sys${config.name}")
     lm
   }
 
 
-  val Seq(r_nodes, w_nodes) = Seq(submodules.flatMap(_.r_nodes), submodules.flatMap(_.w_nodes)).map { nodes =>
-      xbar_tree_reduce_sources[TLNode](nodes, platform.xbarMaxDegree, platform.memEndpointsPerDevice, make_tl_xbar, make_tl_buffer, tl_assign)
+  val Seq(r_nodes, w_nodes) = Seq(
+    (submodules.flatMap(_.r_nodes), "r"),
+    (submodules.flatMap(_.w_nodes), "w")).map { case (nodes, ty) =>
+    val nodesPostCheck = nodes.map { node =>
+      val checkProt = TLSupportChecker(a => ty   match {
+        case "r" => a.master.allSupportGet.max > 0 && a.master.allSupportPutFull.max == 0
+        case "w" => a.master.allSupportGet.max == 0 && a.master.allSupportPutFull.max > 0
+      }, f"Protocol Exclusive: SD${ty}_pre")
+      checkProt := node
+      checkProt
+
+    }
+    xbar_tree_reduce_sources[TLNode](
+      nodesPostCheck,
+      platform.xbarMaxDegree,
+      platform.memEndpointsPerDevice,
+      make_tl_xbar, make_tl_buffer, tl_assign).map { node =>
+      val checkProt = TLSupportChecker(a => ty match {
+        case "r" => a.master.allSupportGet.max > 0 && a.master.allSupportPutFull.max == 0
+        case "w" => a.master.allSupportGet.max == 0 && a.master.allSupportPutFull.max > 0
+      }, f"Protocol Exclusive: SD${ty}_post")
+      checkProt := node
+      checkProt
+    }
   }
 
   val host_rocc = {
@@ -53,5 +78,10 @@ class Subdevice(val deviceId: Int)(implicit p: Parameters) extends LazyModule {
     xbar_tree_reduce_sinks(mems, platform.xbarMaxDegree, 1, make_tl_xbar, make_tl_buffer, tl_assign)
   }
 
-  lazy val module = new LazyModuleImp(this) {}
+  lazy val module = new LazyModuleImp(this) {
+    DeviceContext.currentDevice = Some(deviceId+1)
+    submodules.foreach { sm =>
+      sm.module.reset := ResetBridge(reset, clock, 2)
+    }
+  }
 }

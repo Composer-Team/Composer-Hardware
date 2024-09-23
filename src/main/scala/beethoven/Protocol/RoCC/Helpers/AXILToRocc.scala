@@ -24,7 +24,7 @@ class AXILToRocc(implicit val p: Parameters) extends Module {
   //this should eventually made parameterizable to the nasti width, but the nasti width is currently way wider
   //than the data width we get
   val nBeats = 5 // ((5 * 32).toFloat / bus_bits).ceil.toInt
-  val counter = RegInit(0.U((1 + log2Up(nBeats)).W))
+  val counter = RegInit(0.U(log2Up(nBeats+1).W))
   val bitsBuffer = Reg(Vec(nBeats, UInt(bus_bits.W)))
 
   val rocc = Wire(new AccelRoccCommand)

@@ -14,14 +14,14 @@ class RoccFanout(implicit p: Parameters) extends LazyModule {
       mp(0)
     },
     uFn = { sp =>
-      val sids = sp.map(_.system_core_ids.map(_._1)).reduce(_ ++ _)
+      val sids = sp.map(_.system_core_ids.map(_._1)).reduce(_ ++ _).toList.distinct
       val joined_core_maps = sids.map { sid =>
         val all_cores = sp.flatMap(_.system_core_ids.map(_._2))
         val start = all_cores.map(_._1).min
         val max = all_cores.map(_._2).max
         all_cores.foreach { case (low, high) =>
-          assert(low == start || all_cores.exists(_._2 == low))
-          assert(high == max || all_cores.exists(_._1 == high))
+          assert(low == start || all_cores.exists(_._2+1 == low), all_cores.toString())
+          assert(high == max || all_cores.exists(_._1-1 == high), all_cores.toString())
         }
         (sid, (start, max))
       }

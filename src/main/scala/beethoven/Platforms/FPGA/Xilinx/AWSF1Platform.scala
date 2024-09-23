@@ -13,11 +13,6 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule}
 import freechips.rocketchip.tilelink.TLIdentityNode
 import os.Path
 
-object AWS_sole {
-  def apply(c: Config, pths: Seq[Path]): Unit = {
-  }
-}
-
 object AWSF1Platform {
   def check_if_setup(ip: String): Boolean = {
     val res = os.proc("ssh", "ec2-user@" + ip, "ls", "~/aws-fpga").call()
@@ -32,8 +27,11 @@ object AWSF1Platform {
 }
 
 class AWSF1Platform(memoryNChannels: Int,
-                    val clock_recipe: String = "A0") extends U200Platform(memoryNChannels) with HasPostProccessorScript with
-  PlatformHasSeparateDMA {
+                    val clock_recipe: String = "A0") extends
+  U200Platform(memoryNChannels) with
+  HasPostProccessorScript with
+  PlatformHasSeparateDMA with
+  HasXilinxMem {
   override val DMAIDBits: Int = 6
   override val clockRateMHz: Int = clock_recipe match {
     case "A0" => 125
@@ -54,25 +52,30 @@ class AWSF1Platform(memoryNChannels: Int,
     if (c(BuildModeKey) == BuildMode.Synthesis) {
       // rename beethoven.v to beethoven.sv
       val aws_dir = os.Path(BeethovenBuild.beethovenGenDir) / "aws"
-      val top_file = os.Path(BeethovenBuild.beethovenGenDir) / "aws" / "beethoven.sv"
-      os.makeDir.all(os.Path(BeethovenBuild.beethovenGenDir) / "aws")
-      os.remove.all(top_file)
+      val gen_dir = aws_dir / "build-dir" / "generated-src"
+      val run_dir = aws_dir / "build-dir" / "build" / "scripts"
+      val top_file = gen_dir / "beethoven.sv"
+      os.makeDir.all(gen_dir)
+      os.makeDir.all(run_dir)
       os.proc("touch", top_file.toString()).call()
       //      os.proc("cp", "-r", os.Path(BeethovenBuild.beethovenGenDir) / "beethoven.build" / "*", aws_dir).call()
-      os.copy.over(os.Path(BeethovenBuild.beethovenGenDir) / "beethoven.build", aws_dir)
-      os.move(os.Path(BeethovenBuild.beethovenGenDir) / "aws" / "BeethovenTop.v", top_file)
+      os.copy.over(os.Path(BeethovenBuild.beethovenGenDir) / "beethoven.build", gen_dir)
+      os.move(gen_dir / "BeethovenTop.v", top_file)
       os.walk(os.Path(BeethovenBuild.beethovenGenDir)).foreach(
         p =>
           if (p.last.endsWith(".cc") || p.last.endsWith(".h") || p.last.endsWith(".xdc"))
-            os.copy(p, os.Path(BeethovenBuild.beethovenGenDir) / "aws" / p.last)
+            os.copy.over(p, gen_dir / p.last)
       )
-      val hdl_srcs = os.walk(os.Path(BeethovenBuild.beethovenGenDir) / "aws").filter(p => p.last.endsWith(".v") || p.last.endsWith(".sv")).map {
+      val hdl_srcs = os.walk(gen_dir).filter(p =>
+        (p.last.endsWith(".v") ||
+          p.last.endsWith(".sv")) &&
+          !(p.last.contains("VCS"))).map {
         fname =>
-          val rel_path = fname.relativeTo(os.Path(BeethovenBuild.beethovenGenDir) / "aws")
-          f"$$::env(HOME)/build-dir/design/$rel_path"
+          fname.relativeTo(run_dir)
       }
-      os.write.over(os.Path(BeethovenBuild.beethovenGenDir) / "aws" / "src_list.tcl",
+      os.write.over(run_dir / "src_list.tcl",
         f"set hdl_sources [list ${hdl_srcs.mkString(" \\\n")} ]")
+
       // write ip tcl
       val ip_tcl = os.Path(BeethovenBuild.beethovenGenDir) / "aws" / "ip.tcl"
       os.write.over(ip_tcl,
@@ -91,7 +94,7 @@ class AWSF1Platform(memoryNChannels: Int,
 
       // get aws address from stdio input
       println("Compilation is done.")
-      println("Enter the AWS F1 instance IP address (blank if ignore transfer):")
+      println("Enter the AWS F1 instance IP address (blank if store locally) :")
       var in = scala.io.StdIn.readLine().trim
       if (in.nonEmpty) {
         var fail = true
@@ -100,7 +103,7 @@ class AWSF1Platform(memoryNChannels: Int,
           try {
             println("Transfering...")
             os.proc("ssh", f"ec2-user@$in", "rm", "-rf", "~/build-dir/generated-src/*")
-            os.proc("rsync", "-avz", f"${BeethovenBuild.beethovenGenDir}/aws/", f"ec2-user@$in:~/build-dir/generated-src/").call(
+            os.proc("rsync", "-avz", f"${gen_dir}/*", f"ec2-user@$in:~/build-dir/generated-src/").call(
               stdout = os.Inherit
             )
           } catch {
@@ -121,14 +124,37 @@ class AWSF1Platform(memoryNChannels: Int,
   override val physicalInterfaces: List[PhysicalInterface] = List(
     PhysicalHostInterface(0),
     PhysicalMemoryInterface(1, 0)
-  ) ++ (if (memoryNChannels <= 1) List() else (1 until memoryNChannels).map(a => PhysicalMemoryInterface(a-1, a)))
-  override val physicalConnectivity: List[(Int, Int)] = List((0,1), (1,2))
+  ) ++ (if (memoryNChannels <= 1) List() else (1 until memoryNChannels).map(a => PhysicalMemoryInterface(a - 1, a)))
+  override val physicalConnectivity: List[(Int, Int)] = List((0, 1), (1, 2))
 
   override val physicalDevices: List[DeviceConfig] = List(
     DeviceConfig(0, "pblock_CL_bot"),
     DeviceConfig(1, "pblock_CL_mid"),
     DeviceConfig(2, "pblock_CL_top")
   )
+  /**
+   * We won't _fail_ if we run out of memory, but there will be a warning and the memories will no longer be annotated
+   * with a specific memory type (e.g., URAM/BRAM). This should give Vivado the freedom it needs to potentially not
+   * fail placement
+   */
+    // 320 * (2/3) = 212
+    // try to only use up to 80% (Xilinx Recommendation)
+  override val nURAMs: Map[Int, Int] = Map.from(List((0, 160), (1, 160), (2, 256))) // 960 (320 per) but try not to get too close to overallocation
+  override val nBRAMs: Map[Int, Int] = Map.from(List((0, 384), (1, 384), (2, 576))) // 2160 (720 per) but the shell takes about 30%
+
+  override val net_intraDeviceXbarLatencyPerLayer: Int = 1
+  override val net_intraDeviceXbarTopLatency: Int = clock_recipe match {
+    case "A0" | "A2" => 1
+    case "A1" => 2
+  }
+  override val net_fpgaSLRBridgeLatency: Int = clock_recipe match {
+    case "A0" => 2
+    case "A1" => 0
+    case "A2" => 2
+  }
+
+  override def placementAffinity: Map[Int, Double] = Map.from(Seq((0, 1.0), (1, 1), (2, 1.5)))
+
 }
 
 case class tclMacro(cmd: String, xciPath: Path)

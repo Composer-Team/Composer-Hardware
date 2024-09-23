@@ -23,7 +23,8 @@ package object Systems {
       val min = allocations.min(Ordering.by[(Int, Int, Double), Double](_._3))
       val idx = allocations.indexOf(min)
       val affinity = 1.0 / platform.placementAffinity(min._1)
-      val newAllocations = allocations.updated(idx, (min._1, min._2 + 1, min._2 + affinity))
+      val newAllocations = allocations.updated(idx, (min._1, min._2 + 1, min._3 + affinity))
+//      println(f"idx($idx) aff($affinity) $newAllocations")
       recursivelyDecide(newAllocations, nCores - 1)
     }
   }
@@ -136,6 +137,8 @@ package object Systems {
         (channel_fix << space_bits), (1 << space_bits) - 1)
   }
 
+  var roccGLID: Int = 0
+
   @tailrec
   private[beethoven] def fanout_recursive(grp: Iterable[RoccNode], xbarDeg: Int)(implicit p: Parameters): RoccNode = {
     grp match {
@@ -162,10 +165,10 @@ package object Systems {
     if (grp.size <= toDeg) grp
     else {
       val groups = grp.grouped(xbarDeg).map { q =>
-        val fan_in = LazyModule(new RoccFanin)
+        val roccFanIn = LazyModuleWithFloorplan(new RoccFanin)
         val id = RoccIdentityNode()
-        q.foreach(fan_in.node := RoccBuffer() := _)
-        id := fan_in.node
+        q.foreach(roccFanIn.node := RoccBuffer() := _)
+        id := roccFanIn.node
         id
       }.toSeq
       fanin_recursive(groups, xbarDeg, toDeg)
@@ -174,11 +177,12 @@ package object Systems {
 
   @tailrec
   private[beethoven] def xbar_tree_reduce_sources[T](eles: Seq[T],
-                                  xbarDeg: Int,
-                                  toDeg: Int,
-                                  make_xbar: () => T,
-                                  make_buffer: () => T,
-                                  assign_to: (Seq[T], T) => Unit)(implicit p: Parameters): Seq[T] = {
+                                                     xbarDeg: Int,
+                                                     toDeg: Int,
+                                                     make_xbar: () => T,
+                                                     make_buffer: () => T,
+                                                     assign_to: (Seq[T], T) => Unit,
+                                                     buffer_depth: Int = 1)(implicit p: Parameters): Seq[T] = {
     if (eles.length <= toDeg) {
       eles
     } else {
@@ -198,11 +202,11 @@ package object Systems {
 
   @tailrec
   private[beethoven] def xbar_tree_reduce_sinks[T <: NodeHandle[_, _, _, _, _, _, _, _]](eles: Seq[T],
-                                                                      xbarDeg: Int,
-                                                                      toDeg: Int,
-                                                                      make_xbar: () => T,
-                                                                      make_buffer: () => T,
-                                                                      assign_to: (Seq[T], T) => Unit)(implicit p: Parameters): Seq[T] = {
+                                                                                         xbarDeg: Int,
+                                                                                         toDeg: Int,
+                                                                                         make_xbar: () => T,
+                                                                                         make_buffer: () => T,
+                                                                                         assign_to: (Seq[T], T) => Unit)(implicit p: Parameters): Seq[T] = {
     if (eles.length <= toDeg) {
       eles
     } else {
@@ -222,9 +226,9 @@ package object Systems {
 
   @tailrec
   private[beethoven] def extend_eles_via_protocol_node[T <: NodeHandle[_, _, _, _, _, _, _, _]](eles: Seq[T],
-                                                                             make_buffer: () => T,
-                                                                             assign: (Seq[T], T) => Unit,
-                                                                             buffer_depth: Int = 1)(implicit p: Parameters): Seq[T] = {
+                                                                                                make_buffer: () => T,
+                                                                                                assign: (Seq[T], T) => Unit,
+                                                                                                buffer_depth: Int = 1)(implicit p: Parameters): Seq[T] = {
     buffer_depth match {
       case x if x <= 0 => eles
       case _ =>
@@ -237,18 +241,18 @@ package object Systems {
   }
 
   private[beethoven] def extend_ele_via_protocol_node[T <: NodeHandle[_, _, _, _, _, _, _, _]](ele: T,
-                                                                            make_buffer: () => T,
-                                                                            assign: (Seq[T], T) => Unit,
-                                                                            buffer_depth: Int = 1)(implicit p: Parameters): T =
+                                                                                               make_buffer: () => T,
+                                                                                               assign: (Seq[T], T) => Unit,
+                                                                                               buffer_depth: Int = 1)(implicit p: Parameters): T =
     extend_eles_via_protocol_node(Seq(ele), make_buffer, assign, buffer_depth)(p)(0)
 
 
   private[beethoven] def create_cross_chip_network[T <: NodeHandle[_, _, _, _, _, _, _, _]](sources: List[(T, Int)],
-                                                                         devices_with_sinks: List[Int],
-                                                                         make_buffer: () => T,
-                                                                         make_xbar: () => T,
-                                                                         assign: (Seq[T], T) => Unit,
-                                                                        )(implicit p: Parameters): Map[Int, List[T]] = {
+                                                                                            devices_with_sinks: List[Int],
+                                                                                            make_buffer: () => T,
+                                                                                            make_xbar: () => T,
+                                                                                            assign: (Seq[T], T) => Unit,
+                                                                                           )(implicit p: Parameters): Map[Int, List[T]] = {
     val connectivity = platform.physicalConnectivity
     val devices = platform.physicalDevices.map(_.identifier)
     if (connectivity.nonEmpty) {
@@ -378,14 +382,14 @@ package object Systems {
    */
   @tailrec
   private def topological_xbarReduce_over_SUG[T <: NodeHandle[_, _, _, _, _, _, _, _]](devices: Seq[Int],
-                                                                               connectivity: Seq[(Int, Int)],
-                                                                               carries: Map[Int, List[(T, List[Int])]],
-                                                                               commits: Map[Int, List[(T, List[Int])]],
-                                                                               make_buffer: () => T,
-                                                                               make_xbar: () => T,
-                                                                               assign: (Seq[T], T) => Unit,
-                                                                              )(implicit p: Parameters,
-                                                                                devicesWithSinks: List[Int]): Map[Int, List[(T, List[Int])]] = {
+                                                                                       connectivity: Seq[(Int, Int)],
+                                                                                       carries: Map[Int, List[(T, List[Int])]],
+                                                                                       commits: Map[Int, List[(T, List[Int])]],
+                                                                                       make_buffer: () => T,
+                                                                                       make_xbar: () => T,
+                                                                                       assign: (Seq[T], T) => Unit,
+                                                                                      )(implicit p: Parameters,
+                                                                                        devicesWithSinks: List[Int]): Map[Int, List[(T, List[Int])]] = {
     // for the rootsets that exist on devices that do not have memory xbar endpoints, but where a device
     // can be reached from that endpoint, bridge those rootsets to the neighboring device.
     // Because the graph is a DAG, the search is easy
@@ -451,11 +455,23 @@ package object Systems {
           val carry_terms = carries(root)
           // reduce terms via tree
           val source_buffer = DeviceContext.withDevice(root) {
-            extend_ele_via_protocol_node(xbar_tree_reduce_sources(carry_terms.map(_._1), 2, 1, make_xbar, make_buffer, assign)(p)(0), make_buffer, assign)
+            extend_ele_via_protocol_node(
+              xbar_tree_reduce_sources(
+                carry_terms.map(_._1),
+                xbarDeg = 2,
+                toDeg = 1,
+                make_xbar = make_xbar,
+                make_buffer = make_buffer,
+                assign_to = assign,
+                buffer_depth = platform.net_intraDeviceXbarLatencyPerLayer)(p)(0),
+              make_buffer,
+              assign,
+              buffer_depth = platform.net_intraDeviceXbarTopLatency)
           }
           val next_device = connectivity.find(_._1 == root).get._2
           val dest_buffer = DeviceContext.withDevice(next_device) {
-            extend_ele_via_protocol_node(extend_ele_via_protocol_node(source_buffer, make_buffer, assign), make_xbar, assign)
+            extend_ele_via_protocol_node(extend_ele_via_protocol_node(source_buffer, make_buffer, assign,
+              buffer_depth = platform.net_fpgaSLRBridgeLatency), make_xbar, assign)
           }
           val carry_sources = carry_terms.flatMap(_._2)
           (next_device, List((dest_buffer, carry_sources)))
@@ -494,12 +510,19 @@ package object Systems {
     from.foreach(a => to := a)
   }
 
+  private var rocc_xbar_id = 0
+
   private[beethoven] def make_rocc_xbar()(implicit p: Parameters): RoccNode = {
-    val q: RoccNode = LazyModuleWithFloorplan(new RoccCompositeXbar(), "RoccXbar").node
+    val q: RoccNode = LazyModuleWithFloorplan(new RoccCompositeXbar(), {
+      val id = rocc_xbar_id
+      rocc_xbar_id += 1
+      s"RoccXbar_${id}"
+    }).node
     q
   }
 
   private var rocc_buffer_id = 0
+
   private[beethoven] def make_rocc_buffer()(implicit p: Parameters): RoccNode = LazyModuleWithFloorplan(new RoccBuffer(), {
     val id = rocc_buffer_id
     rocc_buffer_id = rocc_buffer_id + 1

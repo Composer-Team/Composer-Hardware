@@ -13,7 +13,19 @@ class TLToAXI4SRWImpl(outer: TLToAXI4SRW) extends LazyModuleImp(outer) {
   val out_width = outer.node.out(0)._2.bundle.dataBits
   tlManagers.in foreach { in => in._2.bundle.dataBits == out_width }
 
-  val write_in_seq = tlManagers.in.find(_._2.master.allSupportPutFull) match {
+  // require that the masters are excelusive
+  val supportIntersection = outer.node.in.map(_._2.master)
+  supportIntersection.length match {
+    case 1 => ;
+    case 2 =>
+      val a = supportIntersection(0)
+      val b = supportIntersection(1)
+//      require(a.allSupportPutFull.max > 0 ^ b.allSupportPutFull.max > 0, "Incoming connections in TLSRW are not exclusive in write")
+//      require(a.allSupportGet.max > 0 ^ b.allSupportGet.max > 0, s"Incoming connections in TLSRW are not exclusive in read: ${a.allSupportGet} ${b.allSupportGet}")
+    case _ => throw new Exception("An illegal number of incoming connections!")
+  }
+
+  val write_in_seq = tlManagers.in.find(_._2.master.allSupportPutFull.max > 0) match {
     case None =>
       // tie off AXI write ports
       val aw = outer.node.out(0)._1.aw
@@ -27,7 +39,7 @@ class TLToAXI4SRWImpl(outer: TLToAXI4SRW) extends LazyModuleImp(outer) {
       Seq()
     case Some((in, edgeIn)) => Seq((in, edgeIn, true))
   }
-  val read_in_seq = tlManagers.in.find(_._2.master.allSupportGet) match {
+  val read_in_seq = tlManagers.in.find(_._2.master.allSupportGet.max > 0) match {
     case None =>
       // tie off AXI read ports
       val ar = outer.node.out(0)._1.ar

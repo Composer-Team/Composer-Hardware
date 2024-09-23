@@ -4,14 +4,16 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import beethoven._
 import beethoven.Floorplanning.LazyModuleImpWithSLRs.ModuleWithFloorplan
+import beethoven.Floorplanning.ResetBridge
 import beethoven.Generation._
 import beethoven.MemoryStreams._
-import beethoven.Parameters.{BlackboxBuilderCustom, ModuleBuilder}
+import beethoven.Parameters.{AcceleratorSystems, BlackboxBuilderCustom, ModuleBuilder}
 import freechips.rocketchip.diplomacy.LazyModuleImp
 
 
 class AcceleratorSystemImp(val outer: AcceleratorSystem)(implicit p: Parameters) extends LazyModuleImp(outer) {
   override val desiredName = f"System${outer.name}"
+
   val cores = Seq.tabulate(outer.nCores) { core_idx: Int =>
     val altered = p.alterPartial {
       case OuterKey => outer
@@ -24,8 +26,14 @@ class AcceleratorSystemImp(val outer: AcceleratorSystem)(implicit p: Parameters)
     impl
   }
 
+  cores.foreach(_.reset := ResetBridge(reset, clock, 2))
 
-  BeethovenBuild.requestModulePartition(desiredName)
+
+  if (p(AcceleratorSystems).length > 1 || outer.systemParams.nCores > 1) {
+    // if either of these conditions holds, it makes sense to compile separately and stamp them out. Otherwise, just
+    // make your life easier and compile from the top
+    BeethovenBuild.requestModulePartition(desiredName)
+  }
 
   /* handle all memory */
   cores.zipWithIndex.zip(outer.readers) foreach { case ((core, coreIdx), readSet) =>
@@ -35,7 +43,7 @@ class AcceleratorSystemImp(val outer: AcceleratorSystem)(implicit p: Parameters)
         val readerModule = ModuleWithFloorplan(new SequentialReader(client._2.data.bits.getWidth,
           node.out(0)._1, node.out(0)._2,
           cParams.bufferSizeBytesMin),
-          s"readerModule_${outer.baseName}_${nodeParams.name}_core${coreIdx}_channel$channel_idx")
+          s"readerModule_${outer.baseName}_${nodeParams.name}_core${coreIdx}_channel${channel_idx}_d${outer.on_deviceID}")
         readerModule.io.channel <> client._2
         readerModule.io.req <> client._1
         readerModule.tl_out <> node.out(0)._1
@@ -50,7 +58,7 @@ class AcceleratorSystemImp(val outer: AcceleratorSystem)(implicit p: Parameters)
           client._2.dWidth / 8,
           node.out(0)._1, node.out(0)._2,
           cParams.bufferSizeBytesMin),
-          s"writerModule_${outer.baseName}_${nodeName.name}_core${coreIdx}_channel${channel_idx}")
+          s"writerModule_${outer.baseName}_${nodeName.name}_core${coreIdx}_channel${channel_idx}_d${outer.on_deviceID}")
         writerModule.io.channel <> client._2
         writerModule.io.req <> client._1
         writerModule.tl_out <> node.out(0)._1

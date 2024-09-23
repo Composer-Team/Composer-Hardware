@@ -76,7 +76,11 @@ object HarnessGenerator {
            |  end
            |
            |  initial begin
-           |  #100 reset = 0;
+           |  integer i;
+           |  for (i=0;i<100;i=i+1) begin
+           |    # `CLOCK_PERIOD
+           |  end
+           |  reset = 0;
            |  end
            |endmodule
            |

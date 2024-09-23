@@ -132,7 +132,7 @@ trait CanCompileMemories {
     val gens = (useGenerators ++ Seq(Generator.ascii)).distinct
 
     if (!os.exists(sram_base_dir)) {
-      println("main path")
+//      println("main path")
       os.makeDir.all(sram_base_dir)
       gens.map(_.toString.replace("_", "-")) foreach { gen =>
         val binPath = nPorts match {
@@ -150,7 +150,7 @@ trait CanCompileMemories {
         }
         if (!which.equals("")) {
           // do the command on remote system
-          println(s"which is '${which}'")
+//          println(s"which is '${which}'")
           val cmd = Seq(binPath,
             gen,
             "-mux", nMux.toString,
@@ -158,15 +158,16 @@ trait CanCompileMemories {
             "-words", nWords.toString,
             "-write_mask", if (useWE) "on" else "off",
             "-frequency", p(PlatformKey).clockRateMHz.toString,
-            "-instname", name
-          )
-          os.proc(cmd).call(cwd = sram_base_dir, env = Map("_JAVA_OPTIONS" -> ""))
+            "-instname", name,
+          ) ++ (if (gen.equals("synopsys")) Seq("-libname", name) else Seq())
+          os.proc(cmd).call(cwd = sram_base_dir, env = Map("_JAVA_OPTIONS" -> ""), stderr = os.Pipe)
           if (gen.equals("synopsys")) {
             os.walk(sram_base_dir).filter(_.toString().split("\\.").last.equals("lib")).foreach { pth =>
               val fname = pth.toString().split("/").last
               val bn = pth.baseName
               val remove_syn = bn.substring(0, bn.lastIndexOf("_"))
-              os.proc(Seq("lc_shell")).call(sram_base_dir, stdin = s"read_lib $fname; write_lib -format db $remove_syn; exit"
+              os.proc(Seq("lc_shell")).call(sram_base_dir, stdin = s"read_lib $fname; write_lib -format db $remove_syn; exit",
+//                stdout = os.Inherit)
               )
             }
           }
@@ -434,7 +435,9 @@ trait CanCompileMemories {
         tMem = tMem + x * y
         tPow = tPow + map("icc_p0").asInstanceOf[Float]
         tCap = tCap + nRows * nColumns / 8
+//        println(f"\nADDING $instname ($x%.2f x $y%.2f) to ASIC memory compiler")
         System.out.printf("\rTotal Mem: %.4f µm^2, Total MPow: %.4f mW, Total Capacity %.4fMB", tMem, tPow, tCap / 1024 / 1024)
+        System.out.flush()
     }
 
     () => Module(new SRAM_BBWrapper)

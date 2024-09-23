@@ -10,14 +10,12 @@ import beethoven.Parameters.IntraCoreMemoryPortInConfig.IntraCoreCommunicationDe
 import beethoven.Parameters._
 import beethoven.Protocol.RoCC._
 import beethoven.Protocol.tilelink.TLSlave.{TLSlaveBuffer, TLSlaveBufferedBroadcast, TLSlaveIdentityNode, TLSlaveNode, TLSlaveXbar, TLToTLSlave}
+import beethoven.Protocol.tilelink.TLSupportChecker
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.tilelink._
 
-import scala.annotation.tailrec
-
-
-class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameters, val systemParams: AcceleratorSystemConfig, on_deviceID: Int) extends LazyModule {
+class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameters, val systemParams: AcceleratorSystemConfig, val on_deviceID: Int) extends LazyModule {
   val system_id = p(AcceleratorSystems).indexWhere(_.name == systemParams.name)
   val memParams = systemParams.memoryChannelConfig
   val blockBytes = p(CacheBlockBytes)
@@ -46,17 +44,21 @@ class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameter
               name = s"WriteChannel_${systemParams.name}_core${core_id}_${para.name}$i",
               sourceId = IdRange(0, para.maxInFlightTxs.getOrElse(platform.defaultWriteTXConcurrency)),
               supportsPutFull = TransferSizes(blockBytes, blockBytes * platform.prefetchSourceMultiplicity),
-              supportsPutPartial = TransferSizes(blockBytes, blockBytes * platform.prefetchSourceMultiplicity),
+              //              supportsPutPartial = TransferSizes(blockBytes, blockBytes * platform.prefetchSourceMultiplicity),
               supportsProbe = TransferSizes(blockBytes, blockBytes * platform.prefetchSourceMultiplicity))))))
         })
     }
   }
+
+  writers.foreach(_.foreach(_._2.foreach(_.portParams.foreach(a => a.allSupportGet.max == 0 && a.allSupportPutFull.max > 0))))
+  readers.foreach(_.foreach(_._2.foreach(_.portParams.foreach(a => a.allSupportGet.max > 0 && a.allSupportPutFull.max == 0))))
+
   val scratch_mod = (0 until nCores).map(coreIdx => memParams.filter(_.isInstanceOf[ScratchpadConfig]).map(_.asInstanceOf[ScratchpadConfig]).map {
     param =>
       lazy val mod = LazyModuleWithFloorplan(
         param.make,
         slr_id = core2slr(coreIdx),
-        name = s"${systemParams.name}_core${coreIdx}_${param.name}")
+        name = s"${systemParams.name}_d${on_deviceID}_c${coreIdx}_${param.name}")
 
       (param, mod)
   })
@@ -89,12 +91,22 @@ class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameter
     // reduce the number of endpoints and ensure that the output is a nexus
     //   we do this because for multi-die devices, the endpoint might need to move in
     //   multiple directions (e.g., to another die, or to a physical interface)
-    extend_eles_via_protocol_node(xbar_tree_reduce_sources[TLNode](extended_readers,
-      platform.xbarMaxDegree,
-      platform.maxMemEndpointsPerCore,
+    extend_eles_via_protocol_node(
+      xbar_tree_reduce_sources[TLNode](extended_readers,
+        platform.xbarMaxDegree,
+        platform.maxMemEndpointsPerCore,
+        make_tl_xbar,
+        make_tl_buffer,
+        tl_assign,
+        buffer_depth = platform.net_intraDeviceXbarLatencyPerLayer),
       make_tl_xbar,
-      make_tl_buffer,
-      tl_assign), make_tl_xbar, tl_assign)
+      tl_assign,
+      buffer_depth = platform.net_intraDeviceXbarTopLatency).map { extended =>
+      val checkProt = TLSupportChecker(
+        (a: TLEdgeIn) => a.master.allSupportPutFull.max == 0 && a.master.allSupportGet.max > 0, "Protocol Exclusive: AS_rn_post")
+      checkProt := extended
+      checkProt
+    }
   }
 
   val writerNodes = (0 until nCores).map { coreIdx =>
@@ -102,12 +114,21 @@ class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameter
       scratch_mod(coreIdx).map(_._2.mem_writer).filter(_.isDefined).map(_.get)).flatMap { a =>
       extend_eles_via_protocol_node[TLNode](a, make_tl_buffer, tl_assign, platform.interCoreMemReductionLatency)
     }
-    extend_eles_via_protocol_node(xbar_tree_reduce_sources[TLNode](extended_writers,
-      platform.xbarMaxDegree,
-      platform.maxMemEndpointsPerCore,
+    extend_eles_via_protocol_node(
+      xbar_tree_reduce_sources[TLNode](extended_writers,
+        platform.xbarMaxDegree,
+        platform.maxMemEndpointsPerCore,
+        make_tl_xbar,
+        make_tl_buffer,
+        tl_assign,
+        buffer_depth = platform.net_intraDeviceXbarLatencyPerLayer),
       make_tl_xbar,
-      make_tl_buffer,
-      tl_assign), make_tl_xbar, tl_assign)
+      tl_assign,
+      buffer_depth = platform.net_intraDeviceXbarTopLatency).map { extended =>
+      val checkProt = TLSupportChecker((a: TLEdgeIn) => a.master.allSupportPutFull.max > 0 && a.master.allSupportGet.max == 0)
+      checkProt := extended
+      checkProt
+    }
   }
 
   val (intraCoreMemSlaveIOs, intraCoreMemSlaveNode) = {
@@ -192,17 +213,37 @@ class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameter
           supportsProbe = TransferSizes(Math.max(otherSPParams.dataWidthBits.intValue() / 8, platform.interCoreMemBusWidthBytes)),
           supportsPutFull = TransferSizes(Math.max(otherSPParams.dataWidthBits.intValue() / 8, platform.interCoreMemBusWidthBytes))
         ))))))
-      val masterShrunk = memMasters.map(TLWidthWidget(otherSPParams.dataWidthBits/8) := _)
+      val masterShrunk = memMasters.map(TLWidthWidget(otherSPParams.dataWidthBits / 8) := _)
       (mp, memMasters, masterShrunk)
   }
 
-  val Seq(r_nodes, w_nodes) = Seq(readerNodes, writerNodes).map { all_nodes =>
-    xbar_tree_reduce_sources[TLNode](all_nodes.flatten,
+  val Seq(r_nodes, w_nodes) = Seq(
+    (readerNodes, "r"),
+    (writerNodes, "w")).map { case (nodes, ty) =>
+    val nodesPost = nodes.flatten.map { node =>
+      val checkProt = TLSupportChecker(a => ty match {
+        case "r" => a.master.allSupportGet.max > 0 && a.master.allSupportPutFull.max == 0
+        case "w" => a.master.allSupportGet.max == 0 && a.master.allSupportPutFull.max > 0
+      }, f"Protocol Exclusive: AS${ty}_pre")
+      checkProt := node
+      checkProt
+    }
+    xbar_tree_reduce_sources[TLNode](nodesPost,
       platform.xbarMaxDegree,
       platform.maxMemEndpointsPerSystem,
       make_tl_xbar,
       make_tl_buffer,
-      tl_assign)
+      tl_assign,
+      buffer_depth = platform.net_intraDeviceXbarLatencyPerLayer
+    ).map { sys_reduce =>
+      val checkProt = TLSupportChecker((a: TLEdgeIn) =>
+        ty match {
+          case "r" => a.master.allSupportPutFull.max == 0 && a.master.allSupportGet.max > 0
+          case "w" => a.master.allSupportPutFull.max > 0 && a.master.allSupportGet.max == 0
+        }, f"Protocol Exclusive: AS${ty}")
+      checkProt := sys_reduce
+      checkProt
+    }
   }
 
   lazy val module = new AcceleratorSystemImp(this)

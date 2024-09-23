@@ -12,7 +12,7 @@ import freechips.rocketchip.util._
 class TLSourceShrinkerDynamicBlocking(maxNIDs: Int)(implicit p: Parameters) extends LazyModule {
   require(maxNIDs > 0)
 
-  private def noShrinkRequired(client: TLClientPortParameters) = maxNIDs >= client.endSourceId
+  private def noShrinkRequired(client: TLClientPortParameters): Boolean = maxNIDs >= client.endSourceId
 
   // The SourceShrinker completely destroys all FIFO property guarantees
   private val client = TLMasterParameters.v1(
@@ -21,17 +21,26 @@ class TLSourceShrinkerDynamicBlocking(maxNIDs: Int)(implicit p: Parameters) exte
   val node = new TLAdapterNode(
     clientFn = { cp =>
       if (noShrinkRequired(cp)) {
+        println(s"no shrink: ${cp.allSupportPutFull} ${cp.allSupportGet}")
         cp
       } else {
+        println(s"shrink pre: ${cp.allSupportPutFull} ${cp.allSupportGet}")
         // We erase all client information since we crush the source Ids
-        TLMasterPortParameters.v1(
-          clients = Seq(client.v1copy(requestFifo = cp.clients.exists(_.requestFifo))),
+        val q = TLMasterPortParameters.v1(
+          clients = Seq(client.v1copy(
+            requestFifo = cp.clients.exists(_.requestFifo),
+            supportsGet = cp.allSupportGet,
+            supportsPutFull = cp.allSupportPutFull,
+            supportsProbe = cp.allSupportProbe)),
           echoFields = cp.echoFields,
           requestFields = cp.requestFields,
           responseKeys = cp.responseKeys)
-      }
-    },
-    managerFn = { mp => mp.v1copy(managers = mp.managers.map(m => m.v1copy(fifoId = if (maxNIDs == 1) Some(0) else m.fifoId)))
+        println(s"shrink post: ${q.allSupportPutFull} ${q.allSupportGet}")
+        q
+      }},
+    managerFn = { mp => mp.v1copy(managers =
+      mp.managers.map(m =>
+        m.v1copy(fifoId = if (maxNIDs == 1) Some(0) else m.fifoId)))
     }) {
     override def circuitIdentity = edges.in.map(_.client).forall(noShrinkRequired)
   }

@@ -9,6 +9,12 @@ object ResetBridge {
     bridge.io.reset <> dut
     bridge.io.dut_reset
   }
+  def apply[T <: Reset](dut: T, clock: Clock, bridgeDelay: Int): T = {
+    val bridge = Module(new ResetBridge(dut, bridgeDelay))
+    bridge.io.reset <> dut
+    bridge.io.clock := clock
+    bridge.io.dut_reset
+  }
 }
 
 class ResetBridge[T <: Reset](dut: T, bridgeDelay: Int) extends RawModule {
