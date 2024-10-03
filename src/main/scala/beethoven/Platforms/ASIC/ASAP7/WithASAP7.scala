@@ -1,4 +1,9 @@
-//package beethoven.Platforms.ASIC.ASAP7
+/**
+ * The support for libraries with limited numbers of cells has improved. I just have to
+ * integrate it into the ASAP7 platform. Haven't had a bunch of time in a while
+ */
+//
+// package beethoven.Platforms.ASIC.ASAP7
 //
 //import chipsalliance.rocketchip.config.{Config, Parameters}
 //import chisel3._

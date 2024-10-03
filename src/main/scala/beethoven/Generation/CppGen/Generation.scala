@@ -72,22 +72,19 @@ object Generation {
       }
       def getUnsignedCIntType(width: Int): String = "u" + getSignedCIntType(width)
       val addrWid = log2Up(platform.extMem.master.size)
-      val frontBusWidth = CLog2Up(platform.frontBusAddressMask | platform.frontBusBaseAddress)
-
       (
         s"""
            |static const uint64_t addrMask = 0x${addrSet.mask.toLong.toHexString};
            |""".stripMargin
         , if (platform.isInstanceOf[PlatformHasSeparateDMA] && p(BuildModeKey) != Simulation) "#define BEETHOVEN_HAS_DMA" else "", {
         if (platform.memoryNChannels > 0 && top.AXI_MEM.isDefined) {
-          val strobeDtype = getVerilatorDtype(platform.extMem.master.beatBytes)
-
           val idDtype = getVerilatorDtype(top.AXI_MEM.get(0).in(0)._1.ar.bits.id.getWidth)
           f"""
              |#ifdef SIM
+             |${if (platform.extMem.master.beatBytes < 8) "#define SIM_SMALL_MEM" else ""}
              |#ifdef VERILATOR_VERSION
              |#include <verilated.h>
-             |using BeethovenFrontBusAddr_t = ${getUnsignedCIntType(frontBusWidth)};
+             |using BeethovenFrontBusAddr_t = ${getUnsignedCIntType(platform.frontBusAddressNBits)};
              |using BeethovenMemIDDtype=$idDtype;
              |#endif
              |#define DEFAULT_PL_CLOCK ${platform.clockRateMHz}
@@ -100,7 +97,7 @@ object Generation {
              |#ifdef SIM
              |#ifdef VERILATOR
              |#include <verilated.h>
-             |using BeethovenFrontBusAddr_t = ${getUnsignedCIntType(frontBusWidth)};
+             |using BeethovenFrontBusAddr_t = ${getUnsignedCIntType(platform.frontBusAddressNBits)};
              |#endif
              |#endif
              |

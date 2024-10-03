@@ -1,18 +1,17 @@
-package beethoven.Platforms.ASIC
+package beethoven.Platforms.ASIC.memoryCompiler
 
-import beethoven.Generation.{BeethovenBuild, BuildMode}
 import chipsalliance.rocketchip.config
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config.{Config, Field, Parameters}
 import chisel3._
 import chisel3.experimental.BaseModule
 import chisel3.util._
 import beethoven.MemoryStreams.RAM.SyncReadMemMem
 import beethoven.MemoryStreams._
-import beethoven.Platforms.ASIC.ProcessCorner.ProcessCorner
-import beethoven.Platforms.ASIC.ProcessTemp.ProcessTemp
-import beethoven.Platforms.ASIC.memoryCompiler.CanCompileMemories
+import beethoven.Platforms.ASIC.memoryCompiler.MemoryCompiler._
+import beethoven.Platforms.ASIC.memoryCompiler.MemoryCompilerDeliverable.{Datasheet, MemoryCompilerDeliverable}
 import beethoven.Platforms._
 import beethoven.common.{CLog2Up, ShiftReg}
+import beethoven.platform
 import os.Path
 
 import scala.annotation.tailrec
@@ -26,88 +25,149 @@ import scala.annotation.tailrec
 trait SupportsWriteEnable {
   def getWESRAMArray(suggestedRows: Int, suggestedColumns: Int, nPort: Int, latency: Int)(implicit p: Parameters): Option[SRAMArray]
 
-  def generateMemoryFactory(nPorts: Int, nRows: Int, nColumns: Int, withWE: Boolean)(implicit p: config.Parameters): () => BaseModule with HasMemoryInterface
+  def generateMemoryFactory(sc: sramChar_t, withWE: Boolean)(implicit p: config.Parameters): () => BaseModule with HasMemoryInterface
 
-  def generateMemoryFactory(nPorts: Int, nRows: Int, nColumns: Int)(implicit p: config.Parameters): () => BaseModule with HasMemoryInterface =
-    generateMemoryFactory(nPorts, nRows, nColumns, withWE = false)
+  def generateMemoryFactory(sc: sramChar_t)(implicit p: config.Parameters): () => BaseModule with HasMemoryInterface =
+    generateMemoryFactory(sc, withWE = false)
 
 }
 
+
+object MemoryCompilerDeliverable extends Enumeration {
+  val Datasheet, GDS, VERILOG, LEF, LIB, MILKYWAY, LVS = Value
+  type MemoryCompilerDeliverable = Value
+}
 
 /**
  * The linkage of this memory compiler is to a static list of memories that we don't expect to have datasheets
  * or much of anything besides just the cell libs. Provide just the
  */
-trait CannotCompileMemories extends CanCompileMemories {
-  val availableMems: Map[Int, Seq[SD]]
-
-  override def getSRAMArray(suggestedRows: Int,
-                            suggestedColumns: Int,
-                            nPorts: Int,
-                            latency: Int)(implicit p: Parameters): Option[SRAMArray] = {
-    // first figure out how deep we have to cascade.
-    availableMems.get(nPorts) match {
-      case Some(memSet) =>
-        val maxRows = memSet.map(_.nRows).max
-        require(latency * maxRows >= suggestedRows,
-          f"Unable to build a $suggestedRows deep memory in $latency cycles. ${(suggestedRows.toFloat / maxRows).ceil.toInt} cycles needed.")
-        // find the minimum depth that will make us able to build the cascade
-        val chosenDepth = memSet.map(_.nRows).filter(depth => depth * latency >= suggestedRows).min
-        // get the widest memory with the selected depth
-
-        /**
-         * Sieve of eratosthenes-ish except record shortest sequence to get to a certain width given the basis
-         */
-        @tailrec
-        def sieve(lim: Int, numberChoices: List[Int], originators: Map[Int, List[Int]]):
-        Map[Int, List[Int]] = {
-          def get_add_list(): Map[Int, List[Int]] = {
-            if (numberChoices.isEmpty) return Map.empty
-            val inc = numberChoices.head
-            val addList = originators.map(o => (o._1 + inc, inc :: o._2))
-            val filter = addList.filter { kv =>
-              if (kv._1 > lim) false
-              else if (!originators.contains(kv._1)) true
-              else {
-                val other = originators(kv._1)
-                if (other.length > kv._2.length) true
-                else false
-              }
-            }
-            filter
-          }
-
-          val AL = get_add_list()
-          if (AL.isEmpty) {
-            if (numberChoices.isEmpty) originators
-            else sieve(lim, numberChoices.tail, originators)
-          } else {
-            sieve(lim, numberChoices, originators.removedAll(AL.keys) ++ AL)
-          }
-        }
-
-        val max_width = 1 << log2Up(suggestedColumns)
-        val basis = memSet.map(_.dWidth).distinct.toList
-        val sieveRes = sieve(max_width, basis,
-          Map.from(basis.map(p => (p, List(p)))))
-        val chosenWidth = sieveRes.filter(p => p._1 >= suggestedColumns).toList.minBy(_._1)
-        val row = chosenWidth._2.map((chosenDepth, _))
-        Some(SRAMArray(List.fill(chosenWidth._2.length)(List.fill(1)(row))))
-      case None =>
-        // The memory compiler doesn't support SRAMs with the require portage - fail immediately
-        None
-    }
-  }
-}
-
 abstract class MemoryCompiler {
-  val supportedCorners: Seq[(ProcessCorner, ProcessTemp)]
 
   val mostPortsSupported: Int
 
   val isActiveHighSignals: Boolean
 
-  def generateMemoryFactory(nPorts: Int, nRows: Int, nColumns: Int)(implicit p: Parameters): () => BaseModule with HasMemoryInterface
+  def generateMemoryFactory(char_t: sramChar_t)(implicit p: Parameters): () => BaseModule with HasMemoryInterface
+
+  def isLegalConfiguration(char_t: sramChar_t): Boolean
+
+  val sramTimingPessimism_ns = 0.05
+
+  val supports_onlyPow2: Boolean
+
+  val supportedCorners: Seq[String]
+
+  var worst_corners_found: Seq[String] = Seq.empty
+
+  val datasheet_timing_key: String
+  val datasheet_geomx_key: String
+  val datasheet_geomy_key: String
+  val datasheet_power_key: String
+
+  val deliverablesSupported: Seq[MemoryCompilerDeliverable]
+
+  /** From a behavioral perspective, all we need is an array of N rows by M columns
+   * However, SRAM compilers allow a lot of freedom (ECC, EMA, banking, muxing, etc...) that provide the same _function_
+   * but with different PPA. In general, we can't know what all the things that the memory compiler is going to ask,
+   * so the user should define this function that enumerates as many configurations for that cell as the user wants
+   *
+   * The plan will be to find the configuration among these that meets timing AND minimizes area (and therefore probably power)
+   * */
+  def getFeasibleConfigurations(rows: Int, cols: Int, ports: Int, withWriteEnable: Boolean): Seq[sramChar_t]
+
+  def getDeliverable(sc: sramChar_t, deliverable: MemoryCompilerDeliverable)(implicit p: Parameters): sramChar_t
+
+  def collateDeliverables(sc: sramChar_t, deliverables: Seq[MemoryCompilerDeliverable])(implicit p: Parameters): sramChar_t = {
+    if (!isLegalConfiguration(sc)) {
+      throw new Exception("Illegal configuration")
+    }
+    // always generate the wdatasheet
+    val gens = (deliverables ++ Seq(MemoryCompilerDeliverable.Datasheet)).distinct
+
+    val outputs = gens.map{g =>
+      val dl = getDeliverable(sc, g)
+      dl
+    }.reduce(_ ++ _)
+
+    val worstCorner = outputs(SRAMDatasheetPaths).map { dpath =>
+      val chars = getSRAMCharacteristics(dpath)
+      (dpath, chars(datasheet_timing_key), chars(datasheet_geomx_key) * chars(datasheet_geomy_key), chars(datasheet_power_key))
+    }.maxBy(_._2)
+
+    supportedCorners.filter(a => worstCorner._1.last.contains(a)).foreach { a =>
+      worst_corners_found = (worst_corners_found :+ a).distinct
+    }
+    println("CRITICAL CORNERS: " + worst_corners_found.mkString(", "))
+
+    sc ++ outputs ++ Parameters((_, _, _) => {
+      case SRAMArea => worstCorner._3
+      case SRAMPower => worstCorner._4
+      case SRAMCycleTime => worstCorner._2
+    })
+  }
+  def getMemoryCascadeOpt(suggestedRows: Int,
+                          suggestedColumns: Int,
+                          nPorts: Int,
+                          latency: Int,
+                          withWE: Boolean)(implicit p: Parameters): Option[SRAMArray] = {
+    if (latency < 1) return None
+
+    // (latency-1)*x + y >= suggestedRows & x,y are powers of two
+    val (rx, ry) = {
+      if (latency == 1) {
+        if (supports_onlyPow2) {
+          (1 << CLog2Up((suggestedRows.toFloat / latency).ceil.toInt), -1)
+        } else
+          (suggestedRows, -1)
+      } else {
+        val x = 1 << CLog2Up((suggestedRows.toFloat / latency).ceil.toInt)
+        val y = if (supports_onlyPow2) 1 << CLog2Up(suggestedRows - x * (latency-1)) else suggestedRows - x * (latency-1)
+        (x, y)
+      }
+    }
+    val rs = Seq(rx, ry).filter(_ > 0).distinct
+
+    val (wx, wy) = {
+      if (suggestedColumns <= 128) {
+        (suggestedColumns, -1)
+      } else {
+        (128, suggestedColumns % 128)
+      }
+    }
+
+    val ws = Seq(wx, wy).filter(_ > 0).distinct
+
+    val combos = rs.flatMap(a => ws.map(b => (a, b))).distinct
+
+    val combos_eval = combos.map{case (qr, qc) =>
+      val feasible = getFeasibleConfigurations(qr, qc, nPorts, withWE)
+      val maxTcyc = (1000.0 / platform.clockRateMHz) - sramTimingPessimism_ns
+      val evaled = feasible.map(a => (a, collateDeliverables(a, Seq(Datasheet))))
+      val validConfigs = evaled.filter(a => a._2(SRAMCycleTime) < maxTcyc)
+      if (validConfigs.isEmpty) {
+        System.err.println(f"Failed to find valid configuration for $qr x $qc, timing_req: $maxTcyc, ${evaled.map(_._2(SRAMCycleTime))}")
+        return None
+      }
+      val bestValid = evaled.minBy(_._2(SRAMArea))._2
+      ((qr, qc), bestValid)
+    }
+
+    Some(SRAMArray(List.tabulate(latency){l => List(List.tabulate((suggestedColumns.toFloat/128).ceil.toInt){c =>
+      val csum = (c+1) * 128
+      val usum = c * 128
+      // if suggested columns is higher than csum, then 128w is implied
+      // if suggested columns is lower, then this is the last column and we should be suggestedColumns - usum oclumsn wide
+
+      val w = if (suggestedColumns >= csum) 128
+      else suggestedColumns - usum
+
+      val r = if (l == latency-1 && l != 0) ry else rx
+      def eq_pr(a: (Int, Int), b: (Int, Int)): Boolean = a._1 == b._1 && a._2 == b._2
+      combos_eval.find(a => eq_pr(a._1, (r, w))).get._2
+    })}))
+  }
+
 }
 
 
@@ -120,15 +180,68 @@ private class C_ASIC_MemoryCascade(rows: Int,
   val totalAddr = log2Up(rows) + cascadeBits
   val io = IO(new MemoryIOBundle(0, 0, nPorts, totalAddr, dataBits, withWE) with withMemoryIOForwarding)
   val mc = p(PlatformKey).asInstanceOf[Platform with HasMemoryCompiler].memoryCompiler
-
 }
+object SRAMRows extends Field[Int]
+
+object SRAMColumns extends Field[Int]
+
+object SRAMPorts extends Field[Int]
+
+object SRAMWriteEnable extends Field[Boolean]
+
+object SRAMGDSPaths extends Field[Seq[os.Path]]
+
+object SRAMVerilogPaths extends Field[Seq[os.Path]]
+
+object SRAMLEFPaths extends Field[Seq[os.Path]]
+
+object SRAMLibPaths extends Field[Seq[os.Path]]
+
+object SRAMDatasheetPaths extends Field[Seq[os.Path]]
+
+object SRAMLVSPaths extends Field[Seq[os.Path]]
+
+object SRAMPower extends Field[Float]
+
+object SRAMArea extends Field[Float]
+
+object SRAMCycleTime extends Field[Float]
 
 object MemoryCompiler {
-  var libs: Map[(ProcessCorner, ProcessTemp), Seq[Path]] = Map.empty
+  var libs: Seq[Path] = Seq.empty
   var gds2: Seq[Path] = Seq.empty
+  var lefs: Seq[Path] = Seq.empty
   var sram_paths: List[Path] = List.empty
 
-  def mc(implicit p: Parameters) = p(PlatformKey).asInstanceOf[Platform with HasMemoryCompiler].memoryCompiler.asInstanceOf[MemoryCompiler with CanCompileMemories]
+
+  // sram characteristics (nRows, nCols, nBanks, etc...)
+  type sramChar_t = Parameters
+
+
+  def getSRAMCharacteristics(asciiDatatable: Path): Map[String, Float] = {
+    val lines = os.read(asciiDatatable).split("\n")
+    def myFilter(a: String): Boolean = {
+      if (a.isEmpty) false
+      else if (a(0) == '#') false
+      else {
+        val q = a.split("\\s+")
+        if (q.length < 2) false
+        else q(1).toFloatOption.isDefined
+      }
+    }
+
+    Map.from[String, Float](lines.filter(myFilter)
+      map { ln: String =>
+      val members = ln.split("\\s+")
+      val name: String = members(0)
+      val f: Float = members(1).toFloat
+      val q: (String, Float) = (name, f)
+      q
+    })
+  }
+
+
+  def mc(implicit p: Parameters) = p(PlatformKey).asInstanceOf[Platform with HasMemoryCompiler].memoryCompiler
 
   /**
    * Build a large SRAM structure from the provided SRAM cells in the library. This function is expected to be
@@ -150,7 +263,10 @@ object MemoryCompiler {
         mc.asInstanceOf[MemoryCompiler with SupportsWriteEnable].getWESRAMArray(
           nRows, dataWidth, nPorts, latency).map(a => (a, a.characteristics("area").asInstanceOf[Float]))
       else
-        mc.getSRAMArray(nRows, dataWidth, nPorts, latency).map(a => (a, a.characteristics("area").asInstanceOf[Float]))
+        mc.getMemoryCascadeOpt(nRows, dataWidth, nPorts, latency, withWE).map { q =>
+          (q, q.array.flatten.flatten.map(s => s(SRAMArea)).sum)
+        }
+//          .map(a => (a, a.characteristics("area").asInstanceOf[Float]))
     }
 
     def rn[T <: Data](x: T): T = {
@@ -161,16 +277,16 @@ object MemoryCompiler {
       r
     }
 
-    val memOpts = Seq((Latency-2, (x: Data) => rn(x), (x: Data) => rn(x)),
-      (Latency-1, (x: Data) => x, (x: Data) => rn(x)),
-      (Latency-0, (x: Data) => x, (x: Data) => x)).flatMap {
+    val memOpts = Seq((Latency - 2, (x: Data) => rn(x), (x: Data) => rn(x)),
+      (Latency - 1, (x: Data) => x, (x: Data) => rn(x)),
+      (Latency - 0, (x: Data) => x, (x: Data) => x)).flatMap {
       case (lat, pre, post) =>
         works(lat).map((_, pre, post))
     }
     if (memOpts.isEmpty) {
       if (allowFallBack) {
-//        beethoven.Generation.CLogger.log(s"Failed to find suitable SRAM configuration for ${nPorts}x${nRows}x${dataWidth} at L=${Latency}" +
-//          s" Falling back to Register-based memory")
+        //        beethoven.Generation.CLogger.log(s"Failed to find suitable SRAM configuration for ${nPorts}x${nRows}x${dataWidth} at L=${Latency}" +
+        //          s" Falling back to Register-based memory")
         val mem = Module(new SyncReadMemMem(0, 0, nPorts, nRows, dataWidth, Latency))
         mem.mio.clock := io.clock
         mem.suggestName(s"mem_${nRows}x${dataWidth}x${nPorts}_l${Latency}")
@@ -188,9 +304,7 @@ object MemoryCompiler {
         throw new Exception(s"Failed to find suitable SRAM configuration for ${nPorts}x${nRows}x${dataWidth} at L=${Latency}")
       }
     }
-    val ((mem, area), pre, post) = memOpts.minBy(_._1._2)
-    var addr_bits_acc = 0
-
+    val ((mem, _), _, _) = memOpts.minBy(_._1._2)
 
     withClockAndReset(io.clock.asClock, false.B.asAsyncReset) {
       @tailrec
@@ -207,13 +321,13 @@ object MemoryCompiler {
       val we_shift = io.write_enable.map { we => scan_shift(we, mem.array.length) }
       val re_shift = io.read_enable.map { re => scan_shift(re, mem.array.length) }
       val data_shifts = io.data_in.map { data => scan_shift(data, mem.array.length) }
-      val data_stages = Seq.fill(nPorts)(Seq.fill(mem.array.length-1)(Reg(UInt(dataWidth.W))))
+      val data_stages = Seq.fill(nPorts)(Seq.fill(mem.array.length - 1)(Reg(UInt(dataWidth.W))))
       val data_out_wires = Seq.fill(nPorts)(Seq.fill(mem.array.length)(Wire(UInt(dataWidth.W))))
 
 
       val l_bits = CLog2Up(mem.array.length)
       val m_bits = CLog2Up(mem.array.head.length)
-//      val mem_bits = CLog2Up(mem.array.head.head.head._1)
+      //      val mem_bits = CLog2Up(mem.array.head.head.head._1)
 
       def fixActive(a: UInt): UInt = {
         if (mc.isActiveHighSignals) a else (~a).asUInt
@@ -242,11 +356,12 @@ object MemoryCompiler {
             }
           }
           val lm_hit = l_hit.zip(m_hit).map { case (l, m) => l && m }
-          val sramMacroRowOuts: List[List[UInt]] = bankArray.zipWithIndex.map { case ((rows, cols), s_idx: Int) =>
-            val d_off = (0 until s_idx).map(bankArray(_)._2).sum
+          val sramMacroRowOuts: List[List[UInt]] = bankArray.zipWithIndex.map { case (sd, s_idx: Int) =>
+            val cols = sd(SRAMColumns)
+            val d_off = (0 until s_idx).map(bankArray(_)(SRAMColumns)).sum
             val mem =
-              if (withWE) mc.asInstanceOf[SupportsWriteEnable].generateMemoryFactory(nPorts, rows, cols, withWE)(p)()
-              else mc.generateMemoryFactory(nPorts, rows, cols)(p)()
+              if (withWE) mc.asInstanceOf[SupportsWriteEnable].generateMemoryFactory(sd, withWE)(p)()
+              else mc.generateMemoryFactory(sd)(p)()
             mem.clocks.foreach(_ := io.clock)
             ((0 until nPorts) map { port_idx =>
               mem.data_in(port_idx) := data_shifts(port_idx)(l_idx)(d_off + cols - 1, d_off)
@@ -259,7 +374,6 @@ object MemoryCompiler {
                 if (l_idx == 0) 0.U(cols.W) else data_stages(port_idx)(l_idx - 1))
             }).toList
           }
-          // sramMacroRowOuts[bank][port]
           val portCats = (0 until nPorts).map { port_idx =>
             Cat(sramMacroRowOuts.map(a => a(port_idx)).reverse)
           }
@@ -269,4 +383,10 @@ object MemoryCompiler {
       io.data_out.zip(data_out_wires).foreach { case (d, w) => d := w.last }
     }
   }
+}
+
+object GMem {
+  var tMem: Double = 0.0
+  var tPow: Double = 0.0
+  var tCap: Double = 0
 }

@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import beethoven.Systems.DataChannelIO
 import beethoven.common.{CLog2Up, ShiftReg}
-import beethoven.Generation._
+import beethoven.MemoryStreams.RAM.SyncReadMemMem
 import beethoven.Platforms._
 import beethoven.platform
 import freechips.rocketchip.tilelink._
@@ -33,6 +33,7 @@ class SequentialReader(val dWidth: Int,
   val prefetchRows = Math.max(
     nSources * platform.prefetchSourceMultiplicity,
     minSizeBytes.getOrElse(0) / beatBytes)
+  val useRegMem = prefetchRows < 32
   val rowsAvailableToAlloc = RegInit(prefetchRows.U(log2Up(prefetchRows+1).W))
   require(isPow2(maxBytes))
 
@@ -94,12 +95,16 @@ class SequentialReader(val dWidth: Int,
 
   val prefetch_blatency = platform.platformType match {
     case PlatformType.FPGA => 3
-    case PlatformType.ASIC => (prefetchRows.toFloat / 256).ceil.toInt + 2
+    case PlatformType.ASIC => (prefetchRows.toFloat / 512).ceil.toInt
   }
 
   val hasDualPortMemory = platform.platformType match {
     case PlatformType.FPGA => true
-    case PlatformType.ASIC => platform.asInstanceOf[HasMemoryCompiler].memoryCompiler.mostPortsSupported >= 2
+    case PlatformType.ASIC =>
+      platform match {
+        case compiler: HasMemoryCompiler => useRegMem || compiler.memoryCompiler.mostPortsSupported >= 2
+        case _ => true // register mems
+      }
   }
 
   if (!hasDualPortMemory && !SequentialReader.has_warned_dp) {
@@ -116,7 +121,11 @@ class SequentialReader(val dWidth: Int,
   val nRead = if (hasDualPortMemory) 1 else 0
   val nWrite = if (hasDualPortMemory) 1 else 0
   val nRW = if (hasDualPortMemory) 0 else 1
-  val prefetch_buffers = Memory(prefetch_blatency, storedDataWidth, prefetchRows, nRead, nWrite, nRW)
+  val prefetch_buffers = if (useRegMem) {
+    Module(new SyncReadMemMem(0, 0, 2, prefetchRows, storedDataWidth, prefetch_blatency)).mio
+  } else {
+    Memory(prefetch_blatency, storedDataWidth, prefetchRows, nRead, nWrite, nRW)
+  }
 
   val (write_ready, read_ready, write_port_idx, read_port_idx) = if (hasDualPortMemory) {
     prefetch_buffers.clock := clock.asBool

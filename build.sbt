@@ -12,7 +12,7 @@ lazy val beethoven =(project in file(".")).settings(
     "edu.duke.cs.apex" %% "rocketchip-rocketchip-fork" % "0.1.11",
     "org.scalatra.scalate" %% "scalate-core" % "1.9.6",
     "org.slf4j" % "slf4j-api" % "2.0.9",
-    "org.slf4j" % "slf4j-nop" % "2.0.9",
+//    "org.slf4j" % "slf4j-nop" % "2.0.9",
     "edu.berkeley.cs" %% "chiseltest" % "0.5.2"
   ),
   resolvers += ("reposilite-repository-releases" at "http://oak:8080/releases").withAllowInsecureProtocol(true),

@@ -5,7 +5,8 @@ import chisel3._
 import chisel3.util._
 import beethoven.Generation.BuildMode
 import beethoven.MemoryStreams.RAM.SyncReadMemMem
-import beethoven.Platforms.ASIC.{MemoryCompiler, SupportsWriteEnable}
+import beethoven.Platforms.ASIC.memoryCompiler.MemoryCompiler.sramChar_t
+import beethoven.Platforms.ASIC.memoryCompiler.{MemoryCompiler, SupportsWriteEnable}
 import beethoven.Platforms.FPGA.Xilinx.Templates.{BRAMSDP, BRAMTDP}
 import beethoven.Platforms._
 import beethoven.common.ShiftReg
@@ -372,9 +373,8 @@ trait HasMemoryInterface {
   def clocks: Seq[Bool]
 }
 
-case class SD(dWidth: Int, nRows: Int)
 
-case class SRAMArray(array: List[List[List[(Int, Int)]]], characteristics: Map[String, Any] = Map.empty)
+case class SRAMArray(array: List[List[List[sramChar_t]]], characteristics: Map[String, Any] = Map.empty)
 
 /**
  * ALL LOGIC IMPLEMENTED HERE MUST BE ACTIVE LOW

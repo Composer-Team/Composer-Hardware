@@ -2,7 +2,8 @@ package beethoven.Platforms
 
 import chipsalliance.rocketchip.config._
 import beethoven.Generation.BuildMode
-import beethoven.Platforms.ASIC.{MemoryCompiler, TechLib}
+import beethoven.Platforms.ASIC.TechLib
+import beethoven.Platforms.ASIC.memoryCompiler.MemoryCompiler
 import beethoven.Platforms.PlatformType.PlatformType
 import beethoven.Protocol.FrontBus.FrontBusProtocol
 import freechips.rocketchip.subsystem.{MasterPortParams, MemoryPortParams}
@@ -162,7 +163,7 @@ trait PlatformHasSeparateDMA {
 }
 
 trait HasPostProccessorScript {
-  def postProcessorMacro(c: Config, paths: Seq[Path]): Unit = ???
+  def postProcessorMacro(c: Config, paths: Seq[Path]): Unit
 }
 
 trait HasTechLib {

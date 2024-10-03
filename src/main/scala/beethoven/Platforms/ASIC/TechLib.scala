@@ -1,5 +1,6 @@
 package beethoven.Platforms.ASIC
 
+import beethoven.Platforms.ASIC.memoryCompiler.MemoryCompiler
 import beethoven.Platforms.HasPostProccessorScript
 
 abstract class TechLib extends HasPostProccessorScript {
