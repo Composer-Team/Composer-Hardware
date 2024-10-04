@@ -18,12 +18,13 @@ import freechips.rocketchip.tilelink._
 class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameters, val systemParams: AcceleratorSystemConfig, val on_deviceID: Int) extends LazyModule {
   val system_id = p(AcceleratorSystems).indexWhere(_.name == systemParams.name)
   val memParams = systemParams.memoryChannelConfig
-  val blockBytes = p(CacheBlockBytes)
   implicit val baseName = systemParams.name
   val readers = (0 until nCores) map { core_id =>
     memParams.filter(_.isInstanceOf[ReadChannelConfig]).map { para =>
       val param: ReadChannelConfig = para.asInstanceOf[ReadChannelConfig]
       (param, List.tabulate(para.nChannels) { i =>
+        val blockBytes = platform.extMem.master.beatBytes
+        println(s"Read should be [${blockBytes}, ${blockBytes * platform.prefetchSourceMultiplicity}]")
         TLClientNode(List(TLMasterPortParameters.v1(
           clients = List(TLMasterParameters.v1(
             name = s"ReadChannel_d${on_deviceID}_${systemParams.name}_core${core_id}_${para.name}$i",
@@ -39,6 +40,7 @@ class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameter
       val para = mcp.asInstanceOf[WriteChannelConfig]
       (para,
         List.tabulate(para.nChannels) { i =>
+          val blockBytes = platform.extMem.master.beatBytes
           TLClientNode(List(TLMasterPortParameters.v1(
             List(TLMasterParameters.v1(
               name = s"WriteChannel_${systemParams.name}_core${core_id}_${para.name}$i",
@@ -91,8 +93,15 @@ class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameter
     // reduce the number of endpoints and ensure that the output is a nexus
     //   we do this because for multi-die devices, the endpoint might need to move in
     //   multiple directions (e.g., to another die, or to a physical interface)
+    println("N readers: " + extended_readers.length)
     extend_eles_via_protocol_node(
-      xbar_tree_reduce_sources[TLNode](extended_readers,
+      xbar_tree_reduce_sources[TLNode](
+        extended_readers.map {er =>
+          val checkProt = TLSupportChecker(
+            (a: TLEdgeIn) => a.master.allSupportPutFull.max == 0 && a.master.allSupportGet.max > 0, "Protocol Exclusive: AS_rn_pre")
+          checkProt := er
+          checkProt
+        },
         platform.xbarMaxDegree,
         platform.maxMemEndpointsPerCore,
         make_tl_xbar,
