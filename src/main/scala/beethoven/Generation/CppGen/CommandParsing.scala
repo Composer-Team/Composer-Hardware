@@ -10,13 +10,16 @@ import beethoven.Generation.CppGeneration.HookDef
 import scala.annotation.tailrec
 
 object CommandParsing {
+  var has_done_bool_previously = false
+
   def customCommandToCpp(hookDef: HookDef)(implicit p: Parameters): (String, String) = {
     val HookDef(sysName, cc, resp, opCode) = hookDef
     val sub_signature = cc.realElements.sortBy(_._1).map { pa =>
       getCType(cc.elements(pa._1), pa._1) + " " + pa._1
     }
-    val signature = if (sub_signature.isEmpty) "" else { ", " +
-      sub_signature.reduce(_ + ", " + _)
+    val signature = if (sub_signature.isEmpty) "" else {
+      ", " +
+        sub_signature.reduce(_ + ", " + _)
     }
 
     def intToHexFlag(a: Long): String = {
@@ -90,58 +93,67 @@ object CommandParsing {
       f"  payloads[$payloadIdx] = $pl;";
     }
 
-      ResponseParsing.getResponseDeclaration(resp, sysName) match {
-        case None =>
-          val declaration = f"""
+    ResponseParsing.getResponseDeclaration(resp, sysName) match {
+      case None =>
+        val declaration =
+          f"""
              |namespace $sysName {
              |  void ${hookDef.cc.commandName}(uint16_t core_id$signature);
              |}
              |""".stripMargin
-          val definition =
+        val definition =
+          f"""
+             |void $sysName::${hookDef.cc.commandName}(uint16_t core_id$signature) {
+             |#ifndef BAREMETAL
+             |  assert(core_id < ${p(AcceleratorSystems).filter(_.name == sysName)(0).nCores});
+             |#endif
+             |  uint64_t payloads[${Math.max(numCommands * 2, 2)}];
+             |""".stripMargin + (if (assignments.length == 1) assignments(0) + "\n" else assignments.fold("")(_ + "\n" + _)) +
             f"""
-               |void $sysName::${hookDef.cc.commandName}(uint16_t core_id$signature) {
-               |#ifndef BAREMETAL
-               |  assert(core_id < ${p(AcceleratorSystems).filter(_.name == sysName)(0).nCores});
-               |#endif
-               |  uint64_t payloads[${Math.max(numCommands * 2, 2)}];
-               |""".stripMargin +(if (assignments.length == 1) assignments(0) + "\n" else assignments.fold("")(_ + "\n" + _)) +
-              f"""
-                 |  for (int i = 0; i < ${numCommands - 1}; ++i) {
-                 |    beethoven::rocc_cmd::start_cmd(${sysName}_ID, false, 0, false, false, core_id, payloads[i*2+1], payloads[i*2], $opCode).send();
-                 |  }
-                 |  beethoven::rocc_cmd::start_cmd(${sysName}_ID, false, 0, false, false, core_id, payloads[${(numCommands - 1) * 2 + 1}], payloads[${(numCommands - 1) * 2}], $opCode).send();
-                 |}""".stripMargin
-          (declaration, definition)
-        case Some(responseInfo) =>
-          val typeConversion = if (responseInfo.name.equals("beethoven::rocc_response")) "" else f".to<${responseInfo.name}>()";
+               |  for (int i = 0; i < ${numCommands - 1}; ++i) {
+               |    beethoven::rocc_cmd::start_cmd(${sysName}_ID, false, 0, false, false, core_id, payloads[i*2+1], payloads[i*2], $opCode).send();
+               |  }
+               |  beethoven::rocc_cmd::start_cmd(${sysName}_ID, false, 0, false, false, core_id, payloads[${Math.max((numCommands - 1) * 2, 0) + 1}], payloads[${Math.max((numCommands - 1) * 2, 0)}], $opCode).send();
+               |}""".stripMargin
+        (declaration, definition)
+      case Some(responseInfo) =>
+        val empty_resp = (if (responseInfo.name == "bool") {
+          if (has_done_bool_previously) {
+            true
+          } else {
+            has_done_bool_previously = true
+            false
+          }
+        } else false)
+        val typeConversion = if (responseInfo.name.equals("beethoven::rocc_response")) "" else f".to<${responseInfo.name}>()";
 
-          def command_sig(is_dec: Boolean) = (if (is_dec) f"namespace $sysName {\n\t" else "") +
-            f"beethoven::response_handle<${responseInfo.name}> " +
-            f"${if (is_dec) "" else f"$sysName::"}${cc.commandName}(uint16_t core_id$signature)" +
-            (if (is_dec) ";\n}" else "")
+        def command_sig(is_dec: Boolean) = (if (is_dec) f"namespace $sysName {\n\t" else "") +
+          f"beethoven::response_handle<${responseInfo.name}> " +
+          f"${if (is_dec) "" else f"$sysName::"}${cc.commandName}(uint16_t core_id$signature)" +
+          (if (is_dec) ";\n}" else "")
 
 
-          val definition =
+        val definition =
+          f"""
+             |${if (empty_resp) "" else responseInfo.definition}
+             |${command_sig(false)} {
+             |#ifndef BAREMETAL
+             |  assert(core_id < ${p(AcceleratorSystems).filter(_.name == sysName)(0).nCores});
+             |#endif
+             |  uint64_t payloads[${Math.max(numCommands * 2, 2)}];
+             |""".stripMargin + (if (assignments.length == 1) assignments(0) + "\n" else assignments.fold("")(_ + "\n" + _)) +
             f"""
-               |${responseInfo.definition}
-               |${command_sig(false)} {
-               |#ifndef BAREMETAL
-               |  assert(core_id < ${p(AcceleratorSystems).filter(_.name == sysName)(0).nCores});
-               |#endif
-               |  uint64_t payloads[${Math.max(numCommands * 2, 2)}];
-               |""".stripMargin + (if (assignments.length == 1) assignments(0) + "\n" else assignments.fold("")(_ + "\n" + _)) +
-              f"""
-                 |  for (int i = 0; i < ${numCommands - 1}; ++i) {
-                 |    beethoven::rocc_cmd::start_cmd(${sysName}_ID, false, 0, false, false, core_id, payloads[i*2+1], payloads[i*2], $opCode).send();
-                 |  }
-                 |  return beethoven::rocc_cmd::start_cmd(${sysName}_ID, true, 0, false, false, core_id, payloads[${(numCommands - 1) * 2 + 1}], payloads[${(numCommands - 1) * 2}], $opCode).send()$typeConversion;
-                 |}""".stripMargin
-          val declaration =
-            f"""
-               |${responseInfo.dec}
-               |${command_sig(true)};""".stripMargin
-          (declaration, definition)
-      }
+               |  for (int i = 0; i < ${numCommands - 1}; ++i) {
+               |    beethoven::rocc_cmd::start_cmd(${sysName}_ID, false, 0, false, false, core_id, payloads[i*2+1], payloads[i*2], $opCode).send();
+               |  }
+               |  return beethoven::rocc_cmd::start_cmd(${sysName}_ID, true, 0, false, false, core_id, payloads[${Math.max((numCommands - 1) * 2, 0) + 1}], payloads[${Math.max((numCommands - 1) * 2, 0)}], $opCode).send()$typeConversion;
+               |}""".stripMargin
+        val declaration =
+          f"""
+             |${if (empty_resp) "" else responseInfo.dec}
+             |${command_sig(true)};""".stripMargin
+        (declaration, definition)
+    }
   }
 
   def bundlesAreEquivalentEnough(a: Bundle, b: Bundle): Boolean = {
