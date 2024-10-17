@@ -31,7 +31,7 @@ class AXILToRocc(implicit val p: Parameters) extends Module {
 
   rocc := AccelRoccCommand.fromUInt(bitsBuffer)
   io.rocc.bits := rocc
-  io.in.ready := (counter < nBeats.U) && io.rocc.ready
+  io.in.ready := (counter < nBeats.U)
   io.rocc.valid := (counter === nBeats.U)
   when(io.in.fire) {
     bitsBuffer(counter) := (io.in.bits)(31, 0)

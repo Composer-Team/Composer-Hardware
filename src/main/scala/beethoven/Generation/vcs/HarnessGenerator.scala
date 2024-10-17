@@ -54,6 +54,7 @@ object HarnessGenerator {
            |    #`CLOCK_PERIOD
            |    forever begin
            |      #`CLOCK_PERIOD clock = ~clock;
+           |      ;
            |    end
            |  end
            |
@@ -79,6 +80,7 @@ object HarnessGenerator {
            |  integer i;
            |  for (i=0;i<100;i=i+1) begin
            |    # `CLOCK_PERIOD
+           |    ;
            |  end
            |  reset = 0;
            |  end

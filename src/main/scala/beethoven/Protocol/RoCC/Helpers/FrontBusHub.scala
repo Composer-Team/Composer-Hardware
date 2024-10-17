@@ -36,5 +36,4 @@ class AXILHubModule(outer: FrontBusHub)(implicit p: Parameters) extends LazyModu
   rocc_out.valid := rocc_cmd.valid
   rocc_cmd.ready := rocc_out.ready
   rocc_out.bits := rocc_cmd.bits
-//  outer.rocc_out.out(0)._1.req <> axil_to_rocc.io.rocc
 }
