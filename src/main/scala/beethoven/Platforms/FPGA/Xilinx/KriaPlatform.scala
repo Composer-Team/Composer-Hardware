@@ -10,7 +10,7 @@ import os.Path
 
 
 case class KriaPlatform(memoryNChannels: Int = 1,
-                        override val clockRateMHz: Int = 100) extends Platform with HasPostProccessorScript {
+                        override val clockRateMHz: Int = 100) extends Platform with HasPostProccessorScript with HasXilinxMem {
 
   override val platformType: PlatformType = PlatformType.FPGA
   override val hasDiscreteMemory: Boolean = false
@@ -47,4 +47,6 @@ case class KriaPlatform(memoryNChannels: Int = 1,
   override val physicalInterfaces: List[PhysicalInterface] = List(PhysicalHostInterface(0),
     PhysicalMemoryInterface(0, 0))
   override val physicalConnectivity: List[(Int, Int)] = List.empty
+  override val nURAMs: Map[Int, Int] = Map { (0, 64) }
+  override val nBRAMs: Map[Int, Int] = Map { (0, 144) }
 }
