@@ -148,6 +148,8 @@ abstract class MemoryCompiler {
       if (validConfigs.isEmpty) {
         System.err.println(f"Failed to find valid configuration for $qr x $qc, timing_req: $maxTcyc, ${evaled.map(_._2(SRAMCycleTime))}")
         return None
+      } else {
+        System.err.println(f"Found ${validConfigs.length} valid configurations for $qr x $qc, timing_req: $maxTcyc, ${validConfigs.map(_._2(SRAMCycleTime))}")
       }
       val bestValid = evaled.minBy(_._2(SRAMArea))._2
       ((qr, qc), bestValid)
@@ -323,7 +325,6 @@ object MemoryCompiler {
       val data_shifts = io.data_in.map { data => scan_shift(data, mem.array.length) }
       val data_stages = Seq.fill(nPorts)(Seq.fill(mem.array.length - 1)(Reg(UInt(dataWidth.W))))
       val data_out_wires = Seq.fill(nPorts)(Seq.fill(mem.array.length)(Wire(UInt(dataWidth.W))))
-
 
       val l_bits = CLog2Up(mem.array.length)
       val m_bits = CLog2Up(mem.array.head.length)

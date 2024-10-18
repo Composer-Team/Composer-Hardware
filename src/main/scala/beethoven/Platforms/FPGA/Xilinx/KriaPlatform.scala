@@ -10,7 +10,8 @@ import os.Path
 
 
 case class KriaPlatform(memoryNChannels: Int = 1,
-                        override val clockRateMHz: Int = 100) extends Platform with HasPostProccessorScript with HasXilinxMem {
+                        override val clockRateMHz: Int = 100,
+                        overrideMemoryBusWidthBytes: Option[Int] = None) extends Platform with HasPostProccessorScript with HasXilinxMem {
 
   override val platformType: PlatformType = PlatformType.FPGA
   override val hasDiscreteMemory: Boolean = false
@@ -26,7 +27,12 @@ case class KriaPlatform(memoryNChannels: Int = 1,
   override val memorySpaceAddressBase: Long = 0x0
   override val memorySpaceSizeBytes: Long = 1L << 49
   override val memoryControllerIDBits: Int = 6
-  override val memoryControllerBeatBytes: Int = 16
+  override val memoryControllerBeatBytes: Int = overrideMemoryBusWidthBytes match {
+    case None => 16
+    case Some(x) =>
+      if (!Seq(4, 8, 16).contains(x)) throw new Exception("Bus width must be 4B, 8B, or 16B")
+      x
+  }
 
   override def postProcessorMacro(c: Config, paths: Seq[Path]): Unit = {
     if (c(BuildModeKey) == BuildMode.Synthesis) {
