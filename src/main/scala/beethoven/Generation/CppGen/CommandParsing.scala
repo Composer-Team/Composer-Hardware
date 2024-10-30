@@ -66,6 +66,10 @@ object CommandParsing {
       val high = range._1
       val low = range._2
       val width = 1 + high - low
+      if (width > 64) {
+        throw new Exception("Width of a field in a command cannot exceed 64 bits. This is not a fundamental limitation," +
+          "just something I haven't implemented yet because it's annoying...")
+      }
       val payloadId = low / 64
       val plo = low % 64
       val blip = 64 - plo

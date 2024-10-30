@@ -5,7 +5,7 @@ import chisel3.util._
 import chipsalliance.rocketchip.config._
 import beethoven.Generation.BeethovenBuild
 import beethoven.platform
-import beethoven.common.{Stack, splitIntoChunks}
+import beethoven.common.{CLog2Up, Stack, splitIntoChunks}
 import freechips.rocketchip.tilelink._
 
 class WriterDataChannelIO(val dWidth: Int) extends Bundle {
@@ -22,23 +22,24 @@ class SequentialWriteChannelIO(maxBytes: Int)(implicit p: Parameters) extends Bu
 /**
  * Writes out a set number of fixed-size items sequentially to memory.
  *
- * @param nBytes the number of bytes in a single item
+ * @param userBytes the number of bytes in a single item
  */
-class SequentialWriter(nBytes: Int,
+class SequentialWriter(userBytes: Int,
                        val tl_outer: TLBundle,
                        edge: TLEdgeOut,
                        minSizeBytes: Option[Int] = None)
                       (implicit p: Parameters) extends Module {
-  override val desiredName = s"SequentialWriter_w${nBytes * 8}"
-  require(isPow2(nBytes))
-  private val beatBytes = tl_outer.params.dataBits / 8
+  override val desiredName = s"SequentialWriter_w${userBytes * 8}"
+  require(isPow2(userBytes))
+  private val fabricBeatBytes = tl_outer.params.dataBits / 8
   private val addressBits = tl_outer.params.addressBits
-  private val addressBitsChop = addressBits - log2Up(beatBytes)
+  private val addressBitsChop = addressBits - log2Up(fabricBeatBytes)
   private val nSources = edge.master.endSourceId
   val pfsm = platform.prefetchSourceMultiplicity
+  val userBeatsPerLargeTx = fabricBeatBytes * pfsm / userBytes
   require(isPow2(pfsm) && pfsm > 1)
 
-  val io = IO(new SequentialWriteChannelIO(nBytes))
+  val io = IO(new SequentialWriteChannelIO(userBytes))
   val tl_out = IO(new TLBundle(tl_outer.params))
   io.req.ready := false.B
   io.channel.data.ready := false.B
@@ -46,7 +47,7 @@ class SequentialWriter(nBytes: Int,
   tl_out.a.bits := DontCare
 
   val q_size = Math.max(
-    minSizeBytes.getOrElse(0) / beatBytes,
+    minSizeBytes.getOrElse(0) / fabricBeatBytes,
     pfsm * nSources)
 
   val burst_storage_io = Module(new Queue(
@@ -114,7 +115,7 @@ class SequentialWriter(nBytes: Int,
   // keep two different counts so that we can keep enqueueing while bursting
   val burst_progress_count = RegInit(0.U(log2Up(pfsm).W))
 
-  val req_len, req_addr = RegInit(0.U(addressBitsChop.W))
+  val req_addr = RegInit(0.U(addressBitsChop.W))
 
   val sourceBusyBits = Reg(Vec(edge.master.endSourceId, Bool()))
   when(reset.asBool) {
@@ -130,15 +131,15 @@ class SequentialWriter(nBytes: Int,
 
   io.busy := true.B
   io.channel.isFlushed := sourceBusyBits.asUInt === 0.U
-  when(req_len === 0.U) {
+
+  val expectedNumBeats = RegInit(0.U((addressBits - log2Up(userBytes)).W))
+  when(expectedNumBeats === 0.U) {
     when(!sourcesInProgress) {
       io.busy := false.B
       io.req.ready := true.B
       when(io.req.fire) {
-        val l = (io.req.bits.len >> log2Up(beatBytes)).asUInt
-        assert(l > 0.U, f"Cannot write 0 bytes. Truncation of length field? ${io.req.bits.len}")
-        req_len := l
-        val choppedAddr = (io.req.bits.addr >> log2Up(beatBytes)).asUInt
+        val choppedAddr = (io.req.bits.addr >> log2Up(fabricBeatBytes)).asUInt
+        expectedNumBeats := io.req.bits.len >> CLog2Up(userBytes)
         req_addr := choppedAddr
         burst_progress_count := 0.U
       }
@@ -149,9 +150,9 @@ class SequentialWriter(nBytes: Int,
     assert(burst_storage_io.deq.valid)
     tl_out.a.bits.opcode := TLMessages.PutFullData
     tl_out.a.bits.address := addrInProgress
-    tl_out.a.bits.size := log2Up(platform.prefetchSourceMultiplicity * beatBytes).U
+    tl_out.a.bits.size := log2Up(platform.prefetchSourceMultiplicity * fabricBeatBytes).U
     tl_out.a.bits.data := burst_storage_io.deq.bits
-    tl_out.a.bits.mask := BigInt("1" * beatBytes, radix=2).U
+    tl_out.a.bits.mask := BigInt("1" * fabricBeatBytes, radix=2).U
     when(tl_out.a.fire) {
       burst_progress_count := burst_progress_count + 1.U
       when(burst_progress_count === (pfsm - 1).U) {
@@ -160,9 +161,9 @@ class SequentialWriter(nBytes: Int,
       }
     }
   }.otherwise {
-    val isSmall = req_len < pfsm.U
+    val isSmall = expectedNumBeats < userBeatsPerLargeTx.U
     val burstSize = Mux(isSmall, 1.U, pfsm.U)
-    tl_out.a.valid := hasAvailableSource && burst_storage_occupancy >= burstSize && req_len > 0.U && burst_storage_io.deq.valid
+    tl_out.a.valid := hasAvailableSource && burst_storage_occupancy >= burstSize && burst_storage_io.deq.valid
     require(platform.prefetchSourceMultiplicity >= memory_latency,
     """
         |If the valid signal is high, there is _at least_ one thing in the burst queue. For burst storage
@@ -171,10 +172,10 @@ class SequentialWriter(nBytes: Int,
         |at least bso elements within the queue, guaranteed by bso >= ml.
         |""".stripMargin)
     val nextAddr = Cat(req_addr,
-      0.U(log2Up(beatBytes).W))
+      0.U(log2Up(fabricBeatBytes).W))
 
     tl_out.a.bits.data := burst_storage_io.deq.bits
-    tl_out.a.bits.size := Mux(isSmall, log2Up(beatBytes).U, log2Up(beatBytes * pfsm).U)
+    tl_out.a.bits.size := Mux(isSmall, log2Up(fabricBeatBytes).U, log2Up(fabricBeatBytes * pfsm).U)
     tl_out.a.bits.address := nextAddr
     tl_out.a.bits.source := nextSource
     tl_out.a.bits.opcode := TLMessages.PutFullData
@@ -183,7 +184,6 @@ class SequentialWriter(nBytes: Int,
       sourceInProgress := nextSource
       addrInProgress := nextAddr
       req_addr := req_addr + burstSize
-      req_len := req_len - burstSize
       when(!isSmall) {
         burst_inProgress := true.B
         burst_progress_count := 1.U
@@ -191,23 +191,24 @@ class SequentialWriter(nBytes: Int,
     }
   }
 
-  if (nBytes == beatBytes) {
+  if (userBytes == fabricBeatBytes) {
     io.channel.data <> write_buffer_io
-  } else if (nBytes < beatBytes) {
-    val beatLim = beatBytes / nBytes
-    val beatBuffer = Reg(Vec(beatLim - 1, UInt((nBytes * 8).W)))
+  } else if (userBytes < fabricBeatBytes) {
+    val beatLim = fabricBeatBytes / userBytes
+    val beatBuffer = Reg(Vec(beatLim - 1, UInt((userBytes * 8).W)))
     val beatCounter = Reg(UInt(log2Up(beatLim).W))
-    io.channel.data.ready := write_buffer_io.ready && req_len > 0.U
+    io.channel.data.ready := write_buffer_io.ready && expectedNumBeats > 0.U
     write_buffer_io.valid := false.B
     write_buffer_io.bits := DontCare
     when(io.req.fire) {
       beatCounter := 0.U
     }
     when(io.channel.data.fire) {
-      val bytesGrouped = (0 until nBytes).map(i => io.channel.data.bits((i + 1) * 8 - 1, i * 8))
+      expectedNumBeats := expectedNumBeats - 1.U
+      val bytesGrouped = (0 until userBytes).map(i => io.channel.data.bits((i + 1) * 8 - 1, i * 8))
       beatBuffer(beatCounter) := Cat(bytesGrouped.reverse)
       beatCounter := beatCounter + 1.U
-      when(beatCounter === (beatLim - 1).U) {
+      when(beatCounter === (beatLim - 1).U || expectedNumBeats === 1.U) {
         write_buffer_io.valid := true.B
         val bgc = Cat(bytesGrouped.reverse)
         write_buffer_io.bits := Cat(bgc, Cat(beatBuffer.reverse))
@@ -215,14 +216,14 @@ class SequentialWriter(nBytes: Int,
       }
     }
   } else {
-    val dsplit = splitIntoChunks(io.channel.data.bits, beatBytes*8)
+    val dsplit = splitIntoChunks(io.channel.data.bits, fabricBeatBytes*8)
     val inProgressPushing = RegInit(false.B)
-    val channelReg = Reg(Vec(nBytes / beatBytes, UInt((beatBytes*8).W))) // bottom chunk will get optimized away
-    val dsplitCount = Reg(UInt(log2Up(nBytes / beatBytes + 1).W))
+    val channelReg = Reg(Vec(userBytes / fabricBeatBytes, UInt((fabricBeatBytes*8).W))) // bottom chunk will get optimized away
+    val dsplitCount = Reg(UInt(log2Up(userBytes / fabricBeatBytes + 1).W))
     when (!inProgressPushing) {
-      io.channel.data.ready := req_len > 0.U && write_buffer_io.ready
+      io.channel.data.ready := expectedNumBeats > 0.U && write_buffer_io.ready
       write_buffer_io.bits := dsplit(0)
-      write_buffer_io.valid := req_len > 0.U && io.channel.data.valid
+      write_buffer_io.valid := expectedNumBeats > 0.U && io.channel.data.valid
       when (io.channel.data.fire) {
         inProgressPushing := true.B
         channelReg := dsplit
@@ -234,7 +235,7 @@ class SequentialWriter(nBytes: Int,
       write_buffer_io.bits := channelReg(dsplitCount)
       when (write_buffer_io.fire) {
         dsplitCount := dsplitCount + 1.U
-        when (dsplitCount === (nBytes / beatBytes - 1).U) {
+        when (dsplitCount === (userBytes / fabricBeatBytes - 1).U) {
           inProgressPushing := false.B
         }
       }

@@ -1,11 +1,11 @@
-package beethoven.MemoryStreams
+package beethoven.MemoryStreams.Readers
 
-import chipsalliance.rocketchip.config.Parameters
-import chisel3.util._
-import chisel3._
-import beethoven.Generation.{BuildMode, BeethovenBuild}
-import beethoven.common.{CLog2Up, ShiftReg}
+import beethoven.Generation.BeethovenBuild
+import beethoven.common.CLog2Up
 import beethoven.platform
+import chipsalliance.rocketchip.config.Parameters
+import chisel3._
+import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundle, TLBundleA, TLEdgeOut}
 
 /**
@@ -17,7 +17,7 @@ import freechips.rocketchip.tilelink.{TLBundle, TLBundleA, TLEdgeOut}
 class LightweightReader(val dWidth: Int,
                         val tl_bundle: TLBundle,
                         tl_edge: TLEdgeOut,
-                        minSizeBytes: Option[Int] = None)(implicit p: Parameters) extends Module {
+                        minSizeBytes: Option[Int] = None)(implicit p: Parameters) extends Module with ReaderModuleIO {
   override val desiredName = "LightReader_w" + dWidth.toString
   BeethovenBuild.requestModulePartition(this.desiredName)
   val beatBytes = tl_edge.manager.beatBytes
@@ -39,7 +39,6 @@ class LightweightReader(val dWidth: Int,
   val tl_reg = Module(new Queue(new TLBundleA(tl_out.params), 2, false, false, false))
   tl_out.a <> tl_reg.io.deq
 
-  val channelWidthBits = maxBytes * 8
   val storedDataWidthBytes = Math.max(beatBytes, dWidth / 8)
   val storedDataWidth = storedDataWidthBytes * 8
   val channelsPerStorage = storedDataWidthBytes / maxBytes

@@ -46,6 +46,8 @@ case class KriaPlatform(memoryNChannels: Int = 1,
       )
       os.write.over(os.Path(BeethovenBuild.beethovenGenDir) / "synth.tcl",
         s.setup + "\n" + s.run)
+      os.write.over(os.Path(BeethovenBuild.beethovenGenDir) / "ip.tcl",
+        BeethovenBuild.postProcessorBundles.filter(_.isInstanceOf[tclMacro]).map(_.asInstanceOf[tclMacro].cmd).mkString("\n"))
     }
   }
 

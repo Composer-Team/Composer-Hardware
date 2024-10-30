@@ -24,11 +24,13 @@ object ResponseParsing {
              |  return true;
              |}
              |
+             |#ifndef BAREMETAL
              |template<> std::optional<bool> beethoven::response_handle<bool>::try_get() {
              |  auto r = rg.try_get();
              |  if (!r.has_value()) return {};
              |  else return true;
              |}
+             |#endif
              |
              |""".stripMargin))
       case _: InvalidAccelResponse => return None

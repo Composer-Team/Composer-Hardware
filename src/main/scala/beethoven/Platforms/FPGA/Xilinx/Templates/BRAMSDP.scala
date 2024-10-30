@@ -79,13 +79,18 @@ private[beethoven] class BRAMSDP(latency: Int,
        |  end
        |""".stripMargin else ""
 
-  // We need keep hirarchy because in some rare circumstances, cross boundary optimization
+  // We need keep hierarchy because in some rare circumstances, cross boundary optimization
   // prevents the memory from being inferred, and further, the memory is completely unrecongized,
   // mapped to a black box, and causes unrecoverable errors during logic synthesis... (Vivado 2022.1)
 
   val read = if (!withWE)
     "memreg <= mem[0][A_read];"
-  else "memreg[(gi+1)*8-1:gi*8] <= mem[gi][A_read];"
+  else f"""
+        |  for(gi=0;gi<$weWidth;gi=gi+1)
+        |    memreg[(gi+1)*8-1-:8] <= mem[gi][A_read];
+        |  end
+        |
+        """.stripMargin
 
   val write = if (!withWE)
     f"""
@@ -95,7 +100,7 @@ private[beethoven] class BRAMSDP(latency: Int,
        |""".stripMargin
     else
     f"""    if (WEB[gi]) begin
-       |      mem[gi][A_write] <= I[(gi+1)*8-1:gi*8];
+       |      mem[gi][A_write] <= I[(gi+1)*8-1-:8];
        |    end
        |""".stripMargin
 
@@ -118,44 +123,23 @@ private[beethoven] class BRAMSDP(latency: Int,
        |reg [${dataWidth - 1}:0] memreg;
        |reg [${dataWidth - 1}:0] mem_pipe_reg [${latency - 1}:0];    // Pipelines for memory
        |
-       |genvar  gi;
-       |integer i;
-       |generate
-       |for(gi=0;gi<${weWidth};gi=gi+1)
-       |begin:read_ops
-       |always @ (posedge CE)
-       |begin
+       |integer i, gi;
+       |always @ (posedge CE) begin
        |  if(CSB_read) begin
        |    $read
        |  end
-       |end
-       |end
-       |endgenerate
        |
-       |generate
-       |for(gi=0;gi<${weWidth};gi=gi+1)
-       |begin:write_ops
-       |always @ (posedge CE)
-       |begin
        |  if(CSB_write) begin
        |    $write
        |  end
-       |end
-       |end
-       |endgenerate
        |
-       |// RAM output data goes through a pipeline.
-       |always @ (posedge CE)
-       |begin
+       |  // RAM output data goes through a pipeline.
        |  mem_pipe_reg[0] <= memreg ;
        |  $mvR
-       |// O <= mem_pipe_reg[$latency-1];
-       |
        |end
        |
        |assign O = mem_pipe_reg[$latency-1];
        |endmodule
-       |
        |""".stripMargin
 
   val fw = new FileWriter(component.toString())

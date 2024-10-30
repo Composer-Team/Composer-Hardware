@@ -115,7 +115,11 @@ object Generation {
       f"""
          |// Automatically generated header for Beethoven
          |
-         |#include <beethoven/alloc.h>
+         |#ifdef BAREMETAL
+         |#include <beethoven/allocator/alloc_baremetal.h>
+         |#else
+         |#include <beethoven/allocator/alloc.h>
+         |#endif
          |#include <beethoven/rocc_cmd.h>
          |#include <cinttypes>
          |#ifndef BAREMETAL

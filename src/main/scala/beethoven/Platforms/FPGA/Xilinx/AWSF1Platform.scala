@@ -55,16 +55,19 @@ class AWSF1Platform(memoryNChannels: Int,
       val gen_dir = aws_dir / "build-dir" / "generated-src"
       val run_dir = aws_dir / "build-dir" / "build" / "scripts"
       val top_file = gen_dir / "beethoven.sv"
+      os.remove.all(gen_dir)
       os.makeDir.all(gen_dir)
       os.makeDir.all(run_dir)
       os.proc("touch", top_file.toString()).call()
       //      os.proc("cp", "-r", os.Path(BeethovenBuild.beethovenGenDir) / "beethoven.build" / "*", aws_dir).call()
       os.copy.over(os.Path(BeethovenBuild.beethovenGenDir) / "beethoven.build", gen_dir)
       os.move(gen_dir / "BeethovenTop.v", top_file)
-      os.walk(os.Path(BeethovenBuild.beethovenGenDir)).foreach(
+      os.walk(os.Path(BeethovenBuild.beethovenGenDir), followLinks=false, maxDepth = 1).foreach(
         p =>
-          if (p.last.endsWith(".cc") || p.last.endsWith(".h") || p.last.endsWith(".xdc"))
+          if (p.last.endsWith(".cc") || p.last.endsWith(".h") || p.last.endsWith(".xdc")) {
+            println("copying " + p + " to " + gen_dir / p.last)
             os.copy.over(p, gen_dir / p.last)
+          }
       )
       val hdl_srcs = os.walk(gen_dir).filter(p =>
         (p.last.endsWith(".v") ||
@@ -94,7 +97,7 @@ class AWSF1Platform(memoryNChannels: Int,
 
       // get aws address from stdio input
       println("Compilation is done.")
-      println("Enter the AWS F1 instance IP address (blank if store locally) :")
+      println("Enter the AWS F1 instance EC2 instance IP address (blank if store locally) :")
       var in = scala.io.StdIn.readLine().trim
       if (in.nonEmpty) {
         var fail = true
@@ -153,7 +156,7 @@ class AWSF1Platform(memoryNChannels: Int,
     case "A2" => 2
   }
 
-  override def placementAffinity: Map[Int, Double] = Map.from(Seq((0, 1.0), (1, 1), (2, 1.5)))
+  override def placementAffinity: Map[Int, Double] = Map.from(Seq((0, 1.0), (1, 1.0), (2, 2)))
 
 }
 

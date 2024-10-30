@@ -93,9 +93,13 @@ private[beethoven] class BRAMTDP(latency: Int,
        |""".stripMargin
   } else ""
 
-  // We need keep hirarchy because in some rare circumstances, cross boundary optimization
+  // We need keep hierarchy because in some rare circumstances, cross boundary optimization
   // prevents the memory from being inferred, and further, the memory is completely unrecongized,
   // mapped to a black box, and causes unrecoverable errors during logic synthesis... (Vivado 2022.1)
+
+  // In Vivado 2019.2, this template will complain about multiple drivers to the same memory. In other
+  // versions, this code _may_ complain about not being able to infer a memory because they actually
+  // expect the read and write procedures to be in separate processes (always blocks).
 
   val src =
     f"""
@@ -122,14 +126,13 @@ private[beethoven] class BRAMTDP(latency: Int,
        |reg [${dataWidth - 1}:0] mem_pipe_reg1 [${latency - 1}:0];    // Pipelines for memory
        |reg [${dataWidth - 1}:0] mem_pipe_reg2 [${latency - 1}:0];    // Pipelines for memory
        |
-       |genvar  gi;
-       |integer i;
+       |integer i, gi;
+       |always @ (posedge CE)
+       |begin
        |
        |${writeF("1", withWriteEnable, weWidth, dataWidth)}
        |${writeF("2", withWriteEnable, weWidth, dataWidth)}
        |
-       |always @ (posedge CE)
-       |begin
        |  mem_pipe_reg1[0] <= memreg1;
        |  mem_pipe_reg2[0] <= memreg2;
        |  $mvR

@@ -28,7 +28,7 @@ class Subdevice(val deviceId: Int)(implicit p: Parameters) extends LazyModule {
     (submodules.flatMap(_.r_nodes), "r"),
     (submodules.flatMap(_.w_nodes), "w")).map { case (nodes, ty) =>
     val nodesPostCheck = nodes.map { node =>
-      val checkProt = TLSupportChecker(a => ty   match {
+      val checkProt = TLSupportChecker(a => ty match {
         case "r" => a.master.allSupportGet.max > 0 && a.master.allSupportPutFull.max == 0
         case "w" => a.master.allSupportGet.max == 0 && a.master.allSupportPutFull.max > 0
       }, f"Protocol Exclusive: SD${ty}_pre")
@@ -79,7 +79,7 @@ class Subdevice(val deviceId: Int)(implicit p: Parameters) extends LazyModule {
   }
 
   lazy val module = new LazyModuleImp(this) {
-    DeviceContext.currentDevice = Some(deviceId+1)
+    DeviceContext.currentDevice = Some(deviceId + 1)
     submodules.foreach { sm =>
       sm.module.reset := ResetBridge(reset, clock, 2)
     }

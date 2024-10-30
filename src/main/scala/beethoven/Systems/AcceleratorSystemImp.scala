@@ -6,6 +6,7 @@ import beethoven._
 import beethoven.Floorplanning.LazyModuleImpWithSLRs.ModuleWithFloorplan
 import beethoven.Floorplanning.ResetBridge
 import beethoven.Generation._
+import beethoven.MemoryStreams.Readers.SequentialReader
 import beethoven.MemoryStreams._
 import beethoven.Parameters.{AcceleratorSystems, BlackboxBuilderCustom, ModuleBuilder}
 import freechips.rocketchip.diplomacy.LazyModuleImp
