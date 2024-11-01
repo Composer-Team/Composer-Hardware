@@ -1,13 +1,9 @@
-package beethoven.MemoryStreams
+package beethoven
 
-
+import beethoven.common.Address
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import beethoven._
-import beethoven.common.Address
-import freechips.rocketchip.subsystem.ExtMem
-import freechips.rocketchip.util.{DataKey, SimpleBundleField}
 
 /**
  * Bundle used to communicate memory requests between user and memory manager
@@ -70,4 +66,12 @@ trait MemChannelConfig {
 }
 
 case class MemCachedReadChannelConfig(name: String, nChannels: Int, cacheParams: CCacheParams) extends MemChannelConfig {
+}
+
+object ScratchpadSpecialization {
+  def packedSubword(wordSizeBits: Int, datsPerSubword: Int): PackedSubwordScratchpadConfig = {
+    PackedSubwordScratchpadConfig(wordSizeBits, datsPerSubword)
+  }
+
+  def flatPacked: FlatPackScratchpadConfig = new FlatPackScratchpadConfig
 }

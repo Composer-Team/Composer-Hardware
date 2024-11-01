@@ -5,10 +5,8 @@ import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
 import beethoven.Floorplanning.{ConstraintGeneration, LazyModuleWithSLRs, ResetBridge}
-import beethoven.Generation.BuildMode
-import beethoven._
+import beethoven.{BuildMode, _}
 import beethoven.Systems.BeethovenTop._
-import beethoven.Parameters._
 import beethoven.Platforms._
 import beethoven.Protocol.AXI.AXI4Compat
 import beethoven.Protocol.RoCC.{RoccNode, TLToRocc}
@@ -294,7 +292,7 @@ class TopImpl(outer: BeethovenTop)(implicit p: Parameters) extends LazyModuleImp
 
   // Generate C++ headers once all of the cores have been generated so that they have
   //   the opportunity to dictate which symbols they want exported
-  Generation.CPP.Generation.genCPPHeader(outer)
+  Generation.CppGen.Generation.genCPPHeader(outer)
   if (p(BuildModeKey) == BuildMode.Synthesis)
     ConstraintGeneration.writeConstraints()
 

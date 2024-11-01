@@ -1,9 +1,8 @@
-package beethoven.Parameters
+package beethoven
 
-import chipsalliance.rocketchip.config._
 import beethoven.Platforms._
-import beethoven.Systems._
 import beethoven.common._
+import chipsalliance.rocketchip.config._
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._

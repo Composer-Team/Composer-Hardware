@@ -1,6 +1,4 @@
-package beethoven.Parameters
-
-import beethoven.MemoryStreams.MemChannelConfig
+package beethoven
 
 case class IntraCoreMemoryPortOutConfig(name: String,
                                         toSystem: String,

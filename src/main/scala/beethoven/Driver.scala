@@ -1,22 +1,18 @@
-package beethoven.Generation
+package beethoven
 
-import chipsalliance.rocketchip.config._
-import chisel3.stage._
+import beethoven.BeethovenBuild._
 import beethoven.Floorplanning.ConstraintGeneration
 import beethoven.Generation.Annotators.AnnotateXilinxInterface.XilinxInterface
-import beethoven.{Generation, platform}
 import beethoven.Generation.Annotators.{CrossBoundaryDisable, WalkPath}
-import beethoven.Generation.BeethovenBuild._
-import beethoven.Platforms.FPGA.Xilinx.AWSF1Platform
+import beethoven.Generation.{Annotators, vcs}
 import beethoven.Platforms._
-import beethoven.Protocol.FrontBus.FrontBusProtocol
+import chipsalliance.rocketchip.config._
 import firrtl._
-import firrtl.options._
 import firrtl.options.PhaseManager.PhaseDependency
+import firrtl.options._
 import firrtl.stage.RunFirrtlTransformAnnotation
 import firrtl.transforms.{NoConstantPropagationAnnotation, NoDCEAnnotation}
 import freechips.rocketchip.stage._
-import freechips.rocketchip.subsystem.ExtMem
 import os._
 
 import java.util.regex._

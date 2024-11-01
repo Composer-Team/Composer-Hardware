@@ -1,9 +1,9 @@
 package beethoven.Generation.CPP
 
+import beethoven.AcceleratorSystems
 import chipsalliance.rocketchip.config.Parameters
 import beethoven.common._
 import chisel3._
-import beethoven.Parameters.AcceleratorSystems
 import beethoven.Generation.CPP.TypeParsing.getCType
 import beethoven.Generation.CppGeneration.HookDef
 

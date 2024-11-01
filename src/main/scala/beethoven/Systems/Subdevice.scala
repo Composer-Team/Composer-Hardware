@@ -1,7 +1,6 @@
 package beethoven.Systems
 
 import beethoven.Floorplanning.{DeviceContext, ResetBridge}
-import beethoven.Parameters.AcceleratorSystems
 import beethoven.Protocol.RoCC.{RoccBuffer, RoccFanout, RoccIdentityNode}
 import beethoven.Protocol.tilelink.TLSupportChecker
 import beethoven.common.Misc
@@ -17,7 +16,7 @@ class Subdevice(val deviceId: Int)(implicit p: Parameters) extends LazyModule {
   val submodules = Misc.topological_sort_depends(configs.map(_.name), constructDependencies.flatten).map { name =>
     val config = configs.find(_.name == name).get
     val (n, offset) = slr2ncores(deviceId, config.nCores)
-    println(f"$n cores on device $deviceId")
+//    println(f"$n cores on device $deviceId")
     val lm = LazyModule(new AcceleratorSystem(n, offset)(p, config, deviceId))
     lm.suggestName(f"sd${deviceId}_sys${config.name}")
     lm

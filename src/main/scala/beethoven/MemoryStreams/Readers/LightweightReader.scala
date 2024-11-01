@@ -1,8 +1,7 @@
 package beethoven.MemoryStreams.Readers
 
-import beethoven.Generation.BeethovenBuild
 import beethoven.common.CLog2Up
-import beethoven.platform
+import beethoven.{BeethovenBuild, platform}
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._

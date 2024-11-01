@@ -3,10 +3,8 @@ package beethoven.Platforms.FPGA.Xilinx.Templates
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.log2Up
 import chisel3._
-import beethoven.Generation.BeethovenBuild
 import beethoven.MemoryStreams.HasMemoryInterface
-import beethoven.Parameters.{BeethovenConstraintHint, ConstraintHintsKey}
-import beethoven._
+import beethoven.{BeethovenBuild, BeethovenConstraintHint, ConstraintHintsKey, _}
 
 import java.io.FileWriter
 

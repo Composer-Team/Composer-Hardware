@@ -15,7 +15,7 @@ object CrossBoundaryDisable {
     val files = os.walk(targetDir).filter(_.last.endsWith(".v"))
 
 
-    val sed_bin = if (os.proc("sed", "--version").call(check = false).out.text().contains("GNU sed"))
+    val sed_bin = if (os.proc("sed", "--version").call(check = false, stderr = os.Pipe).out.text().contains("GNU sed"))
       "sed"
     else
       "gsed"

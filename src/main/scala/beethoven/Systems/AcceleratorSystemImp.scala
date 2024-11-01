@@ -2,13 +2,12 @@ package beethoven.Systems
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import beethoven._
+import beethoven.{AcceleratorSystems, BlackboxBuilderCustom, ModuleBuilder, _}
 import beethoven.Floorplanning.LazyModuleImpWithSLRs.ModuleWithFloorplan
 import beethoven.Floorplanning.ResetBridge
 import beethoven.Generation._
 import beethoven.MemoryStreams.Readers.SequentialReader
 import beethoven.MemoryStreams._
-import beethoven.Parameters.{AcceleratorSystems, BlackboxBuilderCustom, ModuleBuilder}
 import freechips.rocketchip.diplomacy.LazyModuleImp
 
 

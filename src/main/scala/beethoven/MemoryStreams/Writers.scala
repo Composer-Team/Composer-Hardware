@@ -3,8 +3,7 @@ package beethoven.MemoryStreams
 import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config._
-import beethoven.Generation.BeethovenBuild
-import beethoven.platform
+import beethoven.{BeethovenBuild, ChannelTransactionBundle, platform}
 import beethoven.common.{CLog2Up, Stack, splitIntoChunks}
 import freechips.rocketchip.tilelink._
 

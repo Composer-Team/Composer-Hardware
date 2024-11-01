@@ -2,10 +2,7 @@ package beethoven
 
 import beethoven.Floorplanning.DeviceContext
 import beethoven.Floorplanning.LazyModuleWithSLRs.LazyModuleWithFloorplan
-import beethoven.Parameters.IntraCoreMemoryPortInConfig.IntraCoreCommunicationDegree
-import beethoven.Parameters.{AcceleratorSystems, IntraCoreMemoryPortInConfig}
 import beethoven.Protocol.RoCC.{RoccBuffer, RoccCompositeXbar, RoccFanin, RoccFanout, RoccIdentityNode, RoccNode}
-import beethoven.common.CLog2Up
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util.{Cat, log2Up}
@@ -56,7 +53,7 @@ package object Systems {
       co.memoryChannelConfig.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig]).map {
         case icm: IntraCoreMemoryPortInConfig =>
           icm.communicationDegree match {
-            case IntraCoreCommunicationDegree.BroadcastAllCores | IntraCoreCommunicationDegree.BroadcastAllCoresChannels => 1
+            case CommunicationDegree.BroadcastAllCores | CommunicationDegree.BroadcastAllCoresChannels => 1
             case _ => co.nCores
           }
       }.max
@@ -71,7 +68,7 @@ package object Systems {
       co.memoryChannelConfig.filter(_.isInstanceOf[IntraCoreMemoryPortInConfig]).map {
         case icm: IntraCoreMemoryPortInConfig =>
           icm.communicationDegree match {
-            case IntraCoreCommunicationDegree.BroadcastAllCoresChannels | IntraCoreCommunicationDegree.BroadcastAllChannels => 1
+            case CommunicationDegree.BroadcastAllCoresChannels | CommunicationDegree.BroadcastAllChannels => 1
             case _ => co.nCores
           }
       }.max
@@ -121,12 +118,12 @@ package object Systems {
     // sys, core, endpoint, channel, space
 
     val core_fix = endpoint.communicationDegree match {
-      case IntraCoreCommunicationDegree.BroadcastAllCoresChannels | IntraCoreCommunicationDegree.BroadcastAllCores => 0
+      case CommunicationDegree.BroadcastAllCoresChannels | CommunicationDegree.BroadcastAllCores => 0
       case _ => core
     }
 
     val channel_fix = endpoint.communicationDegree match {
-      case IntraCoreCommunicationDegree.BroadcastAllCoresChannels | IntraCoreCommunicationDegree.BroadcastAllChannels => 0
+      case CommunicationDegree.BroadcastAllCoresChannels | CommunicationDegree.BroadcastAllChannels => 0
       case _ => channel
     }
 

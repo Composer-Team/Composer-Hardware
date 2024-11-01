@@ -1,16 +1,10 @@
-package beethoven.Platforms.FPGA.Xilinx
+package beethoven
 
-import chipsalliance.rocketchip.config.{Config, Parameters}
-import chisel3.{Clock, Reset}
-import beethoven.Floorplanning.LazyModuleWithSLRs
+import chipsalliance.rocketchip.config._
 import beethoven.Generation._
 import beethoven.Platforms.FPGA.Xilinx.Templates.SynthScript
+import beethoven.Platforms.FPGA.Xilinx.getTclMacros
 import beethoven.Platforms._
-import beethoven.Platforms.FPGA._
-import beethoven.Protocol.FrontBus.{AXIFrontBusProtocol, FrontBusProtocol}
-import freechips.rocketchip.amba.axi4.{AXI4MasterNode, AXI4MasterParameters, AXI4MasterPortParameters, AXI4ToTL}
-import freechips.rocketchip.diplomacy.{IdRange, LazyModule}
-import freechips.rocketchip.tilelink.TLIdentityNode
 import os.Path
 
 object AWSF1Platform {
@@ -32,6 +26,7 @@ class AWSF1Platform(memoryNChannels: Int,
   HasPostProccessorScript with
   PlatformHasSeparateDMA with
   HasXilinxMem {
+
   override val DMAIDBits: Int = 6
   override val clockRateMHz: Int = clock_recipe match {
     case "A0" => 125
@@ -55,24 +50,20 @@ class AWSF1Platform(memoryNChannels: Int,
       val gen_dir = aws_dir / "build-dir" / "generated-src"
       val run_dir = aws_dir / "build-dir" / "build" / "scripts"
       val top_file = gen_dir / "beethoven.sv"
-      os.remove.all(gen_dir)
       os.makeDir.all(gen_dir)
       os.makeDir.all(run_dir)
       os.proc("touch", top_file.toString()).call()
-      //      os.proc("cp", "-r", os.Path(BeethovenBuild.beethovenGenDir) / "beethoven.build" / "*", aws_dir).call()
       os.copy.over(os.Path(BeethovenBuild.beethovenGenDir) / "beethoven.build", gen_dir)
       os.move(gen_dir / "BeethovenTop.v", top_file)
       os.walk(os.Path(BeethovenBuild.beethovenGenDir), followLinks=false, maxDepth = 1).foreach(
         p =>
           if (p.last.endsWith(".cc") || p.last.endsWith(".h") || p.last.endsWith(".xdc")) {
-            println("copying " + p + " to " + gen_dir / p.last)
+//            println("copying " + p + " to " + gen_dir / p.last)
             os.copy.over(p, gen_dir / p.last)
           }
       )
       val hdl_srcs = os.walk(gen_dir).filter(p =>
-        (p.last.endsWith(".v") ||
-          p.last.endsWith(".sv")) &&
-          !(p.last.contains("VCS"))).map {
+        (p.last.endsWith(".v") || p.last.endsWith(".sv")) && !(p.last.contains("VCS"))).map {
         fname =>
           fname.relativeTo(run_dir)
       }
@@ -151,9 +142,9 @@ class AWSF1Platform(memoryNChannels: Int,
     case "A1" => 2
   }
   override val net_fpgaSLRBridgeLatency: Int = clock_recipe match {
-    case "A0" => 2
-    case "A1" => 0
-    case "A2" => 2
+    case "A0" => 1
+    case "A1" => 1
+    case "A2" => 0
   }
 
   override def placementAffinity: Map[Int, Double] = Map.from(Seq((0, 1.0), (1, 1.0), (2, 2)))

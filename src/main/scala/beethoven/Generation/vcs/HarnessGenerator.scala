@@ -1,8 +1,6 @@
 package beethoven.Generation.vcs
 
-import beethoven.Generation.BeethovenBuild
-import beethoven.platform
-import chipsalliance.rocketchip.config.Parameters
+import beethoven.BeethovenBuild
 
 /**
  * Thank you to ChiselTest for inspiring this code.

@@ -1,8 +1,9 @@
-package beethoven.Platforms.FPGA.Xilinx
+package beethoven
 
 import chipsalliance.rocketchip.config.Config
 import beethoven.Generation._
 import beethoven.Platforms.FPGA.Xilinx.Templates.SynthScript
+import beethoven.Platforms.FPGA.Xilinx.getTclMacros
 import beethoven.Platforms.PlatformType.PlatformType
 import beethoven.Platforms._
 import beethoven.Protocol.FrontBus.{AXIFrontBusProtocol, FrontBusProtocol}

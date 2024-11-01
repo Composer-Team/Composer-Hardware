@@ -1,5 +1,6 @@
 package beethoven.Systems
 
+import beethoven.CustomIO
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.experimental.{FixedPoint, Interval}

@@ -1,8 +1,7 @@
 package beethoven.Generation.Stage
 
 import chipsalliance.rocketchip.config.Config
-import beethoven.Generation
-import beethoven.Generation.BeethovenBuild
+import beethoven.{BeethovenBuild, Generation}
 import firrtl.stage.RunFirrtlTransformAnnotation
 import firrtl.transforms.NoDCEAnnotation
 import firrtl.options.TargetDirAnnotation

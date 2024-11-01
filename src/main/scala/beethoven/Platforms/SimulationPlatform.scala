@@ -1,5 +1,5 @@
 package beethoven.Platforms
-import beethoven.Platforms.FPGA.Xilinx.KriaPlatform
+import beethoven.KriaPlatform
 import beethoven.Platforms.PlatformType.PlatformType
 
 class SimulationPlatform(override val clockRateMHz: Int) extends KriaPlatform {

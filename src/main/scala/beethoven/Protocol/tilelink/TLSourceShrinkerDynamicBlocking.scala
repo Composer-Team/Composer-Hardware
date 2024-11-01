@@ -21,10 +21,10 @@ class TLSourceShrinkerDynamicBlocking(maxNIDs: Int)(implicit p: Parameters) exte
   val node = new TLAdapterNode(
     clientFn = { cp =>
       if (noShrinkRequired(cp)) {
-        println(s"no shrink: ${cp.allSupportPutFull} ${cp.allSupportGet}")
+//        println(s"no shrink: ${cp.allSupportPutFull} ${cp.allSupportGet}")
         cp
       } else {
-        println(s"shrink pre: ${cp.allSupportPutFull} ${cp.allSupportGet}")
+//        println(s"shrink pre: ${cp.allSupportPutFull} ${cp.allSupportGet}")
         // We erase all client information since we crush the source Ids
         val q = TLMasterPortParameters.v1(
           clients = Seq(client.v1copy(
@@ -35,7 +35,7 @@ class TLSourceShrinkerDynamicBlocking(maxNIDs: Int)(implicit p: Parameters) exte
           echoFields = cp.echoFields,
           requestFields = cp.requestFields,
           responseKeys = cp.responseKeys)
-        println(s"shrink post: ${q.allSupportPutFull} ${q.allSupportGet}")
+//        println(s"shrink post: ${q.allSupportPutFull} ${q.allSupportGet}")
         q
       }},
     managerFn = { mp => mp.v1copy(managers =

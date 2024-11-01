@@ -1,17 +1,17 @@
-package beethoven.Systems
+package beethoven
 
-import beethoven.Generation.BeethovenBuild
+import beethoven._
+import beethoven.MemoryStreams._
+import BeethovenParams.CoreIDLengthKey
+import IntraCoreMemoryPortInConfig._
+import beethoven.AcceleratorCore.{commandExpectsResponse, systemOpCodeMap}
+import beethoven.Protocol.RoCC._
+import beethoven.Protocol.tilelink.MultiBeatCommandEmitter
+import beethoven.Systems.{AcceleratorSystem, BeethovenCommandBundler, getCommMemAddress, getCommMemSpaceBits}
+import beethoven.common._
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
-import beethoven.MemoryStreams._
-import beethoven.Parameters.BeethovenParams.CoreIDLengthKey
-import beethoven.Parameters.IntraCoreMemoryPortInConfig._
-import beethoven.Parameters._
-import beethoven.Protocol.RoCC._
-import beethoven.Protocol.tilelink.MultiBeatCommandEmitter
-import beethoven.Systems.AcceleratorCore.{commandExpectsResponse, systemOpCodeMap}
-import beethoven.common._
 import freechips.rocketchip.tilelink._
 
 import scala.language.implicitConversions

@@ -1,20 +1,16 @@
-package beethoven.Generation.CPP
+package beethoven.Generation.CppGen
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
-import beethoven.Generation.BuildMode.Simulation
+import beethoven.BuildMode.Simulation
 import beethoven.Generation.CPP.CommandParsing.customCommandToCpp
-import beethoven.Generation.CPP.TypeParsing.{enumToCpp, getCType}
-import beethoven.Generation.BeethovenBuild
+import beethoven.Generation.CPP.TypeParsing._
 import beethoven.Generation.CppGeneration._
-import beethoven.Parameters.AcceleratorSystems
-import beethoven.Parameters.BeethovenParams.{CoreIDLengthKey, SystemIDLengthKey}
+import beethoven.BeethovenParams.{CoreIDLengthKey, SystemIDLengthKey}
+import beethoven.Generation.CPP.safe_join
 import beethoven.Platforms.{BuildModeKey, PlatformHasSeparateDMA}
-import beethoven.Protocol.RoCC.Helpers.MCRFileMap
 import beethoven.Systems._
 import beethoven._
-import beethoven.common.CLog2Up
-import freechips.rocketchip.subsystem.FrontBusKey
 import freechips.rocketchip.tile.XLen
 import os.Path
 

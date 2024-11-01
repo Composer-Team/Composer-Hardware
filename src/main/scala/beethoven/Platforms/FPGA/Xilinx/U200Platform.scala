@@ -1,4 +1,4 @@
-package beethoven.Platforms.FPGA.Xilinx
+package beethoven
 
 import beethoven.Platforms.PlatformType.PlatformType
 import beethoven.Platforms._

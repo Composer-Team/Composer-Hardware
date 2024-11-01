@@ -2,17 +2,12 @@ package beethoven.Systems
 
 import beethoven.Floorplanning.LazyModuleWithSLRs.LazyModuleWithFloorplan
 import chipsalliance.rocketchip.config._
-import beethoven.Floorplanning._
 import beethoven._
-import beethoven.Generation._
 import beethoven.MemoryStreams._
-import beethoven.Parameters.IntraCoreMemoryPortInConfig.IntraCoreCommunicationDegree
-import beethoven.Parameters._
 import beethoven.Protocol.RoCC._
 import beethoven.Protocol.tilelink.TLSlave.{TLSlaveBuffer, TLSlaveBufferedBroadcast, TLSlaveIdentityNode, TLSlaveNode, TLSlaveXbar, TLToTLSlave}
 import beethoven.Protocol.tilelink.TLSupportChecker
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.tilelink._
 
 class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameters, val systemParams: AcceleratorSystemConfig, val on_deviceID: Int) extends LazyModule {
@@ -24,7 +19,7 @@ class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameter
       val param: ReadChannelConfig = para.asInstanceOf[ReadChannelConfig]
       (param, List.tabulate(para.nChannels) { i =>
         val blockBytes = platform.extMem.master.beatBytes
-        println(s"Read should be [${blockBytes}, ${blockBytes * platform.prefetchSourceMultiplicity}]")
+//        println(s"Read should be [${blockBytes}, ${blockBytes * platform.prefetchSourceMultiplicity}]")
         TLClientNode(List(TLMasterPortParameters.v1(
           clients = List(TLMasterParameters.v1(
             name = s"ReadChannel_d${on_deviceID}_${systemParams.name}_core${core_id}_${para.name}$i",
@@ -93,7 +88,7 @@ class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameter
     // reduce the number of endpoints and ensure that the output is a nexus
     //   we do this because for multi-die devices, the endpoint might need to move in
     //   multiple directions (e.g., to another die, or to a physical interface)
-    println("N readers: " + extended_readers.length)
+//    println("N readers: " + extended_readers.length)
     extend_eles_via_protocol_node(
       xbar_tree_reduce_sources[TLNode](
         extended_readers.map {er =>
@@ -169,7 +164,7 @@ class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameter
         // squish all the channels
         core_group.groupBy(_._2._2).map { case (_, channel_group) =>
           val reduce_lambda = para.communicationDegree match {
-            case IntraCoreCommunicationDegree.BroadcastAllCoresChannels | IntraCoreCommunicationDegree.BroadcastAllChannels =>
+            case CommunicationDegree.BroadcastAllCoresChannels | CommunicationDegree.BroadcastAllChannels =>
               () => TLSlaveBufferedBroadcast(0)
             case _ =>
               // crossbar reduce instead of broadcast reduce
@@ -183,7 +178,7 @@ class AcceleratorSystem(val nCores: Int, core_offset: Int)(implicit p: Parameter
 
       // reduce cores to a point
       val reduce_lambda = para.communicationDegree match {
-        case IntraCoreCommunicationDegree.BroadcastAllCoresChannels | IntraCoreCommunicationDegree.BroadcastAllCores =>
+        case CommunicationDegree.BroadcastAllCoresChannels | CommunicationDegree.BroadcastAllCores =>
           () => TLSlaveBufferedBroadcast(0)
         case _ =>
           // crossbar reduce instead of broadcast reduce

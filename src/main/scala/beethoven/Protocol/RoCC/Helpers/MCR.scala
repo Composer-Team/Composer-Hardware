@@ -1,9 +1,8 @@
 package beethoven.Protocol.RoCC.Helpers
 
-import beethoven.Parameters.CmdRespBusWidthBytes
 import chisel3._
 import chisel3.util._
-import beethoven._
+import beethoven.{CmdRespBusWidthBytes, _}
 import freechips.rocketchip.amba.axi4._
 import chipsalliance.rocketchip.config._
 import beethoven.Platforms._

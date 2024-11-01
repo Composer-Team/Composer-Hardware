@@ -1,7 +1,7 @@
 package beethoven.Platforms
 
+import beethoven.BuildMode
 import chipsalliance.rocketchip.config._
-import beethoven.Generation.BuildMode
 import beethoven.Platforms.ASIC.TechLib
 import beethoven.Platforms.ASIC.memoryCompiler.MemoryCompiler
 import beethoven.Platforms.PlatformType.PlatformType

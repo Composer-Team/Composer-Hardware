@@ -1,4 +1,4 @@
-package beethoven.Parameters
+package beethoven
 
 import beethoven.MemoryStreams._
 import chipsalliance.rocketchip.config.Parameters
@@ -19,13 +19,6 @@ case class ScratchpadConfig(name: String,
 /**
  * All Scratchpad specializtion types should announce themselves in this object
  */
-object ScratchpadSpecialization {
-  def packedSubword(wordSizeBits: Int, datsPerSubword: Int): PackedSubwordScratchpadConfig = {
-    PackedSubwordScratchpadConfig(wordSizeBits, datsPerSubword)
-  }
-
-  def flatPacked: FlatPackScratchpadConfig = new FlatPackScratchpadConfig
-}
 
 
 case class ScratchpadFeatures(readOnly: Boolean = false,

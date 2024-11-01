@@ -3,12 +3,11 @@ package beethoven.MemoryStreams
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
-import beethoven._
+import beethoven.{ScratchpadConfig, _}
 import beethoven.MemoryStreams.Loaders.ScratchpadPackedSubwordLoader
 import beethoven.common.{Address, CLog2Up, ShiftReg, splitIntoChunks}
 import beethoven.MemoryStreams.MemoryScratchpad.has_warned
 import beethoven.MemoryStreams.Readers.{LightweightReader, LightweightReader_small, SequentialReader}
-import beethoven.Parameters.ScratchpadConfig
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._

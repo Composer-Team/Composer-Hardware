@@ -1,6 +1,4 @@
-package beethoven.Parameters
-
-import beethoven.MemoryStreams.MemChannelConfig
+package beethoven
 
 case class AcceleratorSystemConfig(nCores: Int,
                                    name: String,

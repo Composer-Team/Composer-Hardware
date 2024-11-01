@@ -1,10 +1,8 @@
 package beethoven.Floorplanning
 
 import chipsalliance.rocketchip.config.Parameters
-import beethoven.Generation.BeethovenBuild
-import beethoven.Platforms.FPGA.Xilinx.AWSF1Platform
 import beethoven.Platforms._
-import beethoven._
+import beethoven.{BeethovenBuild, _}
 import os.Path
 
 import java.io.FileWriter

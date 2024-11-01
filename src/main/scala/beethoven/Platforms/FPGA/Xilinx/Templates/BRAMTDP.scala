@@ -4,11 +4,9 @@ import beethoven.Floorplanning.DeviceContext
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
 import chisel3._
-import beethoven.Generation.BeethovenBuild
 import beethoven.MemoryStreams.HasMemoryInterface
-import beethoven.Parameters.{BQuiet, BeethovenConstraintHint, ConstraintHintsKey}
 import beethoven.Platforms.{HasXilinxMem, Platform, PlatformKey}
-import beethoven._
+import beethoven.{BQuiet, BeethovenBuild, BeethovenConstraintHint, ConstraintHintsKey, _}
 import beethoven.common.CLog2Up
 
 import java.io.FileWriter
@@ -244,8 +242,11 @@ object BRAMTDP {
 
     if (platform.isInstanceOf[HasXilinxMem]) {
       val pxm = p(PlatformKey).asInstanceOf[HasXilinxMem]
-      println(s"URAM (d$currentContext): ${uram_used.getOrElse(currentContext, 0)} / ${pxm.nURAMs(currentContext)}\t" +
-        f"BRAM (d$currentContext): ${bram_used.getOrElse(currentContext, 0)} / ${pxm.nBRAMs(currentContext)}")
+//      if (!have_printed.contains(currentContext)) {
+//        have_printed += currentContext
+//      }
+//      System.err.print(s"\rURAM (d$currentContext): ${uram_used.getOrElse(currentContext, 0)} / ${pxm.nURAMs(currentContext)}\t" +
+//        f"BRAM (d$currentContext): ${bram_used.getOrElse(currentContext, 0)} / ${pxm.nBRAMs(currentContext)}")
       if (!have_enough_bram && !have_enough_uram) {
         System.err.println(
           s"Memory module $debugName requires $bram_consumption BRAMs and $uram_consumption URAMs,\n" +
@@ -260,6 +261,8 @@ object BRAMTDP {
 
     usage
   }
+
+//  private val have_printed = scala.collection.mutable.Set[Int]()
 
   private def bram_maxdwidth(isSimple: Boolean) = if (isSimple) 72 else 36
 

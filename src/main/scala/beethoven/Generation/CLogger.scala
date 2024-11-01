@@ -1,5 +1,7 @@
 package beethoven.Generation
 
+import beethoven.BeethovenBuild
+
 import java.io.FileWriter
 
 object CLogger {

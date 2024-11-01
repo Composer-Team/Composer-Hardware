@@ -1,6 +1,6 @@
 package beethoven.Platforms.FPGA
 
-import beethoven.Generation.BeethovenBuild
+import beethoven.{BeethovenBuild, tclMacro}
 
 package object Xilinx {
   def getTclMacros(): Seq[String] = {

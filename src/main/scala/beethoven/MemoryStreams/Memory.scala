@@ -1,9 +1,9 @@
 package beethoven.MemoryStreams
 
+import beethoven.BuildMode
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import beethoven.Generation.BuildMode
 import beethoven.MemoryStreams.RAM.SyncReadMemMem
 import beethoven.Platforms.ASIC.memoryCompiler.MemoryCompiler.sramChar_t
 import beethoven.Platforms.ASIC.memoryCompiler.{MemoryCompiler, SupportsWriteEnable}
