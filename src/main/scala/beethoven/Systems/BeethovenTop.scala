@@ -108,8 +108,8 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
   }
   LazyModuleWithSLRs.freezeSLRPush = false
 
-  val has_r_mem = devices.map(_.r_nodes.nonEmpty).reduce(_ || _) || frontDMA_joined.isDefined
-  val has_w_mem = devices.map(_.w_nodes.nonEmpty).reduce(_ || _) || frontDMA_joined.isDefined
+  val has_r_mem = devices.map(_.r_nodes.nonEmpty).fold(false)(_ || _) || frontDMA_joined.isDefined
+  val has_w_mem = devices.map(_.w_nodes.nonEmpty).fold(false)(_ || _) || frontDMA_joined.isDefined
   val AXI_MEM = if (has_r_mem || has_w_mem) Some(Seq.tabulate(nMemChannels) { channel_idx =>
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(

@@ -35,8 +35,8 @@ case class KriaPlatform(memoryNChannels: Int = 1,
       x
   }
 
-  override def postProcessorMacro(c: Parameters, paths: Seq[Path]): Unit = {
-    if (c(BuildModeKey) == BuildMode.Synthesis) {
+  override def postProcessorMacro(p: Parameters, paths: Seq[Path]): Unit = {
+    if (p(BuildModeKey) == BuildMode.Synthesis) {
       val s = SynthScript(
         "beethoven",
         "output",
