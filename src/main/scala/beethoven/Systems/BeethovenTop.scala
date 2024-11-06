@@ -191,9 +191,13 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
       platform.physicalInterfaces.foreach {
         case pmi: PhysicalMemoryInterface =>
           val mem = (AXI_MEM.get)(pmi.channelIdx)
-          val sTLToAXI = LazyModuleWithFloorplan(new TLToAXI4SRW(), pmi.locationDeviceID).node
 
-          Seq((r_commits, "r"), (w_commits, "w")) foreach { case (commit_set, ty) =>
+          val sTLToAXI = if (is_map_nonempty(r_commits) && is_map_nonempty(w_commits))
+            LazyModuleWithFloorplan(new TLToAXI4SRW(), pmi.locationDeviceID).node
+          else
+            LazyModuleWithFloorplan(new TLToAXI4(), pmi.locationDeviceID).node
+
+          Seq((r_commits, "r"), (w_commits, "w")).filter(a => is_map_nonempty(a._1)).foreach { case (commit_set, ty) =>
             val xbar_s = xbar_tree_reduce_sources(commit_set(pmi.locationDeviceID), platform.xbarMaxDegree, 1,
               make_tl_xbar,
               make_tl_buffer,
@@ -211,6 +215,7 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
         case _ => ;
       }
     }
+
   }
 
   // commands

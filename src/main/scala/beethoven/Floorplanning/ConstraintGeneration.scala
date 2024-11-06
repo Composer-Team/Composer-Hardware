@@ -2,8 +2,7 @@ package beethoven.Floorplanning
 
 import chipsalliance.rocketchip.config.Parameters
 import beethoven.Platforms._
-import beethoven.{BeethovenBuild, _}
-import os.Path
+import beethoven._
 
 import java.io.FileWriter
 
@@ -19,14 +18,12 @@ object ConstraintGeneration {
   def writeConstraints()(implicit p: Parameters): Unit = {
     p(PlatformKey).platformType match {
       case PlatformType.FPGA =>
-        val path = Path(BeethovenBuild.beethovenGenDir)
-        val outPath = path / "user_constraints.xdc"
+        val outPath = BeethovenBuild.top_build_dir / "user_constraints.xdc"
         if (platform.physicalDevices.length == 1) {
           os.write.over(outPath, "")
           return
         }
 
-        os.makeDir.all(path)
         val f = new FileWriter(outPath.toString())
 
         val slrs = platform.physicalDevices

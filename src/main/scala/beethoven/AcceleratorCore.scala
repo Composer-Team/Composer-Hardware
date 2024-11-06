@@ -579,10 +579,9 @@ class AcceleratorBlackBoxCore(blackboxBuilder: ModuleConstructor)(implicit p: Pa
 
   // Link in Wrapper using BeethovenBuild,
   // write source to file first
-  val wrapperFName = os.Path(BeethovenBuild.beethovenGenDir) / s"${systemParams.name}_chiselLink.v"
+  val wrapperFName = BeethovenBuild.hw_build_dir / s"${systemParams.name}_chiselLink.v"
   os.write.over(wrapperFName, bbWrapper)
-  BeethovenBuild.addSource(wrapperFName)
 
-  val bbFName = os.Path(BeethovenBuild.beethovenGenDir) / s"${systemParams.name}.v"
+  val bbFName = BeethovenBuild.hw_build_dir / s"${systemParams.name}.v"
   os.write.over(bbFName, userBB)
 }

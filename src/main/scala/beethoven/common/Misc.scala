@@ -75,6 +75,13 @@ object splitIntoChunks {
   }
 }
 
+object applyToChunks {
+  def apply(a: UInt, sz: Int, op: UInt => UInt): UInt = {
+    val subs = splitIntoChunks(a, sz)
+    Cat(subs.reverse.map(op))
+  }
+}
+
 object Misc {
   def left_assign[T <: Data](tup: (T, T)): Unit = tup._1 := tup._2
 

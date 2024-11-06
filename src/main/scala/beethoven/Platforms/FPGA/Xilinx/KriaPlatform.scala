@@ -1,6 +1,6 @@
 package beethoven
 
-import chipsalliance.rocketchip.config.Config
+import chipsalliance.rocketchip.config.{Config, Parameters}
 import beethoven.Generation._
 import beethoven.Platforms.FPGA.Xilinx.Templates.SynthScript
 import beethoven.Platforms.FPGA.Xilinx.getTclMacros
@@ -35,7 +35,7 @@ case class KriaPlatform(memoryNChannels: Int = 1,
       x
   }
 
-  override def postProcessorMacro(c: Config, paths: Seq[Path]): Unit = {
+  override def postProcessorMacro(c: Parameters, paths: Seq[Path]): Unit = {
     if (c(BuildModeKey) == BuildMode.Synthesis) {
       val s = SynthScript(
         "beethoven",
@@ -45,9 +45,9 @@ case class KriaPlatform(memoryNChannels: Int = 1,
         clockRateMHz.toString,
         precompile_dependencies = getTclMacros()
       )
-      os.write.over(os.Path(BeethovenBuild.beethovenGenDir) / "synth.tcl",
+      os.write.over(BeethovenBuild.top_build_dir / "synth.tcl",
         s.setup + "\n" + s.run)
-      os.write.over(os.Path(BeethovenBuild.beethovenGenDir) / "ip.tcl",
+      os.write.over(BeethovenBuild.top_build_dir / "ip.tcl",
         BeethovenBuild.postProcessorBundles.filter(_.isInstanceOf[tclMacro]).map(_.asInstanceOf[tclMacro].cmd).mkString("\n"))
     }
   }

@@ -8,7 +8,7 @@ import beethoven.BeethovenBuild
 
 object HarnessGenerator {
   def generateHarness(): Unit = {
-    val r = os.read(BeethovenBuild.targetDir / "BeethovenTop.v").split("\n")
+    val r = os.read(BeethovenBuild.hw_build_dir / "BeethovenTop.v").split("\n")
     def sanitize(q: String): Seq[String] = q.trim.split(" +").map(a => a.replace(",", "").trim)
     def is_reserved(q: Seq[String]): Boolean = {
       val r = q.last
@@ -86,6 +86,6 @@ object HarnessGenerator {
            |
            |""".stripMargin
 
-    os.write(BeethovenBuild.targetDir / "BeethovenTopVCSHarness.v", w)
+    os.write(BeethovenBuild.hw_build_dir / "BeethovenTopVCSHarness.v", w)
   }
 }

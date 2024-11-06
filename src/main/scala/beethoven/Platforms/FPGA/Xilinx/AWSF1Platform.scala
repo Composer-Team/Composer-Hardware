@@ -14,7 +14,7 @@ object AWSF1Platform {
   }
 
   def initial_setup(ip: String): Unit = {
-    val croot = sys.env("BEETHOVEN_ROOT")
+    val croot = sys.env("BEETHOVEN_PATH")
     os.proc("rsync", "-azr", f"$croot/bin", f"ec2-user@$ip:~/bin").call()
     os.proc("ssh", f"ec2-user@$ip", "~/bin/aws/scripts/initial_setup.sh").call()
   }
@@ -43,19 +43,19 @@ class AWSF1Platform(memoryNChannels: Int,
 
   override val defaultWriteTXConcurrency: Int = defaultReadTXConcurrency
 
-  override def postProcessorMacro(c: Config, paths: Seq[Path]): Unit = {
+  override def postProcessorMacro(c: Parameters, paths: Seq[Path]): Unit = {
     if (c(BuildModeKey) == BuildMode.Synthesis) {
       // rename beethoven.v to beethoven.sv
-      val aws_dir = os.Path(BeethovenBuild.beethovenGenDir) / "aws"
+      val aws_dir = BeethovenBuild.top_build_dir / "aws"
       val gen_dir = aws_dir / "build-dir" / "generated-src"
       val run_dir = aws_dir / "build-dir" / "build" / "scripts"
       val top_file = gen_dir / "beethoven.sv"
       os.makeDir.all(gen_dir)
       os.makeDir.all(run_dir)
       os.proc("touch", top_file.toString()).call()
-      os.copy.over(os.Path(BeethovenBuild.beethovenGenDir) / "beethoven.build", gen_dir)
+      os.copy.over(BeethovenBuild.hw_build_dir, gen_dir)
       os.move(gen_dir / "BeethovenTop.v", top_file)
-      os.walk(os.Path(BeethovenBuild.beethovenGenDir), followLinks=false, maxDepth = 1).foreach(
+      os.walk(BeethovenBuild.top_build_dir, followLinks=false, maxDepth = 1).foreach(
         p =>
           if (p.last.endsWith(".cc") || p.last.endsWith(".h") || p.last.endsWith(".xdc")) {
 //            println("copying " + p + " to " + gen_dir / p.last)
@@ -71,7 +71,7 @@ class AWSF1Platform(memoryNChannels: Int,
         f"set hdl_sources [list ${hdl_srcs.mkString(" \\\n")} ]")
 
       // write ip tcl
-      val ip_tcl = os.Path(BeethovenBuild.beethovenGenDir) / "aws" / "ip.tcl"
+      val ip_tcl = BeethovenBuild.top_build_dir / "aws" / "ip.tcl"
       os.write.over(ip_tcl,
         """
           |set ipDir ips

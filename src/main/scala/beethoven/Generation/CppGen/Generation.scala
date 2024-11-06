@@ -21,8 +21,6 @@ object Generation {
   def genCPPHeader(top: BeethovenTop)(implicit p: Parameters): Unit = {
     val acc = p(AcceleratorSystems)
     // we might have multiple address spaces...
-    val path = Path(BeethovenBuild.beethovenGenDir)
-    os.makeDir.all(path)
 
     val actualChannels = if (top.AXI_MEM.isDefined) platform.memoryNChannels else 0
     val (allocator, addrBits) = {
@@ -106,7 +104,8 @@ object Generation {
     }
     val mmio_addr = "const uint64_t BeethovenMMIOOffset = 0x" + platform.frontBusBaseAddress.toHexString + "LL;"
 
-    val header = new FileWriter((path / "beethoven_allocator_declaration.h").toString())
+    os.makeDir.all(BeethovenBuild.top_build_dir / "beethoven")
+    val header = new FileWriter((BeethovenBuild.top_build_dir / "beethoven_hardware.h").toString())
     header.write(
       f"""
          |// Automatically generated header for Beethoven
@@ -156,10 +155,10 @@ object Generation {
   """.stripMargin)
     header.close()
 
-    val src = new FileWriter((path / "generated_beethoven_src.cc").toString())
+    val src = new FileWriter((BeethovenBuild.top_build_dir / "beethoven_hardware.cc").toString())
     src.write(
       f"""
-         |#include "beethoven_allocator_declaration.h"
+         |#include "beethoven_hardware.h"
          |
          |$commandDefinitions
          |""".stripMargin)

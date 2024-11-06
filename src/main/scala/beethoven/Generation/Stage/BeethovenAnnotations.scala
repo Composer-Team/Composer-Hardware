@@ -22,7 +22,7 @@ object BeethovenAnnotations {
             c: Class[_],
             emitAllModules: Boolean = true,
             performDeadCodeElimination: Boolean = false,
-            targetDir: Path = BeethovenBuild.targetDir): AnnotationSeq =
+            targetDir: Path = BeethovenBuild.top_build_dir): AnnotationSeq =
     AnnotationSeq(Seq(
       new TargetDirAnnotation(targetDir.toString()),
       new TopModuleAnnotation(c),
@@ -43,7 +43,7 @@ object BeethovenAnnotations {
   def no_class(config: Config,
                emitAllModules: Boolean = true,
                performDeadCodeElimination: Boolean = false,
-               targetDir: Path = BeethovenBuild.targetDir): AnnotationSeq =
+               targetDir: Path = BeethovenBuild.top_build_dir): AnnotationSeq =
     AnnotationSeq(Seq(
       new TargetDirAnnotation(targetDir.toString()),
       Generation.Stage.ConfigsAnnotation(config),

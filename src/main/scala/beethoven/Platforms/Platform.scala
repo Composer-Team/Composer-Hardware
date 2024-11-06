@@ -163,7 +163,7 @@ trait PlatformHasSeparateDMA {
 }
 
 trait HasPostProccessorScript {
-  def postProcessorMacro(c: Config, paths: Seq[Path]): Unit
+  def postProcessorMacro(c: Parameters, paths: Seq[Path]): Unit
 }
 
 trait HasTechLib {
