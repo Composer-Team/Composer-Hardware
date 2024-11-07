@@ -76,7 +76,7 @@ object Generation {
           f"""
              |#ifdef SIM
              |${if (platform.extMem.master.beatBytes < 8) "#define SIM_SMALL_MEM" else ""}
-             |#ifdef VERILATOR_VERSION
+             |#ifdef VERILATOR
              |#include <verilated.h>
              |using BeethovenFrontBusAddr_t = ${getUnsignedCIntType(platform.frontBusAddressNBits)};
              |using BeethovenMemIDDtype=$idDtype;

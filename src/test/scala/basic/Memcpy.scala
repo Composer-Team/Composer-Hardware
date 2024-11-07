@@ -103,7 +103,7 @@ class Memcpy(n_parallel: Int,
   val writeBusLock = Module(new Lock(n_slots))
   slotAllocator.io.free_in := M00.bvalid
   slotAllocator.io.free_idx := DontCare // set later
-  readSourceAllocator.io.free_in := M00.rlast
+  readSourceAllocator.io.free_in := M00.rlast && M00.rvalid
   readSourceAllocator.io.free_idx := M00.rid
 
   // write bus lock allows a slot to claim the write bus and write onto it a full read burst that we have in storage

@@ -1,6 +1,5 @@
 package beethoven
 
-import beethoven._
 import beethoven.MemoryStreams._
 import BeethovenParams.CoreIDLengthKey
 import IntraCoreMemoryPortInConfig._

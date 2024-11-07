@@ -97,8 +97,8 @@ class AWSF1Platform(memoryNChannels: Int,
           try {
             println("Transfering...")
             os.proc("ssh", f"ec2-user@$in", "rm", "-rf", "~/build-dir/generated-src/*")
-            os.proc("rsync", "-avz", f"${gen_dir}/*", f"ec2-user@$in:~/build-dir/generated-src/").call(
-              stdout = os.Inherit
+            os.proc("rsync", "-avz", f"$gen_dir/", f"ec2-user@$in:~/build-dir/generated-src/").call(
+              stdout = os.Inherit,
             )
           } catch {
             case e: Exception =>

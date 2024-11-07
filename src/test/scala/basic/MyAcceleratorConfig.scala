@@ -12,5 +12,5 @@ class MyAcceleratorConfig extends AcceleratorConfig(
       WriteChannelConfig("vec_out", dataBytes = 4))
   ))
 object MyAcceleratorKria extends BeethovenBuild(new MyAcceleratorConfig,
-  buildMode = BuildMode.Simulation,
-  platform = KriaPlatform())
+  buildMode = BuildMode.Synthesis,
+  platform = new AWSF1Platform(1))

@@ -112,7 +112,8 @@ object BuildMode {
 
 class BeethovenBuild(config: AcceleratorConfig,
                      platform: Platform,
-                     buildMode: BuildMode = BuildMode.Synthesis) {
+                     buildMode: BuildMode = BuildMode.Synthesis,
+                     additional_parameter: Option[PartialFunction[Any, Any]] = None) {
   final def main(args: Array[String]): Unit = {
     //    args.foreach(println(_))
 //    println("Running with " + Runtime.getRuntime.freeMemory() + "B memory")
@@ -127,10 +128,16 @@ class BeethovenBuild(config: AcceleratorConfig,
     )
     os.remove.all(hw_build_dir)
     os.makeDir.all(hw_build_dir)
-    val configWithBuildMode = new WithBeethoven(
-      platform = platform).alterPartial {
-      case BuildModeKey => buildMode
-      case AcceleratorSystems => config.configs
+    val configWithBuildMode = {
+      val w = new WithBeethoven(
+        platform = platform).alterPartial {
+        case BuildModeKey => buildMode
+        case AcceleratorSystems => config.configs
+      }
+      additional_parameter match {
+        case Some(f) => w.alterPartial(f)
+        case None => w
+      }
     }
     beethoven.platform(configWithBuildMode).platformCheck()
 

@@ -16,4 +16,8 @@ case class AcceleratorConfig(configs: List[AcceleratorSystemConfig]) {
   def this(config: AcceleratorSystemConfig) = {
     this(List(config))
   }
+
+  def this(other: AcceleratorConfig) = {
+    this(other.configs)
+  }
 }
