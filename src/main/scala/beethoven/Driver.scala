@@ -130,7 +130,7 @@ class BeethovenBuild(config: AcceleratorConfig,
     val configWithBuildMode = new WithBeethoven(
       platform = platform).alterPartial {
       case BuildModeKey => buildMode
-      case AcceleratorSystems => config.systems
+      case AcceleratorSystems => config.configs
     }
     beethoven.platform(configWithBuildMode).platformCheck()
 
