@@ -73,7 +73,14 @@ class AXIFrontBusProtocol(withDMA: Boolean) extends FrontBusProtocol {
         )))
         val dma2tl = TLIdentityNode()
         DeviceContext.withDevice(frontInterfaceID) {
-          dma2tl := make_tl_buffer(Some("DMA_BUFFER")) := (LazyModuleWithFloorplan(new LongAXI4ToTL(64), "axi4ToTL_dma").node) := AXI4Buffer() := node
+          dma2tl :=
+            make_tl_buffer() :=
+            LazyModuleWithFloorplan(new LongAXI4ToTL(1)).node :=
+            AXI4UserYanker(capMaxFlight = Some(1)) :=
+            AXI4Buffer() :=
+            AXI4Fragmenter() :=
+            AXI4IdIndexer(1) :=
+            AXI4Buffer() := node
         }
         (Some(node), Some(dma2tl))
       } else (None, None)

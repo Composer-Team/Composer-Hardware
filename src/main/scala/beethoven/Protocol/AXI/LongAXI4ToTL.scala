@@ -144,9 +144,11 @@ class LongAXI4ToTL(maxTxLen: Int)(implicit p: Parameters) extends LazyModule {
     val raddr = Reg(axi_in.ar.bits.addr.cloneType)
     val rid = Reg(axi_in.ar.bits.id.cloneType)
 
+
     tl_out.d.ready := can_accept_wresp_tl || (tl_out.d.bits.source === READ_SOURCE.U && ((rstate === r_wait && axi_in.r.ready) || rstate === r_drain))
     axi_in.r.bits.data := tl_out.d.bits.data
     axi_in.r.bits.last := rnctr === rnbeats
+    axi_in.r.bits.id := rid
     when (rstate === r_idle) {
       when (axi_in.ar.fire) {
         rnbeats := axi_in.ar.bits.len
