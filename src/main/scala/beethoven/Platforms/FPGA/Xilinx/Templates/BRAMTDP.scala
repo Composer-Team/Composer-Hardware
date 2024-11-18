@@ -245,17 +245,13 @@ object BRAMTDP {
 //      if (!have_printed.contains(currentContext)) {
 //        have_printed += currentContext
 //      }
-//      System.err.print(s"\rURAM (d$currentContext): ${uram_used.getOrElse(currentContext, 0)} / ${pxm.nURAMs(currentContext)}\t" +
-//        f"BRAM (d$currentContext): ${bram_used.getOrElse(currentContext, 0)} / ${pxm.nBRAMs(currentContext)}")
+      System.err.print(s"\rURAM (d$currentContext): ${uram_used.getOrElse(currentContext, 0)} / ${pxm.nURAMs(currentContext)}\t" +
+        f"BRAM (d$currentContext): ${bram_used.getOrElse(currentContext, 0)} / ${pxm.nBRAMs(currentContext)}")
       if (!have_enough_bram && !have_enough_uram) {
         System.err.println(
           s"Memory module $debugName requires $bram_consumption BRAMs and $uram_consumption URAMs,\n" +
             s" but only ${pxm.nBRAMs(currentContext) - bram_used.getOrElse(currentContext, 0)} BRAMs and ${pxm.nURAMs(currentContext) - uram_used.getOrElse(currentContext, 0)} URAMs" +
             s"are available.")
-        if (!p(BQuiet)) {
-          System.err.println(s"Using ${usage.brams} BRAMs and ${usage.urams} URAMs for $debugName: $nRows x $dwidth")
-          System.err.println(s"Total Usage - BRAM(${BRAMTDP.bram_used.getOrElse(currentContext, 0) + usage.brams}/${pxm.nBRAMs(currentContext)}) URAM(${BRAMTDP.uram_used.getOrElse(currentContext, 0) + usage.urams}/${pxm.nURAMs(currentContext)})")
-        }
       }
     }
 

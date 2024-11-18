@@ -88,7 +88,7 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
           supportsPutFull = maxTransfer,
           supportsPutPartial = maxTransfer
         )))))
-    val indexer = LazyModule(new TLSourceShrinkerDynamicBlocking(4))
+    val indexer = LazyModule(new TLSourceShrinkerDynamicBlocking(2))
     splitter.in_node := indexer.node := frontDMA_joined.get
     val read_out = TLXbar() := TLBuffer() := splitter.read_out
     val write_out = TLXbar() := TLBuffer() := splitter.write_out

@@ -100,6 +100,7 @@ class AWSF1Platform(memoryNChannels: Int,
             os.proc("rsync", "-avz", f"$gen_dir/", f"ec2-user@$in:~/build-dir/generated-src/").call(
               stdout = os.Inherit,
             )
+            os.proc("rsync", "-avz", (run_dir / "src_list.tcl").toString(), f"ec2-user@$in:~/build-dir/generated-src/").call()
           } catch {
             case e: Exception =>
               println(e)
@@ -147,7 +148,7 @@ class AWSF1Platform(memoryNChannels: Int,
     case "A2" => 0
   }
 
-  override def placementAffinity: Map[Int, Double] = Map.from(Seq((0, 1.0), (1, 1.0), (2, 2)))
+  override def placementAffinity: Map[Int, Double] = Map.from(Seq((0, 1.0), (1, 1.0), (2, 1.7)))
 
 }
 

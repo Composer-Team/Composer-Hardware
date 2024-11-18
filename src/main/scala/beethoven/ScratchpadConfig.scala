@@ -4,8 +4,8 @@ import beethoven.MemoryStreams._
 import chipsalliance.rocketchip.config.Parameters
 
 case class ScratchpadConfig(name: String,
-                            dataWidthBits: Number,
-                            nDatas: Number,
+                            dataWidthBits: Int,
+                            nDatas: Int,
                             nPorts: Int,
                             latency: Number = 2,
                             features: ScratchpadFeatures = ScratchpadFeatures()) extends MemChannelConfig {

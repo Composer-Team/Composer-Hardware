@@ -22,16 +22,18 @@ class AllocSource(n: Int) extends Module {
   val alloced = PriorityEncoder(idle)
   io.idx_out := alloced
 
-  when (io.alloc_in) {
+  when(io.alloc_in) {
     idle(alloced) := false.B
   }
 
-  when (io.free_in) {
+  when(io.free_in) {
     idle(io.free_idx) := true.B
   }
 
-  when (reset.asBool) {
-    idle foreach { _ := true.B }
+  when(reset.asBool) {
+    idle foreach {
+      _ := true.B
+    }
   }
 }
 
@@ -50,20 +52,20 @@ class Lock(n: Int) extends Module {
   prevHigh(0) := false.B
   io.acquire_out(0) := canAcquire && io.acquire_in(0)
   (1 until n) foreach { idx =>
-    prevHigh(idx) := prevHigh(idx - 1) || io.acquire_in(idx-1)
+    prevHigh(idx) := prevHigh(idx - 1) || io.acquire_in(idx - 1)
     io.acquire_out(idx) := !prevHigh(idx) && io.acquire_in(idx) && canAcquire
   }
 
-  when (io.free) {
+  when(io.free) {
     is_acquired := false.B
   }
-  when (io.acquire_out.asUInt =/= 0.U) {
+  when(io.acquire_out.asUInt =/= 0.U) {
     is_acquired := true.B
   }
 }
 
-class Memcpy(n_parallel: Int,
-             n_slots: Int) extends Module {
+class BeethovenToppy(n_parallel: Int,
+                   n_slots: Int) extends Module {
   require(n_slots >= n_parallel)
   val M00 = IO(beethoven.Protocol.AXI.AXI4Compat(
     AXI4BundleParameters(
@@ -95,7 +97,7 @@ class Memcpy(n_parallel: Int,
   val writeMask = 0x100000000L
 
   val tx_addrs = Reg(Vec(n_slots, UInt(64.W)))
-  val slot_idle :: slot_active :: slot_acquire:: slot_transfer :: slot_wait :: Nil = Enum(5)
+  val slot_idle :: slot_active :: slot_acquire :: slot_transfer :: slot_wait :: Nil = Enum(5)
 
   val readSourceAllocator = Module(new AllocSource(n_parallel))
   val writeSourceAllocator = Module(new AllocSource(n_parallel))
@@ -110,7 +112,9 @@ class Memcpy(n_parallel: Int,
   // we can only acquire the write bus lock if there is a source available
   val writeAlloc_machine = {
     writeBusLock.io.free := false.B
-    writeBusLock.io.acquire_in.foreach{_ := false.B }
+    writeBusLock.io.acquire_in.foreach {
+      _ := false.B
+    }
     writeBusLock.io.external_stall := (!M00.awready) || (!writeSourceAllocator.io.valid_out)
     writeSourceAllocator.io.alloc_in := writeBusLock.io.acquire_out.asUInt =/= 0.U
     writeSourceAllocator.io.free_in := M00.bvalid
@@ -153,8 +157,8 @@ class Memcpy(n_parallel: Int,
   M00.rready := true.B
   when(M00.bvalid && M00.bready) {
     nTxsToRecieve := nTxsToRecieve - 1.U
-    when (nTxsToRecieve === 1.U) {
-      when (cycle_counter(49, 32) =/= 0.U) {
+    when(nTxsToRecieve === 1.U) {
+      when(cycle_counter(49, 32) =/= 0.U) {
         cycle_count := 0xFFFFFFFFL.U
       }.otherwise {
         cycle_count := cycle_counter(31, 0)
@@ -168,11 +172,11 @@ class Memcpy(n_parallel: Int,
     val slot_state = RegInit(slot_idle)
     val c_addr = Reg(UInt(64.W))
 
-    when (slot_state === slot_idle) {
+    when(slot_state === slot_idle) {
       write_idx := 0.U
       val slot_alloc_fire = slotAllocator.io.alloc_in && slotAllocator.io.valid_out
       val read_alloc_fire = readSourceAllocator.io.alloc_in && readSourceAllocator.io.valid_out
-      when ( slot_alloc_fire
+      when(slot_alloc_fire
         && read_alloc_fire
         && slotAllocator.io.idx_out === idx.U) {
         slot_state := slot_active
@@ -180,17 +184,17 @@ class Memcpy(n_parallel: Int,
         c_addr := readAddr | writeMask.U
       }
     }.elsewhen(slot_state === slot_active) {
-      when (M00.rvalid && M00.rid === slot_idx) {
+      when(M00.rvalid && M00.rid === slot_idx) {
         mem(write_idx) := M00.rdata
         write_idx := write_idx + 1.U
-        when (write_idx === 63.U || M00.rlast) {
+        when(write_idx === 63.U || M00.rlast) {
           slot_state := slot_acquire
           write_idx := 0.U
         }
       }
     }.elsewhen(slot_state === slot_acquire) {
       writeBusLock.io.acquire_in(idx) := true.B
-      when (writeBusLock.io.acquire_out(idx)) {
+      when(writeBusLock.io.acquire_out(idx)) {
         slot_idx := writeSourceAllocator.io.idx_out
         slot_state := slot_transfer
         M00.awvalid := true.B
@@ -202,15 +206,15 @@ class Memcpy(n_parallel: Int,
       M00.wdata := mem(write_idx)
       M00.wlast := write_idx === 63.U
       M00.wstrb := BigInt("FFFFFFFFFFFFFFFF", 16).U
-      when (M00.wready) {
+      when(M00.wready) {
         write_idx := write_idx + 1.U
-        when (write_idx === 63.U) {
+        when(write_idx === 63.U) {
           writeBusLock.io.free := true.B
           slot_state := slot_wait
         }
       }
     }.elsewhen(slot_state === slot_wait) {
-      when (M00.bvalid && M00.bid === slot_idx) {
+      when(M00.bvalid && M00.bid === slot_idx) {
         slot_state := slot_idle
         slotAllocator.io.free_in := true.B
         slotAllocator.io.free_idx := idx.U
@@ -221,16 +225,16 @@ class Memcpy(n_parallel: Int,
   S00.rdata := cycle_count
 
   S00.arready := stat_idle
-  when (S00.arready && S00.arvalid) {
+  when(S00.arready && S00.arvalid) {
     stat_idle := false.B
   }
 
   S00.awready := machine_state === m_idle
-  when (S00.awready && S00.awvalid) {
+  when(S00.awready && S00.awvalid) {
     machine_state := m_get_len
-  }.elsewhen (machine_state === m_get_len) {
+  }.elsewhen(machine_state === m_get_len) {
     S00.wready := true.B
-    when (S00.wready && S00.wvalid) {
+    when(S00.wready && S00.wvalid) {
       Seq(nTxsToLaunch, nTxsToRecieve) foreach {
         _ := S00.wdata
       }
@@ -241,23 +245,23 @@ class Memcpy(n_parallel: Int,
     }
   }.elsewhen(machine_state === m_resp) {
     S00.bvalid := true.B
-    when (S00.bready && S00.bvalid) {
+    when(S00.bready && S00.bvalid) {
       machine_state := m_idle
     }
   }
 
-  when (!stat_idle) {
+  when(!stat_idle) {
     S00.rvalid := true.B
-    when (S00.rvalid && S00.rready) {
+    when(S00.rvalid && S00.rready) {
       stat_idle := true.B
     }
   }
 }
 
-object Memcpy {
-  def main(args: Array[String]): Unit = (new ChiselStage).emitVerilog(new Memcpy(16, 64),
-    annotations = AnnotationSeq(Seq(
-      CustomDefaultMemoryEmission(MemoryNoInit),
-      CustomDefaultRegisterEmission(useInitAsPreset = false, disableRandomization = true)
-    )))
-}
+//object Memcpy {
+//  def main(args: Array[String]): Unit = (new ChiselStage).emitVerilog(new BeethovenTop(8, 24),
+//    annotations = AnnotationSeq(Seq(
+//      CustomDefaultMemoryEmission(MemoryNoInit),
+//      CustomDefaultRegisterEmission(useInitAsPreset = false, disableRandomization = true)
+//    )))
+//}

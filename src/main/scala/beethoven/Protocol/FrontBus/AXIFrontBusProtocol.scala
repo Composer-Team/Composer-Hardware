@@ -6,7 +6,7 @@ import beethoven.Generation.DotGen
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import beethoven.Platforms._
-import beethoven.Protocol.AXI.AXI4Compat
+import beethoven.Protocol.AXI.{AXI4Compat, LongAXI4ToTL}
 import beethoven.Protocol.RoCC.Helpers.FrontBusHub
 import beethoven.Protocol.RoCC._
 import beethoven.Systems.make_tl_buffer
@@ -27,15 +27,14 @@ class AXIFrontBusProtocol(withDMA: Boolean) extends FrontBusProtocol {
       idBits = ap.idBits))))
     AXI4Compat.connectCompatSlave(S00_AXI, port_cast.out(0)._1)
 
-    val dma = if (withDMA) {
+    if (withDMA) {
       val dma = IO(Flipped(new AXI4Compat(MasterPortParams(
         base = 0,
-        size = 1L << p(PlatformKey).frontBusAddressNBits,
-        beatBytes = dma_cast.get.out(0)._1.r.bits.data.getWidth,
+        size = platform.extMem.master.size,
+        beatBytes = dma_cast.get.out(0)._1.r.bits.data.getWidth/8,
         idBits = 6))))
       AXI4Compat.connectCompatSlave(dma, dma_cast.get.out(0)._1)
-      Some(dma)
-    } else None
+    }
 
   }
 
@@ -67,14 +66,14 @@ class AXIFrontBusProtocol(withDMA: Boolean) extends FrontBusProtocol {
         val node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
           masters = Seq(AXI4MasterParameters(
             name = "S01_AXI",
-            maxFlight = Some(2),
+            maxFlight = Some(1),
             aligned = true,
-            id = IdRange(0, 1 << 6),
+            id = IdRange(0, 1 << 6)
           ))
         )))
         val dma2tl = TLIdentityNode()
         DeviceContext.withDevice(frontInterfaceID) {
-          dma2tl := make_tl_buffer() := (LazyModuleWithFloorplan(new AXI4ToTL(false), "axi4ToTL_dma").node) := node
+          dma2tl := make_tl_buffer(Some("DMA_BUFFER")) := (LazyModuleWithFloorplan(new LongAXI4ToTL(64), "axi4ToTL_dma").node) := AXI4Buffer() := node
         }
         (Some(node), Some(dma2tl))
       } else (None, None)

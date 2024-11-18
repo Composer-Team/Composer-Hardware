@@ -503,6 +503,15 @@ package object Systems {
     f"zzanonymous_tlbuffer_$id"
   }).node
 
+  private[beethoven] def make_tl_buffer(opt_name: Option[String])(implicit p: Parameters): TLNode = LazyModuleWithFloorplan(new TLBuffer(), {
+    val id = tl_buffer_id
+    tl_buffer_id = tl_buffer_id + 1
+    opt_name match {
+      case None => f"zzanonymous_tlbuffer_$id"
+      case Some(q) => q
+    }
+  }).node
+
   private[beethoven] def tl_assign[T <: TLNode](from: Seq[T], to: T)(implicit p: Parameters): Unit = {
     from.foreach(a => to := a)
   }

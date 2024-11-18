@@ -4,8 +4,9 @@ import chisel3._
 import chisel3.util._
 import beethoven.MemoryStreams._
 import beethoven.common.ShiftReg
+import chipsalliance.rocketchip.config.Parameters
 
-class RegMem(nRows: Int, nColumns: Int, nPorts: Int, latency: Int) extends RawModule with HasMemoryInterface{
+class RegMem(nRows: Int, nColumns: Int, nPorts: Int, latency: Int)(implicit p: Parameters) extends RawModule with HasMemoryInterface{
   val io = IO(new MemoryIOBundle(0, 0, nPorts, log2Up(nRows), nColumns, perByteWE = false))
 
   override def data_in: Seq[UInt] = io.data_in

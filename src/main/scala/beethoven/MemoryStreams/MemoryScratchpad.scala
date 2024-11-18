@@ -7,7 +7,7 @@ import beethoven.{ScratchpadConfig, _}
 import beethoven.MemoryStreams.Loaders.ScratchpadPackedSubwordLoader
 import beethoven.common.{Address, CLog2Up, ShiftReg, splitIntoChunks}
 import beethoven.MemoryStreams.MemoryScratchpad.has_warned
-import beethoven.MemoryStreams.Readers.{LightweightReader, LightweightReader_small, SequentialReader}
+import beethoven.MemoryStreams.Readers.{LightweightReader, LightweightReader_small, ReadChannelIO, ReaderModuleIO, SequentialReader}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
@@ -79,6 +79,7 @@ class MemoryScratchpad(csp: ScratchpadConfig)(implicit p: Parameters) extends La
 
   val blockBytes = p(CacheBlockBytes)
   lazy val module = new ScratchpadImpl(csp, this)
+  val forceCustom = true
   val useLowResourceReader = csp.dataWidthBits.intValue() > channelWidthBytes * 8 * platform.prefetchSourceMultiplicity
   if (useLowResourceReader && !has_warned) {
     has_warned = true
@@ -113,23 +114,23 @@ class ScratchpadImpl(csp: ScratchpadConfig,
                      outer: MemoryScratchpad) extends LazyModuleImp(outer) {
   val nDatas = csp.nDatas.intValue()
   val datasPerCacheLine = csp.features.nBanks
-  val dataWidthBits = csp.dataWidthBits.intValue()
+  val dWidth = csp.dataWidthBits.intValue()
   val nPorts = csp.nPorts
   val latency = csp.latency.intValue()
   val specialization = csp.features.specialization
   val supportWriteback = csp.features.supportWriteback
 
   private val realNRows = Math.max((nDatas.toFloat / datasPerCacheLine).ceil.toInt,
-    outer.channelWidthBytes * 8 / dataWidthBits)
-  val memoryLengthBits = log2Up(realNRows * dataWidthBits) + 1
+    outer.channelWidthBytes * 8 / dWidth)
+  val memoryLengthBits = log2Up(realNRows * dWidth) + 1
 
   private val maxTxLength = outer.channelWidthBytes
 
   private val scReqBits = log2Up(nDatas)
-  val IOs = Seq.fill(nPorts)(IO(new ScratchpadDataPort(scReqBits, dataWidthBits)))
+  val IOs = Seq.fill(nPorts)(IO(new ScratchpadDataPort(scReqBits, dWidth)))
   val req = IO(new ScratchpadMemReqPort(nDatas))
   private val memory = Seq.fill(datasPerCacheLine)(Memory(latency,
-    dataWidth = dataWidthBits,
+    dataWidth = dWidth,
     nRows = realNRows,
     debugName = Some(outer.name),
     nReadPorts = if (csp.features.readOnly) nPorts - 1 else 0,
@@ -181,20 +182,20 @@ class ScratchpadImpl(csp: ScratchpadConfig,
     val loader = Module(specialization match {
       case psw: PackedSubwordScratchpadConfig =>
         require(datasPerCacheLine == 1)
-        new ScratchpadPackedSubwordLoader(dataWidthBits, scReqBits, psw.wordSizeBits, psw.datsPerSubword)
+        new ScratchpadPackedSubwordLoader(dWidth, scReqBits, psw.wordSizeBits, psw.datsPerSubword)
       case _: FlatPackScratchpadConfig =>
-        new ScratchpadPackedSubwordLoader(dataWidthBits * datasPerCacheLine, scReqBits - CLog2Up(datasPerCacheLine), dataWidthBits * datasPerCacheLine, 1)
+        new ScratchpadPackedSubwordLoader(dWidth * datasPerCacheLine, scReqBits - CLog2Up(datasPerCacheLine), dWidth * datasPerCacheLine, 1)
     })
 
     val swWordSize = specialization match {
       case psw: PackedSubwordScratchpadConfig =>
         psw.wordSizeBits
-      case _ => dataWidthBits
+      case _ => dWidth
     }
 
     loader.io.sp_write_out.ready := true.B
     when(loader.io.sp_write_out.valid) {
-      val dataSplit = splitIntoChunks(loader.io.sp_write_out.bits.dat, dataWidthBits)
+      val dataSplit = splitIntoChunks(loader.io.sp_write_out.bits.dat, dWidth)
       memory.zip(dataSplit) foreach { case (mem, dat) =>
         val rwp = mem.getReadWritePortIdx(0)
         mem.addr(rwp) := loader.io.sp_write_out.bits.idx
@@ -208,48 +209,139 @@ class ScratchpadImpl(csp: ScratchpadConfig,
     loader.io.cache_block_in.bits.len := maxTxLength.U
     val idxCounter = Reg(UInt(log2Up(realNRows).W))
 
+    def linearReadInc(): Unit = {
+      when(loader.io.cache_block_in.fire) {
+        idxCounter := idxCounter + loader.spEntriesPerBeat.U
+      }
+      when(req.init.fire) {
+        idxCounter := req.init.bits.scAddr
+      }
+      loader.io.cache_block_in.bits.idxBase := idxCounter
+    }
+
     val tx_ready = {
-      val reader = if (outer.useLowResourceReader)
-        Module(new LightweightReader(
+      val reader = if (outer.useLowResourceReader) {
+        val reader = Module(new LightweightReader(
           swWordSize * datasPerCacheLine,
           tl_edge = outer.mem_reader.get.out(0)._2,
           tl_bundle = outer.mem_reader.get.out(0)._1))
-      else if (outer.very_small_sp)
-        Module(new LightweightReader_small(
+        reader.tl_out <> outer.mem_reader.get.out(0)._1
+        linearReadInc()
+        reader.io
+      } else if (outer.very_small_sp) {
+        val reader = Module(new LightweightReader_small(
           dWidth = swWordSize * datasPerCacheLine,
           tl_bundle = outer.mem_reader.get.out(0)._1,
           tl_edge = outer.mem_reader.get.out(0)._2,
           sp_sz_bytes = csp.nDatas.intValue() * csp.dataWidthBits.intValue() / 8
         ))
-      else
-        Module(new SequentialReader(
+        reader.tl_out <> outer.mem_reader.get.out(0)._1
+        linearReadInc()
+        reader.io
+      } else if (!outer.forceCustom) {
+        val reader = Module(new SequentialReader(
           swWordSize * datasPerCacheLine,
           tl_edge = outer.mem_reader.get.out(0)._2,
           tl_bundle = outer.mem_reader.get.out(0)._1))
+        reader.tl_out <> outer.mem_reader.get.out(0)._1
+        linearReadInc()
+        reader.io
+      } else {
+        val reader = Wire(Output(new ReadChannelIO(dWidth)))
+        val (tl_out, tl_edge) = outer.mem_reader.get.out(0)
+        val beatBytes = tl_out.params.dataBits / 8
+        val beatBytesWidth = CLog2Up(beatBytes)
 
-      reader.tl_out <> outer.mem_reader.get.out(0)._1
-      reader.io.req.valid := req.init.valid
-      reader.io.req.bits.addr := req.init.bits.memAddr
-      reader.io.req.bits.len := req.init.bits.len
-      when(req.init.fire) {
-        idxCounter := req.init.bits.scAddr
+        val addr, expectedBeatsLeft = Reg(UInt((tl_out.params.addressBits - beatBytesWidth).W))
+        val bigTxBytes = platform.prefetchSourceMultiplicity * beatBytes
+
+        val sourceIdle = Reg(Vec(tl_edge.client.endSourceId, Bool()))
+        val hasIdle = sourceIdle.asUInt =/= 0.U
+        val nextSource = PriorityEncoder(sourceIdle)
+
+        val offsetAcc = Reg(UInt(log2Up(csp.nDatas).W))
+        val spadAddrOffsetPerSource = Reg(Vec(tl_edge.client.endSourceId, UInt(log2Up(csp.nDatas).W)))
+        val beatsLeftPerSourcee = Reg(Vec(tl_edge.client.endSourceId, UInt(log2Up(platform.prefetchSourceMultiplicity).W)))
+
+        when(reset.asBool) {
+          sourceIdle.foreach(_ := true.B)
+          expectedBeatsLeft := 0.U
+        }
+
+
+        val s_idle :: s_emit :: s_wait :: Nil = Enum(3)
+        val state = RegInit(s_idle)
+
+        reader.channel.data.valid := tl_out.d.valid
+        reader.channel.data.bits := tl_out.d.bits.data
+        tl_out.d.ready := reader.channel.data.ready
+        tl_out.a.valid := false.B
+
+        val src = tl_out.d.bits.source
+        loader.io.cache_block_in.bits.idxBase := spadAddrOffsetPerSource(src)
+        when (tl_out.d.fire) {
+          val progress = beatsLeftPerSourcee(src)
+          beatsLeftPerSourcee(src) := progress - 1.U
+          when (progress === 0.U) {
+            sourceIdle(src) := true.B
+          }
+          spadAddrOffsetPerSource(src) := spadAddrOffsetPerSource(src) + loader.spEntriesPerBeat.U
+        }
+
+        when (state === s_idle) {
+          when (reader.req.fire) {
+            expectedBeatsLeft := reader.req.bits.len >> beatBytesWidth
+            offsetAcc := req.init.bits.scAddr
+            state := s_emit
+            addr := req.init.bits.memAddr.address >> beatBytesWidth
+          }
+        }.elsewhen(state === s_emit) {
+          when (hasIdle && expectedBeatsLeft =/= 0.U) {
+            val isBig = expectedBeatsLeft >= platform.prefetchSourceMultiplicity.U
+            tl_out.a.valid := true.B
+            tl_out.a.bits.opcode := TLMessages.Get
+            tl_out.a.bits.address := Cat(addr, 0.U(beatBytesWidth.W))
+            tl_out.a.bits.data := DontCare
+            tl_out.a.bits.source := nextSource
+            tl_out.a.bits.mask := BigInt("1" * beatBytes, radix=2).U
+            tl_out.a.bits.size := Mux(isBig, CLog2Up(bigTxBytes).U, CLog2Up(beatBytes).U)
+            when (tl_out.a.fire) {
+              sourceIdle(nextSource) := false.B
+              addr := addr + Mux(isBig, platform.prefetchSourceMultiplicity.U, 1.U)
+              spadAddrOffsetPerSource(nextSource) := offsetAcc
+              offsetAcc := offsetAcc + Mux(isBig, (loader.spEntriesPerBeat * platform.prefetchSourceMultiplicity).U, loader.spEntriesPerBeat.U)
+              beatsLeftPerSourcee(src) := Mux(isBig, (platform.prefetchSourceMultiplicity-1).U, 0.U)
+              expectedBeatsLeft := expectedBeatsLeft - Mux(isBig, platform.prefetchSourceMultiplicity.U, 1.U)
+            }
+          }
+          when (expectedBeatsLeft === 0.U) {
+            state := s_wait
+          }
+        }.elsewhen(state === s_wait) {
+          when (loader.io.cache_block_in.ready && sourceIdle.asUInt === BigInt("1" * tl_edge.client.endSourceId, radix=2).U) {
+            state := s_idle
+          }
+        }
+        reader.req.ready := state === s_idle
+        reader.channel.in_progress := state =/= s_idle
+        reader
       }
-      loader.io.cache_block_in.valid := reader.io.channel.data.valid
-      loader.io.cache_block_in.bits.dat := reader.io.channel.data.bits
-      loader.io.cache_block_in.bits.idxBase := idxCounter
-      reader.io.channel.data.ready := loader.io.cache_block_in.ready
-      reader.io.req.ready
-    }
-    when(loader.io.cache_block_in.fire) {
-      idxCounter := idxCounter + loader.spEntriesPerBeat.U
+
+      reader.req.valid := req.init.valid
+      reader.req.bits.addr := req.init.bits.memAddr
+      reader.req.bits.len := req.init.bits.len
+      loader.io.cache_block_in.valid := reader.channel.data.valid
+      loader.io.cache_block_in.bits.dat := reader.channel.data.bits
+      reader.channel.data.ready := loader.io.cache_block_in.ready
+      reader.req.ready
     }
 
     req.init.ready := tx_ready && loader.io.cache_block_in.ready
 
 
     if (supportWriteback) {
-      require(specialization.isInstanceOf[FlatPackScratchpadConfig] && dataWidthBits % 8 == 0)
-      val writer = Module(new SequentialWriter(userBytes = dataWidthBits / 8,
+      require(specialization.isInstanceOf[FlatPackScratchpadConfig] && dWidth % 8 == 0)
+      val writer = Module(new SequentialWriter(userBytes = dWidth / 8,
         tl_outer = outer.mem_writer.get.out(0)._1,
         edge = outer.mem_writer.get.out(0)._2))
       writer.tl_out.a.ready := false.B

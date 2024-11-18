@@ -22,9 +22,6 @@ abstract class Platform {
   // more precise decision-making
   val platformType: PlatformType
 
-  // Is the memory access from the FPGA discrete from the host memory
-  val hasDiscreteMemory: Boolean
-
   /**
    * The front bus is the MMIO bus that the host uses to access accelerator cores. Most parameters are
    * self-explanatory except for some platforms (usually heavily resource constrained ones), the host
@@ -35,7 +32,6 @@ abstract class Platform {
   val frontBusAddressNBits: Int
   val frontBusAddressMask: Long
   val frontBusBeatBytes: Int
-  val frontBusCanDriveMemory: Boolean
   val frontBusProtocol: FrontBusProtocol
 
   /**
@@ -45,6 +41,8 @@ abstract class Platform {
    * `physicalMemoryBytes` parameter corresponds to the size of the physical memory space and
    * `memorySpaceSizeBytes` corresponds to the size of the whole addressable space.
    */
+  // Is the memory access from the FPGA discrete from the host memory
+  val hasDiscreteMemory: Boolean
   val physicalMemoryBytes: Long
   val memorySpaceAddressBase: Long
   val memorySpaceSizeBytes: Long
@@ -77,9 +75,7 @@ abstract class Platform {
   val xbarMaxDegree = 2
   // maximum number of logical memory endpoints per system (read and write handled separately)
   val maxMemEndpointsPerSystem = 1
-
   val maxMemEndpointsPerCore = 1
-
   val interCoreMemReductionLatency = 1
   val interCoreMemBusWidthBytes = 4
 
@@ -105,9 +101,9 @@ abstract class Platform {
 
   def placementAffinity: Map[Int, Double] = Map.from(physicalDevices.map { dev => (dev.identifier, 1.0 / physicalDevices.length) })
 
-  val physicalDevices: List[DeviceConfig]
-  val physicalInterfaces: List[PhysicalInterface]
-  val physicalConnectivity: List[(Int, Int)]
+  val physicalDevices: List[DeviceConfig] = List(DeviceConfig(0, ""))
+  val physicalInterfaces: List[PhysicalInterface] = List(PhysicalHostInterface(0), PhysicalMemoryInterface(0, 0))
+  val physicalConnectivity: List[(Int, Int)] = List()
 
   private[beethoven] def platformCheck(): Unit = {
     assert(physicalInterfaces.exists(_.isInstanceOf[PhysicalHostInterface]),

@@ -13,7 +13,6 @@ abstract class U200Platform(val memoryNChannels: Int) extends Platform {
   override val frontBusAddressNBits: Int = 16
   override val frontBusAddressMask: Long = 0xFFFF
   override val frontBusBeatBytes: Int = 4
-  override val frontBusCanDriveMemory: Boolean = false
   override val frontBusProtocol: FrontBusProtocol = new AXIFrontBusProtocol(true)
 
   override val physicalMemoryBytes: Long = 0x400000000L

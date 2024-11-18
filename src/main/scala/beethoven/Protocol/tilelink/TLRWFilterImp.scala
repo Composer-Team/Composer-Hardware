@@ -22,6 +22,7 @@ class TLRWFilterImp(outer: TLRWFilter) extends LazyModuleImp(outer) {
 
   aqueue.io.deq.ready := Mux(is_read, out_read.a.ready, out_write.a.ready)
   out_read.a.valid := aqueue.io.deq.valid && is_read
+  out_read.a.bits := aqueue.io.deq.bits
   out_write.a.valid := aqueue.io.deq.valid && !is_read
   out_write.a.bits := aqueue.io.deq.bits
 

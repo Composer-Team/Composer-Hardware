@@ -2,15 +2,16 @@ package beethoven.MemoryStreams.RAM
 
 import chisel3._
 import chisel3.util._
-import beethoven.MemoryStreams.{MemoryIOBundle, HasMemoryInterface}
+import beethoven.MemoryStreams.{HasMemoryInterface, MemoryIOBundle}
 import beethoven.common.ShiftReg
+import chipsalliance.rocketchip.config.Parameters
 
 private class SRMMHelper(nReadPorts: Int,
                          nWritePorts: Int,
                          nReadWritePorts: Int,
                          nRows: Int,
                          dataWidth: Int,
-                         latency: Int) extends Module {
+                         latency: Int)(implicit p: Parameters) extends Module {
   val mio = IO(new MemoryIOBundle(nReadPorts, nWritePorts, nReadWritePorts, log2Up(nRows), dataWidth, false))
   val cmem = SyncReadMem(nRows, UInt(dataWidth.W))
   dontTouch(mio)
@@ -52,7 +53,7 @@ private class SRMMHelper(nReadPorts: Int,
 class SyncReadMemMem(nReadPorts: Int,
                      nWritePorts: Int,
                      nReadWritePorts: Int,
-                     nRows: Int, dataWidth: Int, latency: Int) extends RawModule with HasMemoryInterface {
+                     nRows: Int, dataWidth: Int, latency: Int)(implicit p: Parameters) extends RawModule with HasMemoryInterface {
 
   val mio = IO(new MemoryIOBundle(nReadPorts, nWritePorts, nReadWritePorts, log2Up(nRows), dataWidth, false))
   withClockAndReset(mio.clock.asClock, false.B.asAsyncReset) {
