@@ -1,7 +1,7 @@
 package beethoven.Protocol.AXI
 
 import beethoven.MemoryStreams.Memory
-import beethoven.common.ShiftReg
+import beethoven.common.{CLog2Up, ShiftReg}
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.amba.axi4.AXI4ToTLNode
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
@@ -13,6 +13,7 @@ import scala.annotation.tailrec
 
 class LongAXI4ToTL(maxTxLen: Int)(implicit p: Parameters) extends LazyModule {
   val node = AXI4ToTLNode(wcorrupt = false)
+
 
   lazy val module = new LazyModuleImp(this) {
     /**
@@ -28,80 +29,46 @@ class LongAXI4ToTL(maxTxLen: Int)(implicit p: Parameters) extends LazyModule {
     val READ_SOURCE = 1
 
     // write machine
-    val mem_latency = 2
-    val axibuff = Memory(mem_latency, axi_param.bundle.dataBits, maxTxLen, 0, 0, 1)
-    axibuff.initLow(clock)
-    val wtx_len, wtx_cnt = RegInit(0.U(8.W))
+    val wtx_len = RegInit(0.U(9.W))
     val s_idle :: s_axi :: s_tl :: s_drain :: s_resp_tl :: s_resp_axi :: Nil = Enum(6)
     val state = RegInit(s_idle)
     axi_in.aw.ready := state === s_idle
+    val writeQ = Module(new Queue[UInt](axi_in.w.bits.data.cloneType, maxTxLen))
     when(axi_in.aw.fire) {
-      wtx_len := axi_in.aw.bits.len
-      wtx_cnt := 0.U
+      wtx_len := axi_in.aw.bits.len +& 1.U
       state := s_axi
     }
     axi_in.w.ready := state === s_axi
     val waddr = Reg(axi_in.aw.bits.addr.cloneType)
     val wid = Reg(axi_in.aw.bits.id.cloneType)
-    val wnbeats = Reg(axi_in.aw.bits.len.cloneType)
+    val wnbeats = Reg(UInt(log2Up(65).W))
     when(axi_in.aw.fire) {
       waddr := axi_in.aw.bits.addr
       wid := axi_in.aw.bits.id
-      wnbeats := axi_in.aw.bits.len
+      wnbeats := axi_in.aw.bits.len +& 1.U
     }
     tl_out.a.bits.address := waddr
-    val w_tl_mem_read_wire = WireInit(false.B)
-    axibuff.addr(0) := wtx_cnt
-    axibuff.write_enable(0) := state === s_axi
-    axibuff.read_enable(0) := state === s_tl
-    axibuff.chip_select(0) := axi_in.w.fire || w_tl_mem_read_wire
-    axibuff.data_in(0) := axi_in.w.bits.data
-    when(axi_in.w.fire) {
-      wtx_cnt := wtx_cnt + 1.U
-      when(wtx_cnt === wtx_len) {
-        state := s_tl
-        wtx_cnt := 0.U
-      }
-    }
-    val writeQ = Module(new Queue[UInt](axi_in.w.bits.data.cloneType, mem_latency + 1))
-    val Q_promised_occupancy = RegInit(0.U(log2Up(mem_latency + 2).W))
-    val mem_r_valid = ShiftReg(w_tl_mem_read_wire, mem_latency)
-    when(w_tl_mem_read_wire && writeQ.io.deq.fire) {
-    }.elsewhen(w_tl_mem_read_wire) {
-      Q_promised_occupancy := Q_promised_occupancy + 1.U
-    }.elsewhen(writeQ.io.deq.fire) {
-      Q_promised_occupancy := Q_promised_occupancy - 1.U
-    }
-    writeQ.io.enq.bits := axibuff.data_out(0)
-    writeQ.io.enq.valid := mem_r_valid
-    assert(writeQ.io.enq.ready)
-
-    def axilen2tllen(a: UInt): UInt = {
-      val out = Wire(tl_out.a.bits.size.cloneType)
-      out := 0.U
-
-      @tailrec
-      def rec_decide(accidx: Int): Unit = {
-        // if accidx can't be stored in out, then quit
-        if (accidx >= (1 << out.getWidth)) return
-        when(a >= ((1 << accidx)-1).U) {
-          out := accidx.U
-        }
-        rec_decide(accidx+1)
-      }
-
-      rec_decide(1)
-      out + log2Up(axi_in.w.bits.data.getWidth/8).U
+    writeQ.io.enq.valid := state === s_axi && axi_in.w.fire
+    writeQ.io.enq.bits := axi_in.w.bits.data
+    writeQ.io.deq.ready := state === s_tl && tl_out.a.fire
+    val firstWrite = Reg(Bool())
+    val isBigReg = Reg(Bool())
+    val isBig = Mux(firstWrite, wnbeats >= 8.U, isBigReg)
+    val asz = Mux(isBig, (CLog2Up(axi_in.w.bits.data.getWidth/8)+3).U, CLog2Up(axi_in.w.bits.data.getWidth/8).U)
+    when(axi_in.w.fire && axi_in.w.bits.last) {
+      state := s_tl
+      firstWrite := true.B
     }
 
-    val can_emit_w_tl = state === s_tl || state === s_drain
-    tl_out.a.valid := can_emit_w_tl && writeQ.io.deq.valid
-    writeQ.io.deq.ready := can_emit_w_tl && tl_out.a.ready
+    val DO_WRITE = WireInit(false.B)
+    tl_out.a.valid := DO_WRITE
+    writeQ.io.deq.ready := DO_WRITE && tl_out.a.ready
     tl_out.a.bits.corrupt := false.B
     tl_out.a.bits.source := WRITE_SOURCE.U
     tl_out.a.bits.address := waddr
-    tl_out.a.bits.size := axilen2tllen(wnbeats)
+    tl_out.a.bits.size := asz
     tl_out.a.bits.data := writeQ.io.deq.bits
+    assert(!(tl_out.a.valid) || (tl_out.a.valid && writeQ.io.deq.ready) || (tl_out.a.valid && tl_out.a.bits.source === READ_SOURCE.U))
     tl_out.a.bits.opcode := TLMessages.PutFullData
 
     val can_accept_wresp_tl = state === s_resp_tl &&
@@ -111,21 +78,40 @@ class LongAXI4ToTL(maxTxLen: Int)(implicit p: Parameters) extends LazyModule {
     axi_in.b.bits.resp := 0.U
     axi_in.b.valid := false.B
 
+    val writeCount = Reg(UInt(3.W))
     when(state === s_tl) {
-      when ((Q_promised_occupancy < (mem_latency + 1).U || writeQ.io.deq.fire) && wtx_cnt <= wtx_len) {
-        w_tl_mem_read_wire := true.B
-        wtx_cnt := wtx_cnt + 1.U
-        when(wtx_cnt === wtx_len) {
-          state := s_drain
+      DO_WRITE := true.B
+      when (tl_out.a.fire) {
+        firstWrite := false.B
+        when(firstWrite) {
+          isBigReg := wnbeats >= 8.U
         }
+        when (wnbeats < 8.U) {
+          state := s_resp_tl
+        }.otherwise {
+          state := s_drain
+          writeCount := 7.U
+        }
+        wnbeats := wnbeats - 1.U
       }
     }.elsewhen(state === s_drain) {
-      when (!writeQ.io.deq.valid) {
-        state := s_resp_tl
+      DO_WRITE := true.B
+      when (tl_out.a.fire) {
+        writeCount := writeCount - 1.U
+        wnbeats := wnbeats - 1.U
+        when (writeCount === 1.U) {
+          state := s_resp_tl
+        }
       }
     }.elsewhen(state === s_resp_tl) {
       when (can_accept_wresp_tl && tl_out.d.valid) {
-        state := s_resp_axi
+        when (wnbeats === 0.U) {
+          state := s_resp_axi
+        }.otherwise {
+          state := s_tl
+          waddr := waddr + Mux(isBigReg, (axi_in.w.bits.data.getWidth).U, (axi_in.w.bits.data.getWidth/8).U)
+          firstWrite := true.B
+        }
       }
     }.elsewhen(state === s_resp_axi) {
       axi_in.b.valid := true.B
@@ -135,56 +121,62 @@ class LongAXI4ToTL(maxTxLen: Int)(implicit p: Parameters) extends LazyModule {
     }
 
     // read machine gotta be independent
-    val r_idle :: r_emit :: r_wait :: r_drain :: Nil = Enum(4)
+    val r_idle :: r_emit :: r_wait :: Nil = Enum(3)
     val rstate = RegInit(r_idle)
 
     axi_in.ar.ready := rstate === r_idle
-    val rnbeats, rnbeatstot = Reg(axi_in.ar.bits.len.cloneType)
-    val rnctr = Reg(UInt((rnbeats.getWidth+1).W))
+    val rnbeats, rnbeatsout = Reg(UInt(7.W))
+    val rnctr = Reg(UInt(4.W))
     val raddr = Reg(axi_in.ar.bits.addr.cloneType)
     val rid = Reg(axi_in.ar.bits.id.cloneType)
 
 
-    tl_out.d.ready := can_accept_wresp_tl || (tl_out.d.bits.source === READ_SOURCE.U && ((rstate === r_wait && axi_in.r.ready) || rstate === r_drain))
+    val can_read_accept = tl_out.d.bits.source === READ_SOURCE.U && axi_in.r.ready
+    tl_out.d.ready := can_accept_wresp_tl || can_read_accept
+    axi_in.r.valid := tl_out.d.bits.source === READ_SOURCE.U && tl_out.d.valid
     axi_in.r.bits.data := tl_out.d.bits.data
-    axi_in.r.bits.last := rnctr === rnbeats
+    axi_in.r.bits.last := rnbeatsout === 1.U
     axi_in.r.bits.id := rid
+    when (axi_in.r.fire) {
+      rnbeatsout := rnbeatsout - 1.U
+    }
     when (rstate === r_idle) {
       when (axi_in.ar.fire) {
-        rnbeats := axi_in.ar.bits.len
+        rnbeats := axi_in.ar.bits.len +& 1.U
+        rnbeatsout := axi_in.ar.bits.len +& 1.U
         raddr := axi_in.ar.bits.addr
         rid := axi_in.ar.bits.id
-        rnctr := 0.U
         rstate := r_emit
       }
     }.elsewhen(rstate === r_emit) {
       when (state =/= s_drain && state =/= s_tl) {
         tl_out.a.valid := true.B
-        val len = axilen2tllen(rnbeats)
         tl_out.a.bits.address := raddr
         tl_out.a.bits.source := READ_SOURCE.U
-        tl_out.a.bits.size := len
+        val is_big = rnbeats >= 8.U
+        val tx_sz_log = Mux(is_big, (log2Up(tl_out.a.bits.data.getWidth/8)+3).U, log2Up(tl_out.a.bits.data.getWidth/8).U)
+        val tx_sz = Mux(is_big, 8.U, 1.U)
+        rnctr := tx_sz
+
+        tl_out.a.bits.size := tx_sz_log
         tl_out.a.bits.opcode := TLMessages.Get
         tl_out.a.bits.corrupt := false.B
-        rnbeatstot := (1.U << (len-log2Up(tl_out.a.bits.data.getWidth/8).U)).asUInt
+        rnbeats := rnbeats - tx_sz
+        raddr := raddr + Cat(tx_sz, 0.U(6.W))
         when (tl_out.a.fire) {
           rstate := r_wait
         }
       }
     }.elsewhen(rstate === r_wait) {
-      axi_in.r.valid := tl_out.d.valid && tl_out.d.bits.source === READ_SOURCE.U
-      when (tl_out.d.fire && tl_out.d.bits.source === READ_SOURCE.U) {
-        rnctr := rnctr + 1.U
-        when (rnctr === rnbeats) {
-          rstate := r_drain
+      when (can_read_accept && tl_out.d.valid) {
+        rnctr := rnctr - 1.U
+        when (rnctr === 1.U) {
+          when (rnbeats === 0.U) {
+            rstate := r_idle
+          }.otherwise {
+            rstate := r_emit
+          }
         }
-      }
-    }.elsewhen(rstate === r_drain) {
-      when (rnctr === rnbeatstot) {
-        rstate := r_idle
-      }
-      when (tl_out.d.fire && tl_out.d.bits.source === READ_SOURCE.U) {
-        rnctr := rnctr + 1.U
       }
     }
     tl_out.a.bits.mask := BigInt("1" * tl_out.a.bits.mask.getWidth, radix = 2).U

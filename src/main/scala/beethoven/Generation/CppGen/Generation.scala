@@ -80,9 +80,9 @@ object Generation {
              |#include <verilated.h>
              |using BeethovenFrontBusAddr_t = ${getUnsignedCIntType(platform.frontBusAddressNBits)};
              |using BeethovenMemIDDtype=$idDtype;
+             |${platform match {case pWithDMA: PlatformHasSeparateDMA => s"using BeethovenDMAIDtype=${getVerilatorDtype(pWithDMA.DMAIDBits)};"; case _ => ""}}
              |#endif
              |#define DEFAULT_PL_CLOCK ${platform.clockRateMHz}
-             |${platform match {case pWithDMA: PlatformHasSeparateDMA => s"using BeethovenDMAIDtype=${getVerilatorDtype(pWithDMA.DMAIDBits)};"; case _ => ""}}
              |#define DATA_BUS_WIDTH ${platform.extMem.master.beatBytes * 8}
              |#endif
              |""".stripMargin
