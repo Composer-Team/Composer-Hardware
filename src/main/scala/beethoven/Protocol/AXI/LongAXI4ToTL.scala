@@ -34,6 +34,7 @@ class LongAXI4ToTL(maxTxLen: Int)(implicit p: Parameters) extends LazyModule {
     val state = RegInit(s_idle)
     axi_in.aw.ready := state === s_idle
     val writeQ = Module(new Queue[UInt](axi_in.w.bits.data.cloneType, maxTxLen))
+    val writeMaskQ = Module(new Queue[UInt](axi_in.w.bits.strb.cloneType, maxTxLen))
     when(axi_in.aw.fire) {
       wtx_len := axi_in.aw.bits.len +& 1.U
       state := s_axi
@@ -51,6 +52,11 @@ class LongAXI4ToTL(maxTxLen: Int)(implicit p: Parameters) extends LazyModule {
     writeQ.io.enq.valid := state === s_axi && axi_in.w.fire
     writeQ.io.enq.bits := axi_in.w.bits.data
     writeQ.io.deq.ready := state === s_tl && tl_out.a.fire
+    writeMaskQ.io.enq.valid := writeQ.io.enq.valid
+    writeMaskQ.io.enq.bits := axi_in.w.bits.strb
+    writeMaskQ.io.deq.ready := writeQ.io.deq.ready
+
+
     val firstWrite = Reg(Bool())
     val isBigReg = Reg(Bool())
     val isBig = Mux(firstWrite, wnbeats >= 8.U, isBigReg)
@@ -69,6 +75,7 @@ class LongAXI4ToTL(maxTxLen: Int)(implicit p: Parameters) extends LazyModule {
     tl_out.a.bits.size := asz
     tl_out.a.bits.data := writeQ.io.deq.bits
     assert(!(tl_out.a.valid) || (tl_out.a.valid && writeQ.io.deq.ready) || (tl_out.a.valid && tl_out.a.bits.source === READ_SOURCE.U))
+    tl_out.a.bits.mask := writeMaskQ.io.deq.bits
     tl_out.a.bits.opcode := TLMessages.PutFullData
 
     val can_accept_wresp_tl = state === s_resp_tl &&
@@ -153,6 +160,7 @@ class LongAXI4ToTL(maxTxLen: Int)(implicit p: Parameters) extends LazyModule {
         tl_out.a.valid := true.B
         tl_out.a.bits.address := raddr
         tl_out.a.bits.source := READ_SOURCE.U
+        tl_out.a.bits.mask := BigInt("1" * tl_out.a.bits.mask.getWidth, radix = 2).U
         val is_big = rnbeats >= 8.U
         val tx_sz_log = Mux(is_big, (log2Up(tl_out.a.bits.data.getWidth/8)+3).U, log2Up(tl_out.a.bits.data.getWidth/8).U)
         val tx_sz = Mux(is_big, 8.U, 1.U)
@@ -179,6 +187,5 @@ class LongAXI4ToTL(maxTxLen: Int)(implicit p: Parameters) extends LazyModule {
         }
       }
     }
-    tl_out.a.bits.mask := BigInt("1" * tl_out.a.bits.mask.getWidth, radix = 2).U
   }
 }

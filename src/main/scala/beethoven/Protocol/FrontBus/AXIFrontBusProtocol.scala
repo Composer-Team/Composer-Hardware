@@ -52,12 +52,14 @@ class AXIFrontBusProtocol(withDMA: Boolean) extends FrontBusProtocol {
       val fronthub =
         DeviceContext.withDevice(frontInterfaceID) {
           val fronthub = LazyModuleWithFloorplan(new FrontBusHub(), "zzfront6_axifronthub")
-          fronthub.tl_in :=
-            LazyModuleWithFloorplan(new AXI4ToTL(false), "zzfront5_axi4ToTL_front").node :=
-            LazyModuleWithFloorplan(new AXI4UserYanker(capMaxFlight = Some(1)), "zzfront4_axi4yank_front").node :=
-            LazyModuleWithFloorplan(new AXI4Buffer(), "zzfront3_axi4buffer_front").node :=
-            LazyModuleWithFloorplan(new AXI4Fragmenter(), "zzfront2_axi4fragment_front").node :=
-            LazyModuleWithFloorplan(new AXI4IdIndexer(1), "zzfront1_axi4idxer").node := axi_master
+//          fronthub.tl_in :=
+//            LazyModuleWithFloorplan(new AXI4ToTL(false), "zzfront5_axi4ToTL_front").node :=
+//            LazyModuleWithFloorplan(new AXI4UserYanker(capMaxFlight = Some(1)), "zzfront4_axi4yank_front").node :=
+//            LazyModuleWithFloorplan(new AXI4Buffer(), "zzfront3_axi4buffer_front").node :=
+//            LazyModuleWithFloorplan(new AXI4Fragmenter(), "zzfront2_axi4fragment_front").node :=
+//            LazyModuleWithFloorplan(new AXI4IdIndexer(1), "zzfront1_axi4idxer").node := axi_master
+//          fronthub
+          fronthub.axi_in := axi_master
           fronthub
         }
 

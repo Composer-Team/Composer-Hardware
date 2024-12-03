@@ -306,11 +306,13 @@ class ScratchpadImpl(csp: ScratchpadConfig,
             tl_out.a.bits.mask := BigInt("1" * beatBytes, radix=2).U
             tl_out.a.bits.size := Mux(isBig, CLog2Up(bigTxBytes).U, CLog2Up(beatBytes).U)
             when (tl_out.a.fire) {
+
               sourceIdle(nextSource) := false.B
-              addr := addr + Mux(isBig, platform.prefetchSourceMultiplicity.U, 1.U)
               spadAddrOffsetPerSource(nextSource) := offsetAcc
+              beatsLeftPerSourcee(nextSource) := Mux(isBig, (platform.prefetchSourceMultiplicity-1).U, 0.U)
+
+              addr := addr + Mux(isBig, platform.prefetchSourceMultiplicity.U, 1.U)
               offsetAcc := offsetAcc + Mux(isBig, (loader.spEntriesPerBeat * platform.prefetchSourceMultiplicity).U, loader.spEntriesPerBeat.U)
-              beatsLeftPerSourcee(src) := Mux(isBig, (platform.prefetchSourceMultiplicity-1).U, 0.U)
               expectedBeatsLeft := expectedBeatsLeft - Mux(isBig, platform.prefetchSourceMultiplicity.U, 1.U)
             }
           }

@@ -152,8 +152,8 @@ class BeethovenBuild(config: AcceleratorConfig,
           CustomDefaultMemoryEmission(MemoryNoInit),
           CustomDefaultRegisterEmission(useInitAsPreset = false, disableRandomization = true),
           RunFirrtlTransformAnnotation(new VerilogEmitter),
-          NoDCEAnnotation,
-          NoConstantPropagationAnnotation
+//          NoDCEAnnotation,
+//          NoConstantPropagationAnnotation
         )
       )
     )

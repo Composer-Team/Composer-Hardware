@@ -177,78 +177,90 @@ class MCRFileModuleAXI(outer: MCRFileAXI, numRegs: Int)(implicit p: Parameters) 
     rChannel.ready := false.B
   }
   io.mcr.write.foreach { wChannel =>
-    wChannel.bits := DontCare
+    wChannel.bits := in.w.bits.data
     wChannel.valid := false.B
   }
 
-  // For bus widths > 64, we expect multiple transactions to
-  switch(state) {
-    is(s_idle) {
-      in.aw.ready := true.B
-      in.ar.ready := !in.aw.valid
-
-      when(in.aw.fire) {
-        address := in.aw.bits.addr >> log2Up(platform.frontBusBeatBytes)
-        state := s_write_data
-        opLen := in.aw.bits.len
-        opvalid := true.B
-        assert(in.aw.bits.len === 0.U)
-      }
-      when(in.ar.fire) {
-        address := in.ar.bits.addr >> log2Up(platform.frontBusBeatBytes)
-        state := s_read
-        opLen := in.ar.bits.len
-        opvalid := true.B
-        assert(in.ar.bits.len === 0.U)
-      }
+  // WRITE
+  val write_machine = {
+    val s_idle :: s_write :: s_drain :: s_response :: Nil = Enum(4)
+    val state = RegInit(s_idle)
+    val addr = Reg(UInt(logNumRegs.W))
+    val len = Reg(in.ar.bits.len.cloneType)
+    val id = Reg(in.ar.bits.id.cloneType)
+    when (in.w.fire) {
+      len := len - 1.U
     }
-    is(s_write_data) {
-      in.w.ready := true.B
-      when(in.w.fire) {
-        writeData := in.w.bits.data
+    when (state === s_idle) {
+      in.aw.ready := true.B
+      addr := in.aw.bits.addr(logNumRegs+2-1, 2)
+      len := in.aw.bits.len
+      when (in.aw.fire) {
         state := s_write
       }
-    }
-    is(s_write) {
-      io.mcr.write(address).bits := writeData
-      val go = io.mcr.write(address).ready || !opvalid
-      io.mcr.write(address).valid := opvalid
-      when(go) {
-        opLen := opLen - 1.U
-        when(opLen === 0.U) {
-          state := s_write_response
+    }.elsewhen(state === s_write) {
+      in.w.ready := true.B
+      io.mcr.write(addr).valid := in.w.valid
+      when (in.w.fire) {
+        when(len === 0.U) {
+          state := s_response
         }.otherwise {
-          state := s_write_data
+          state := s_drain
         }
       }
-    }
-    is(s_write_response) {
+    }.elsewhen(state === s_drain) {
+      in.w.ready := true.B
+      when (in.w.fire && len === 0.U) {
+        state := s_response
+      }
+    }.otherwise {
       in.b.valid := true.B
       in.b.bits.resp := 0.U
-      when(in.b.fire) {
+      in.b.bits.id := id
+      when (in.b.fire) {
         state := s_idle
       }
     }
-    is(s_read) {
-      io.mcr.read(address).ready := opvalid
-      readData := io.mcr.read(address).bits
-      when(io.mcr.read(address).fire || !opvalid) {
-        opvalid := false.B
-        state := s_read_send
-      }
+  }
+
+  val read_machine = {
+    val s_idle :: s_read :: s_drain :: Nil = Enum(3)
+    val state = RegInit(s_idle)
+
+    val addr = Reg(UInt(logNumRegs.W))
+    val len = Reg(in.ar.bits.len.cloneType)
+    val id = Reg(in.ar.bits.id.cloneType)
+    in.r.bits.id := id
+    in.r.bits.last := len === 0.U
+    in.r.bits.resp := 0.U
+    in.r.bits.data := io.mcr.read(addr).bits
+
+    when (in.r.fire) {
+      len := len - 1.U
     }
-    is(s_read_send) {
+    when (state === s_idle) {
+      in.ar.ready := true.B
+      addr := in.ar.bits.addr(logNumRegs+2-1, 2)
+      len := in.ar.bits.len
+      id := in.ar.bits.id
+      when (in.ar.fire) {
+        state := s_read
+      }
+    }.elsewhen(state === s_read) {
       in.r.valid := true.B
-      in.r.bits.resp := 0.U
-      in.r.bits.data := readData
-      in.r.bits.last := opLen === 0.U
-      when(in.r.fire) {
-        when(opLen === 0.U) {
+      io.mcr.read(addr).ready := in.r.ready
+      when (in.r.fire) {
+        when (len === 0.U) {
           state := s_idle
         }.otherwise {
-          state := s_read
+          state := s_drain
         }
-        opLen := opLen - 1.U
+      }
+    }.otherwise {
+      in.r.valid := true.B
+      in.r.bits.data := 0xABCDABCDL.U
+      when (len === 0.U && in.r.fire) {
+        state := s_idle
       }
     }
   }

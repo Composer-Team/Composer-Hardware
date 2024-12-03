@@ -5,14 +5,12 @@ import beethoven.Platforms.PlatformKey
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.amba.axi4.AXI4IdentityNode
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.TLIdentityNode
 
 class FrontBusWidget(implicit p: Parameters) extends LazyModule {
-//  override val crFile = LazyModule(new MCRFileTL(16))
-//  crFile.node := node
-  val node = TLIdentityNode()
-  val crFile = LazyModule(new MCRFileTL(16))
+  val node = AXI4IdentityNode()
+  val crFile = LazyModule(new MCRFileAXI(16))
   crFile.node := node
   override lazy val module = new AXILWidgetModule(this)
 }
