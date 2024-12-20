@@ -132,7 +132,7 @@ class SequentialWriter(userBytes: Int,
   io.channel.isFlushed := sourceBusyBits.asUInt === 0.U
 
   val expectedNumBeats = RegInit(0.U((addressBits - log2Up(userBytes)).W))
-  when(expectedNumBeats === 0.U) {
+  when(expectedNumBeats === 0.U && write_buffer_occupancy === 0.U && burst_storage_occupancy === 0.U) {
     when(!sourcesInProgress) {
       io.busy := false.B
       io.req.ready := true.B
