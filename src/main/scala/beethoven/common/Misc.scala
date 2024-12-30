@@ -110,4 +110,30 @@ object Misc {
   }
 
   def round2Pow2(x: Int): Int = 1 << log2Up(x)
+
+  def multByIntPow2(a: UInt, b: Int): UInt = {
+    if (b == 1) a
+    else {
+      require(isPow2(b))
+      Cat(a, 0.U(CLog2Up(b).W))
+    }
+  }
+
+  def manyOnes(n: Int): UInt = BigInt("1" * n, radix=2).U
+
+  def manyOnesVec(n: Int): Vec[Bool] = VecInit(BigInt("1" * n, radix=2).U.asBools)
+
+
+  /**
+   * We might have a logical mask 0110 where each bit corresponds to a 16b payload, but most memory protocols
+   * deal in 8b payloads, so we need to adjust the mask
+   */
+  def maskDemux(a: Vec[Bool], bitsPerBit: Int): UInt = {
+    Cat(a.map(b => Mux(b, manyOnes(bitsPerBit), 0.U(bitsPerBit.W))))
+  }
+
+  def maskDemux(a: UInt, bitsPerBit: Int): UInt = {
+    maskDemux(VecInit(a.asBools), bitsPerBit)
+  }
+
 }
