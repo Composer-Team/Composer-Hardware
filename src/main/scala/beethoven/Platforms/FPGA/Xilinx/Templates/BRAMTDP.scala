@@ -242,16 +242,19 @@ object BRAMTDP {
 
     if (platform.isInstanceOf[HasXilinxMem]) {
       val pxm = p(PlatformKey).asInstanceOf[HasXilinxMem]
-//      if (!have_printed.contains(currentContext)) {
-//        have_printed += currentContext
-//      }
-      System.err.print(s"\rURAM (d$currentContext): ${uram_used.getOrElse(currentContext, 0)} / ${pxm.nURAMs(currentContext)}\t" +
-        f"BRAM (d$currentContext): ${bram_used.getOrElse(currentContext, 0)} / ${pxm.nBRAMs(currentContext)}")
-      if (!have_enough_bram && !have_enough_uram) {
-        System.err.println(
-          s"Memory module $debugName requires $bram_consumption BRAMs and $uram_consumption URAMs,\n" +
-            s" but only ${pxm.nBRAMs(currentContext) - bram_used.getOrElse(currentContext, 0)} BRAMs and ${pxm.nURAMs(currentContext) - uram_used.getOrElse(currentContext, 0)} URAMs" +
-            s"are available.")
+      //      if (!have_printed.contains(currentContext)) {
+      //        have_printed += currentContext
+      //      }
+
+      if (!p(BQuiet)) {
+        System.err.print(s"\rURAM (d$currentContext): ${uram_used.getOrElse(currentContext, 0)} / ${pxm.nURAMs(currentContext)}\t" +
+          f"BRAM (d$currentContext): ${bram_used.getOrElse(currentContext, 0)} / ${pxm.nBRAMs(currentContext)}")
+        if (!have_enough_bram && !have_enough_uram) {
+          System.err.println(
+            s"Memory module $debugName requires $bram_consumption BRAMs and $uram_consumption URAMs,\n" +
+              s" but only ${pxm.nBRAMs(currentContext) - bram_used.getOrElse(currentContext, 0)} BRAMs and ${pxm.nURAMs(currentContext) - uram_used.getOrElse(currentContext, 0)} URAMs" +
+              s"are available.")
+        }
       }
     }
 
