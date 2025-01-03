@@ -16,7 +16,7 @@ class RoccFanout(implicit p: Parameters) extends LazyModule {
     uFn = { sp =>
       val sids = sp.map(_.system_core_ids.map(_._1)).reduce(_ ++ _).toList.distinct
       val joined_core_maps = sids.map { sid =>
-        val all_cores = sp.flatMap(_.system_core_ids.map(_._2))
+        val all_cores = sp.map(_.system_core_ids).toList.flatten.filter(_._1 == sid).map(_._2)
         val start = all_cores.map(_._1).min
         val max = all_cores.map(_._2).max
         all_cores.foreach { case (low, high) =>

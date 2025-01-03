@@ -50,6 +50,7 @@ object ResponseParsing {
          |    ${resp.responseName}(${safe_join(structMembersWithType, ", ")}) :
          |      ${safe_join(resp.realElements.map(a => f"${a._1}(${a._1})"), ", ")}
          |      {}
+         |    ${resp.responseName}() = default;
          |  };
          |}
          |""".stripMargin

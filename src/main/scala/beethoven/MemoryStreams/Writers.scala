@@ -88,10 +88,14 @@ class SequentialWriter(userBytes: Int,
   waddr := waddr + write_buffer.chip_select(wb_widx)
 
   val mask_buffer = if (userBytes < fabricBeatBytes) {
-    val q = Module(new Queue[UInt](UInt((fabricBeatBytes / userBytes).W), q_size))
-    q.io.enq.valid := write_buffer_io.valid
+    val q = Module(new Queue[UInt](UInt((fabricBeatBytes / userBytes).W), q_size + platform.prefetchSourceMultiplicity + 1))
+    println(s"mask buffer is sz ${q.entries}")
+    q.io.enq.valid := write_buffer_io.fire
     q.io.enq.bits := write_buffer_io.bits.mask.get
-    q.io.deq.ready := false.B
+    q.io.deq.ready := tl_out.a.fire
+    when(q.io.enq.valid) {
+      assert(q.io.enq.ready, "Mask buffer needs to be made bigger")
+    }
     Some(q)
   } else None
 
@@ -149,9 +153,9 @@ class SequentialWriter(userBytes: Int,
   val expectedNumBeats = RegInit(0.U((addressBits - log2Up(userBytes)).W))
   when(expectedNumBeats === 0.U && write_buffer_occupancy === 0.U && burst_storage_occupancy === 0.U) {
     /** TODO verify this doesn't mess everything up. We should be able to start a new command when old writes
-     *    from a previous command are in flight but there's no data left in the buffers
+     * from a previous command are in flight but there's no data left in the buffers
      */
-//        when(!sourcesInProgress) {
+    //        when(!sourcesInProgress) {
     io.busy := false.B
     io.req.ready := true.B
     when(io.req.fire) {
@@ -160,21 +164,24 @@ class SequentialWriter(userBytes: Int,
       req_addr := choppedAddr
       burst_progress_count := 0.U
     }
-//        }
+    //        }
   }
+  // these are always true
+  tl_out.a.bits.mask := (if (mask_buffer.isDefined) {
+    val q = mask_buffer.get
+    when (q.io.deq.ready) {
+      assert(q.io.deq.valid)
+    }
+    Misc.maskDemux(q.io.deq.bits, userBytes)
+  } else BigInt("1" * fabricBeatBytes, radix = 2).U)
+  tl_out.a.bits.opcode := TLMessages.PutFullData
+
   when(burst_inProgress) {
     tl_out.a.valid := true.B
     assert(burst_storage_io.deq.valid)
-    tl_out.a.bits.opcode := TLMessages.PutFullData
     tl_out.a.bits.address := addrInProgress
     tl_out.a.bits.size := log2Up(platform.prefetchSourceMultiplicity * fabricBeatBytes).U
     tl_out.a.bits.data := burst_storage_io.deq.bits
-    tl_out.a.bits.mask := (if (mask_buffer.isDefined) {
-      val q = mask_buffer.get
-      q.io.deq.ready := true.B
-      assert(q.io.deq.valid)
-      Misc.maskDemux(q.io.deq.bits, userBytes)
-    } else BigInt("1" * fabricBeatBytes, radix = 2).U)
     when(tl_out.a.fire) {
       burst_progress_count := burst_progress_count + 1.U
       when(burst_progress_count === (pfsm - 1).U) {
@@ -200,7 +207,6 @@ class SequentialWriter(userBytes: Int,
     tl_out.a.bits.size := Mux(isSmall, log2Up(fabricBeatBytes).U, log2Up(fabricBeatBytes * pfsm).U)
     tl_out.a.bits.address := nextAddr
     tl_out.a.bits.source := nextSource
-    tl_out.a.bits.opcode := TLMessages.PutFullData
     when(tl_out.a.fire) {
       sourceBusyBits(nextSource) := true.B
       sourceInProgress := nextSource
@@ -257,7 +263,7 @@ class SequentialWriter(userBytes: Int,
         write_buffer_io.valid := true.B
         val bgc = Cat(bytesGrouped.reverse)
         val beatBuffer_concat = Wire(Vec(beatLim, UInt((userBytes * 8).W)))
-        (0 to beatLim-2) foreach { t =>
+        (0 to beatLim - 2) foreach { t =>
           beatBuffer_concat(t) := beatBuffer(t)
         }
         beatBuffer_concat.last := DontCare
