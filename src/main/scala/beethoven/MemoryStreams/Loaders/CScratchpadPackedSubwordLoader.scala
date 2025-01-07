@@ -52,6 +52,7 @@ class ScratchpadPackedSubwordLoader(datOutWidth: Int, idxWidth: Int, wordSizeBit
         when(io.sp_write_out.fire) {
           datCounter.inc()
           idxBase := idxBase + 1.U
+          println("dats per subword " + datsPerSubword)
           when(datCounter.value === (datsPerSubword - 1).U) {
             subwordCounter.inc()
             lenRemainingFromReq := lenRemainingFromReq - (wordSizeBits / 8).U

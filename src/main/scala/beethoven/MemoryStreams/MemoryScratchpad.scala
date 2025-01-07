@@ -179,19 +179,22 @@ class ScratchpadImpl(csp: ScratchpadConfig,
 
   require(isPow2(datasPerCacheLine))
   if (outer.mem_reader.isDefined) {
-    val loader = Module(specialization match {
-      case psw: PackedSubwordScratchpadConfig =>
-        require(datasPerCacheLine == 1)
-        new ScratchpadPackedSubwordLoader(dWidth, scReqBits, psw.wordSizeBits, psw.datsPerSubword)
-      case _: FlatPackScratchpadConfig =>
-        new ScratchpadPackedSubwordLoader(dWidth * datasPerCacheLine, scReqBits - CLog2Up(datasPerCacheLine), dWidth * datasPerCacheLine, 1)
-    })
 
     val swWordSize = specialization match {
       case psw: PackedSubwordScratchpadConfig =>
         psw.wordSizeBits
       case _ => dWidth
     }
+    val loader = Module(specialization match {
+      case psw: PackedSubwordScratchpadConfig =>
+        require(datasPerCacheLine == 1)
+        new ScratchpadPackedSubwordLoader(dWidth, scReqBits, psw.wordSizeBits, psw.datsPerSubword)
+      case _: FlatPackScratchpadConfig =>
+        new ScratchpadPackedSubwordLoader(dWidth * datasPerCacheLine,
+          scReqBits - CLog2Up(datasPerCacheLine),
+          outer.mem_reader.get.out(0)._1.params.dataBits,
+          outer.mem_reader.get.out(0)._1.params.dataBits / (dWidth * datasPerCacheLine))
+    })
 
     loader.io.sp_write_out.ready := true.B
     when(loader.io.sp_write_out.valid) {
@@ -221,6 +224,7 @@ class ScratchpadImpl(csp: ScratchpadConfig,
 
     val tx_ready = {
       val reader = if (outer.useLowResourceReader) {
+        println("use low resource")
         val reader = Module(new LightweightReader(
           swWordSize * datasPerCacheLine,
           tl_edge = outer.mem_reader.get.out(0)._2,
@@ -229,6 +233,7 @@ class ScratchpadImpl(csp: ScratchpadConfig,
         linearReadInc()
         reader.io
       } else if (outer.very_small_sp) {
+        println("very small")
         val reader = Module(new LightweightReader_small(
           dWidth = swWordSize * datasPerCacheLine,
           tl_bundle = outer.mem_reader.get.out(0)._1,
@@ -239,6 +244,7 @@ class ScratchpadImpl(csp: ScratchpadConfig,
         linearReadInc()
         reader.io
       } else if (!outer.forceCustom) {
+        println("not small")
         val reader = Module(new SequentialReader(
           swWordSize * datasPerCacheLine,
           tl_edge = outer.mem_reader.get.out(0)._2,
@@ -247,7 +253,8 @@ class ScratchpadImpl(csp: ScratchpadConfig,
         linearReadInc()
         reader.io
       } else {
-        val reader = Wire(Output(new ReadChannelIO(dWidth)))
+        println("else")
+        val reader = Wire(Output(new ReadChannelIO(outer.mem_reader.get.out(0)._1.params.dataBits)))
         val (tl_out, tl_edge) = outer.mem_reader.get.out(0)
         val beatBytes = tl_out.params.dataBits / 8
         val beatBytesWidth = CLog2Up(beatBytes)
