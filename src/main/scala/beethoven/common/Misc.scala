@@ -129,7 +129,7 @@ object Misc {
    * deal in 8b payloads, so we need to adjust the mask
    */
   def maskDemux(a: Vec[Bool], bitsPerBit: Int): UInt = {
-    Cat(a.map(b => Mux(b, manyOnes(bitsPerBit), 0.U(bitsPerBit.W))))
+    Cat(a.reverse.map(b => Mux(b, manyOnes(bitsPerBit), 0.U(bitsPerBit.W))))
   }
 
   def maskDemux(a: UInt, bitsPerBit: Int): UInt = {

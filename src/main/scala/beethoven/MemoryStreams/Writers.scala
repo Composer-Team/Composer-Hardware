@@ -230,28 +230,24 @@ class SequentialWriter(userBytes: Int,
     io.channel.data.ready := write_buffer_io.ready && expectedNumBeats > 0.U
     write_buffer_io.valid := false.B
     write_buffer_io.bits := DontCare
-    val maskAcc = Reg(Vec(userBytes, Bool()))
+    val maskAcc = Reg(Vec(beatLim - 1, Bool()))
     when(reset.asBool) {
       maskAcc.foreach(_ := false.B)
     }
     when(io.req.fire) {
-      if (userBytes < fabricBeatBytes) {
-        val upper = log2Up(fabricBeatBytes) - 1
-        val lower = CLog2Up(userBytes)
+      val upper = log2Up(fabricBeatBytes) - 1
+      val lower = CLog2Up(userBytes)
 
-        /**
-         * What if your channel wants to do an unaligned access? For instance, with a 32b bus, you're trying
-         * to do a 16b write to the address 0x2.
-         * It's illegal to emit a transaction for 0x2, so you have to start it at 0x0, mask out the two bottom
-         * bytes, and THEN put the bytes of interest on the higher-order bits. If we run into this situation,
-         * then we'll just initialize beatCounter higher. It'll be filled with old/uninitialized data but who
-         * cares?
-         */
-        beatCounter := io.req.bits.addr(upper, lower)
-        printf("Address: %x\tStart: %d\n", io.req.bits.addr, io.req.bits.addr(upper, lower))
-      } else {
-        beatCounter := 0.U
-      }
+      /**
+       * What if your channel wants to do an unaligned access? For instance, with a 32b bus, you're trying
+       * to do a 16b write to the address 0x2.
+       * It's illegal to emit a transaction for 0x2, so you have to start it at 0x0, mask out the two bottom
+       * bytes, and THEN put the bytes of interest on the higher-order bits. If we run into this situation,
+       * then we'll just initialize beatCounter higher. It'll be filled with old/uninitialized data but who
+       * cares?
+       */
+      beatCounter := io.req.bits.addr(upper, lower)
+      printf("Address: %x\tStart: %d\n", io.req.bits.addr, io.req.bits.addr(upper, lower))
     }
     when(io.channel.data.fire) {
       expectedNumBeats := expectedNumBeats - 1.U
@@ -263,15 +259,17 @@ class SequentialWriter(userBytes: Int,
         write_buffer_io.valid := true.B
         val bgc = Cat(bytesGrouped.reverse)
         val beatBuffer_concat = Wire(Vec(beatLim, UInt((userBytes * 8).W)))
+        val maskAcc_concat = Wire(Vec(beatLim, Bool()))
         (0 to beatLim - 2) foreach { t =>
           beatBuffer_concat(t) := beatBuffer(t)
+          maskAcc_concat(t) := maskAcc(t)
         }
         beatBuffer_concat.last := DontCare
-        val maskAcc_concat = WireInit(maskAcc)
+        maskAcc_concat.last := false.B
         beatBuffer_concat(beatCounter) := bgc
         maskAcc_concat(beatCounter) := true.B
         write_buffer_io.bits.payload := Cat(beatBuffer_concat.reverse)
-        write_buffer_io.bits.mask.get := maskAcc_concat.asUInt
+        write_buffer_io.bits.mask.get := Cat(maskAcc_concat.reverse)
         maskAcc.foreach(_ := false.B)
         beatCounter := 0.U
       }
