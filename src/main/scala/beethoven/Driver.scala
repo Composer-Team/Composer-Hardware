@@ -51,8 +51,10 @@ object BeethovenBuild {
 
   private[beethoven] var partitionModules: Seq[String] = Seq("BeethovenTop")
   var separateCompileCells: Seq[String] = Seq.empty
-  def requestModulePartition(moduleName: String): Unit =
+  def requestModulePartition(moduleName: String): Unit = {
+    println("thinkging about adding " + moduleName)
     partitionModules = (partitionModules :+ moduleName).distinct
+  }
 
   def requestSeparateCompileCell(cellName: String): Unit =
     separateCompileCells = (separateCompileCells :+ cellName).distinct
