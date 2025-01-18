@@ -6,6 +6,7 @@ import beethoven.{CmdRespBusWidthBytes, _}
 import freechips.rocketchip.amba.axi4._
 import chipsalliance.rocketchip.config._
 import beethoven.Platforms._
+import beethoven.common.{Misc, splitIntoChunks}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
@@ -113,7 +114,7 @@ trait MCRFile {
 
 class MCRFileTL(numRegs: Int)(implicit p: Parameters) extends LazyModule with MCRFile {
   require((p(PlatformKey).frontBusBaseAddress & 0x3FFL) == 0)
-//  println(p(FrontBusAddressMask))
+  //  println(p(FrontBusAddressMask))
   val node = TLManagerNode(portParams = Seq(TLSlavePortParameters.v1(
     managers = Seq(TLSlaveParameters.v1(
       address = Seq(AddressSet(platform.frontBusBaseAddress, platform.frontBusAddressMask)),
@@ -129,14 +130,14 @@ class MCRFileTL(numRegs: Int)(implicit p: Parameters) extends LazyModule with MC
   override def getMCRIO: MCRIO = module.io.mcr
 }
 
-class MCRFileAXI(numRegs: Int)(implicit p: Parameters) extends LazyModule with MCRFile {
-  require((platform.frontBusBaseAddress& 0x3FFL) == 0)
-    val node = AXI4SlaveNode(portParams = Seq(AXI4SlavePortParameters(slaves = Seq(
-      AXI4SlaveParameters(
-        address = Seq(AddressSet(platform.frontBusBaseAddress, platform.frontBusAddressMask)),
-        supportsRead = TransferSizes(platform.frontBusBeatBytes),
-        supportsWrite = TransferSizes(platform.frontBusBeatBytes)
-      )),
+class Protocol2RoccWidget(numRegs: Int)(implicit p: Parameters) extends LazyModule with MCRFile {
+  require((platform.frontBusBaseAddress & 0x3FFL) == 0)
+  val node = AXI4SlaveNode(portParams = Seq(AXI4SlavePortParameters(slaves = Seq(
+    AXI4SlaveParameters(
+      address = Seq(AddressSet(platform.frontBusBaseAddress, platform.frontBusAddressMask)),
+      supportsRead = TransferSizes(platform.frontBusBeatBytes),
+      supportsWrite = TransferSizes(platform.frontBusBeatBytes)
+    )),
     beatBytes = platform.frontBusBeatBytes)))
   lazy val module = new MCRFileModuleAXI(this, numRegs)
 
@@ -144,8 +145,15 @@ class MCRFileAXI(numRegs: Int)(implicit p: Parameters) extends LazyModule with M
 }
 
 
-class MCRFileModuleAXI(outer: MCRFileAXI, numRegs: Int)(implicit p: Parameters) extends LazyModuleImp(outer) {
-
+class MCRFileModuleAXI(outer: Protocol2RoccWidget, numRegs: Int)(implicit p: Parameters) extends LazyModuleImp(outer) {
+  val dataWidth = platform.frontBusBeatBytes * 8
+  require(dataWidth >= 32 && isPow2(dataWidth),
+    """RoCC commands were originally broken down into 5 by 32b payloads. The first payload is 32b for the RISC-V instr.
+      |and the 128b remaining were data payloads. 32b is a pretty common lower bound on the supported size for AXI
+      |controllers (lower would be unusual because you need so many wires for the address and other metadata that
+      |anything less is paying a high cost for control with very little data transfer. Anyway, we support powers of
+      |two higher than 32. Lower than 32 is possible but requies modifying the state machines a bit.
+      |""".stripMargin)
   val io = IO(new Bundle {
     val mcr = new MCRIO(numRegs)
   })
@@ -153,19 +161,14 @@ class MCRFileModuleAXI(outer: MCRFileAXI, numRegs: Int)(implicit p: Parameters) 
   val logNumRegs = log2Up(numRegs)
   val (in, edge) = outer.node.in(0)
 
-  val s_idle :: s_read :: s_read_send :: s_write :: s_write_data :: s_write_response :: Nil = Enum(6)
-  val state = RegInit(s_idle)
-
   val address = Reg(UInt(logNumRegs.W))
-  val writeData = Reg(UInt(32.W))
-  val readData = Reg(UInt(32.W))
+  val writeData = Reg(UInt(dataWidth.W))
   val opLen = Reg(UInt(8.W))
-  val opvalid = Reg(Bool())
 
   in.ar.ready := false.B
   in.aw.ready := false.B
   in.r.valid := false.B
-  in.r.bits.data := readData
+  in.r.bits.data := DontCare
   in.r.bits.id := 0.U
   in.r.bits.last := false.B
   in.w.ready := false.B
@@ -176,10 +179,34 @@ class MCRFileModuleAXI(outer: MCRFileAXI, numRegs: Int)(implicit p: Parameters) 
   io.mcr.read.foreach { rChannel =>
     rChannel.ready := false.B
   }
-  io.mcr.write.foreach { wChannel =>
-    wChannel.bits := in.w.bits.data
-    wChannel.valid := false.B
-  }
+  /**
+   * Implementation details:
+   * We are assuming single beats on the bus for a few reasons
+   * 1. AXI-Lite implementations don't support multi-beat (from my memory)
+   * 2. Platforms that support the full AXI-protocol on their master bus to the accelerator are unlikely to
+   * emit multi-beat transactions for Beethoven's current implementation of the software control.
+   * If I remember right, this implementation is something like:
+   *
+   * volatile uint32_t *ptr;
+   * *ptr = payload;
+   *
+   * The `volatile` keyword prevents a whole bunch of optimization that may result in "more efficient"
+   * instrumentation. Worry about this problem when it arises I say.
+   * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+   * The machines RELY on Beethoven-specific instrumentation.
+   * Specifically, that bits of a single RoCC command are all contiguous on the bus - no interleaving rocc commands.
+   * Let's say you have a 32b bus and we're piecing together the pieces R1-R5 into a command
+   * Then you get
+   * R1... R2... R3... so on
+   *
+   * If you have a 64b bus, then you actually get two of these at a time
+   * R1+2... R3+4..... R5+R6....
+   * but R6 doesn't exist!
+   * This means we either have to keep track of which part of the command we're moving at each transaction
+   * so we can throw away R6, or even if we have a wide bus, we only use the bottom 32b. Doing the former
+   * requires rewriting a lot of the software integration to be more flexible to the bus size. Someone else
+   * can do this, so we're going with the latter solution.
+   */
 
   // WRITE
   val write_machine = {
@@ -188,20 +215,21 @@ class MCRFileModuleAXI(outer: MCRFileAXI, numRegs: Int)(implicit p: Parameters) 
     val addr = Reg(UInt(logNumRegs.W))
     val len = Reg(in.ar.bits.len.cloneType)
     val id = Reg(in.ar.bits.id.cloneType)
-    when (in.w.fire) {
+    when(in.w.fire) {
       len := len - 1.U
     }
-    when (state === s_idle) {
+    when(state === s_idle) {
       in.aw.ready := true.B
-      addr := in.aw.bits.addr(logNumRegs+2-1, 2)
+      addr := in.aw.bits.addr(logNumRegs + 2 - 1, 2)
       len := in.aw.bits.len
-      when (in.aw.fire) {
+      when(in.aw.fire) {
         state := s_write
       }
     }.elsewhen(state === s_write) {
       in.w.ready := true.B
       io.mcr.write(addr).valid := in.w.valid
-      when (in.w.fire) {
+      io.mcr.write(addr).bits := in.w.bits.data(31, 0)
+      when(in.w.fire) {
         when(len === 0.U) {
           state := s_response
         }.otherwise {
@@ -210,14 +238,14 @@ class MCRFileModuleAXI(outer: MCRFileAXI, numRegs: Int)(implicit p: Parameters) 
       }
     }.elsewhen(state === s_drain) {
       in.w.ready := true.B
-      when (in.w.fire && len === 0.U) {
+      when(in.w.fire && len === 0.U) {
         state := s_response
       }
     }.otherwise {
       in.b.valid := true.B
       in.b.bits.resp := 0.U
       in.b.bits.id := id
-      when (in.b.fire) {
+      when(in.b.fire) {
         state := s_idle
       }
     }
@@ -233,33 +261,36 @@ class MCRFileModuleAXI(outer: MCRFileAXI, numRegs: Int)(implicit p: Parameters) 
     in.r.bits.id := id
     in.r.bits.last := len === 0.U
     in.r.bits.resp := 0.U
-    in.r.bits.data := io.mcr.read(addr).bits
+    // pad out the higher-order bits with 0 if necessary
+    in.r.bits.data := (if (dataWidth == 32) io.mcr.read(addr).bits else {
+      Cat(0.U((dataWidth-32).W), io.mcr.read(addr).bits)
+    })
 
-    when (in.r.fire) {
+    when(in.r.fire) {
       len := len - 1.U
     }
-    when (state === s_idle) {
+    when(state === s_idle) {
       in.ar.ready := true.B
-      addr := in.ar.bits.addr(logNumRegs+2-1, 2)
+      addr := in.ar.bits.addr(logNumRegs + 2 - 1, 2)
       len := in.ar.bits.len
       id := in.ar.bits.id
-      when (in.ar.fire) {
+      when(in.ar.fire) {
         state := s_read
       }
     }.elsewhen(state === s_read) {
       in.r.valid := true.B
       io.mcr.read(addr).ready := in.r.ready
-      when (in.r.fire) {
-        when (len === 0.U) {
+      when(in.r.fire) {
+        when(len === 0.U) {
           state := s_idle
         }.otherwise {
           state := s_drain
         }
       }
-    }.otherwise {
+    }.otherwise { // state === s_drain
       in.r.valid := true.B
-      in.r.bits.data := 0xABCDABCDL.U
-      when (len === 0.U && in.r.fire) {
+      in.r.bits.data := BigInt(f"ABCD" * (dataWidth/16), radix=16).U
+      when(len === 0.U && in.r.fire) {
         state := s_idle
       }
     }
@@ -275,7 +306,7 @@ class MCRFileModuleTL(outer: MCRFileTL, numRegs: Int)(implicit p: Parameters) ex
   val logNumRegs = log2Up(numRegs)
   val (in, edge) = outer.node.in(0)
 
-  val s_idle :: s_read :: s_read_send :: s_write  :: s_write_response :: Nil = Enum(5)
+  val s_idle :: s_read :: s_read_send :: s_write :: s_write_response :: Nil = Enum(5)
   val state = RegInit(s_idle)
 
   val address = Reg(UInt(logNumRegs.W))
@@ -304,17 +335,17 @@ class MCRFileModuleTL(outer: MCRFileTL, numRegs: Int)(implicit p: Parameters) ex
   switch(state) {
     is(s_idle) {
       in.a.ready := true.B
-      when (in.a.fire) {
+      when(in.a.fire) {
         id := in.a.bits.source
         param := in.a.bits.size
         val start = log2Up(platform.frontBusBeatBytes)
         val end = start + log2Up(numRegs) - 1
         address := in.a.bits.address(end, start)
-        when (in.a.bits.opcode === TLMessages.PutFullData || in.a.bits.opcode === TLMessages.PutPartialData) {
+        when(in.a.bits.opcode === TLMessages.PutFullData || in.a.bits.opcode === TLMessages.PutPartialData) {
           state := s_write
           writeData := in.a.bits.data(31, 0)
         }
-        when (in.a.bits.opcode === TLMessages.Get) {
+        when(in.a.bits.opcode === TLMessages.Get) {
           state := s_read
         }
       }
@@ -327,7 +358,7 @@ class MCRFileModuleTL(outer: MCRFileTL, numRegs: Int)(implicit p: Parameters) ex
     is(s_write_response) {
       in.d.valid := true.B
       in.d.bits := edge.AccessAck(id, param)
-      when (in.d.fire) {
+      when(in.d.fire) {
         state := s_idle
       }
     }
@@ -341,7 +372,7 @@ class MCRFileModuleTL(outer: MCRFileTL, numRegs: Int)(implicit p: Parameters) ex
     is(s_read_send) {
       in.d.valid := true.B
       in.d.bits := edge.AccessAck(id, param, readData)
-      when (in.d.fire) {
+      when(in.d.fire) {
         state := s_idle
       }
     }

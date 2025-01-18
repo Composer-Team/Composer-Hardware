@@ -10,7 +10,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 
 class FrontBusWidget(implicit p: Parameters) extends LazyModule {
   val node = AXI4IdentityNode()
-  val crFile = LazyModule(new MCRFileAXI(16))
+  val crFile = LazyModule(new Protocol2RoccWidget(16))
   crFile.node := node
   override lazy val module = new AXILWidgetModule(this)
 }
