@@ -77,6 +77,7 @@ class Subdevice(val deviceId: Int)(implicit p: Parameters) extends LazyModule {
   }
 
   lazy val module = new LazyModuleImp(this) {
+
     DeviceContext.currentDevice = Some(deviceId + 1)
     submodules.foreach { sm =>
       sm.module.reset := ResetBridge(reset, clock, 2)

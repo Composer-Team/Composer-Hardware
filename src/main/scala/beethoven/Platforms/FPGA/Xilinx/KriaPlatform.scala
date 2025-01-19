@@ -16,6 +16,7 @@ case class KriaPlatform(memoryNChannels: Int = 1,
 
   override val platformType: PlatformType = PlatformType.FPGA
   override val hasDiscreteMemory: Boolean = false
+  override val isActiveHighReset: Boolean = false
 
   override val frontBusBaseAddress: Long = 0x2000000000L
   override val frontBusAddressNBits: Int = 40

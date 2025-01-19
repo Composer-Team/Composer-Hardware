@@ -21,6 +21,7 @@ abstract class Platform {
   // expected for this platform type. In the future, we could use the clock rate parameter to perform much
   // more precise decision-making
   val platformType: PlatformType
+  val isActiveHighReset: Boolean
 
   /**
    * The front bus is the MMIO bus that the host uses to access accelerator cores. Most parameters are

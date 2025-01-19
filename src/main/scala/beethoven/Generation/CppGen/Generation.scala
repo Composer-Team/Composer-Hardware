@@ -27,6 +27,7 @@ object Generation {
       (
         s"""
            |#ifdef SIM
+           |#define HW_IS_RESET_ACTIVE_HIGH ${if (platform.isActiveHighReset) 1 else 0}
            |#define NUM_DDR_CHANNELS ${actualChannels}
            |#endif
            |#define ALLOCATOR_SIZE_BYTES (0x${platform.physicalMemoryBytes.toHexString}L)

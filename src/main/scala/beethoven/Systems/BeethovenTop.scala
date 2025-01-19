@@ -104,6 +104,7 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
     val lm = LazyModuleWithFloorplan(new Subdevice(dev.identifier)(p.alterPartial {
       case TileVisibilityNodeKey => rocc_front
     }), dev.identifier, f"beethovenDevice${dev.identifier}")
+    BeethovenBuild.requestModulePartition(lm.desiredName)
     lm
   }
   LazyModuleWithSLRs.freezeSLRPush = false
@@ -273,8 +274,23 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
   lazy val module = new TopImpl(this)
 }
 
-class TopImpl(outer: BeethovenTop)(implicit p: Parameters) extends LazyModuleImp(outer) {
-  platform.frontBusProtocol.deriveTopIOs(outer.comm_node, clock, reset)
+
+class TopImpl(outer: BeethovenTop)(implicit p: Parameters) extends LazyRawModuleImp(outer) {
+  val clock = IO(Input(Clock()))
+  val reset = IO(Input(Bool()))
+  if (platform.isActiveHighReset) {
+    reset.suggestName("reset")
+  } else {
+    reset.suggestName("RESETn")
+  }
+  val chiselReset = if (platform.isActiveHighReset) {
+    reset
+  } else {
+    !reset
+  }
+  platform.frontBusProtocol.deriveTopIOs(outer.comm_node, childClock, chiselReset)
+  childReset := chiselReset
+  childClock := clock
 
   if (outer.AXI_MEM.isDefined) {
     val dram_ports = outer.AXI_MEM.get

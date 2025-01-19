@@ -52,7 +52,6 @@ object BeethovenBuild {
   private[beethoven] var partitionModules: Seq[String] = Seq("BeethovenTop")
   var separateCompileCells: Seq[String] = Seq.empty
   def requestModulePartition(moduleName: String): Unit = {
-    println("thinkging about adding " + moduleName)
     partitionModules = (partitionModules :+ moduleName).distinct
   }
 
@@ -108,8 +107,6 @@ object BuildMode {
   case object Synthesis extends BuildMode
 
   case object Simulation extends BuildMode
-
-  case object Training extends BuildMode
 }
 
 class BeethovenBuild(config: AcceleratorConfig,

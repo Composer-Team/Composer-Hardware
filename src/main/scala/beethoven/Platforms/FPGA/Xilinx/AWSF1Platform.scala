@@ -26,6 +26,7 @@ class AWSF1Platform(memoryNChannels: Int,
   HasPostProccessorScript with
   PlatformHasSeparateDMA with
   HasXilinxMem {
+  override val isActiveHighReset: Boolean = true
 
   override val DMAIDBits: Int = 6
   override val clockRateMHz: Int = clock_recipe match {
