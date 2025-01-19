@@ -10,6 +10,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.TLNode
 
 class Subdevice(val deviceId: Int)(implicit p: Parameters) extends LazyModule {
+  override val desiredName: String = f"Subdevice${deviceId}"
   val configs = p(AcceleratorSystems)
   val constructDependencies = configs.map { a => a.canIssueCoreCommandsTo.map(b => (a.name, b)) }
 
