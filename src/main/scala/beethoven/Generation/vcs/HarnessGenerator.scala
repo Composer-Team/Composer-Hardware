@@ -1,22 +1,27 @@
 package beethoven.Generation.vcs
 
-import beethoven.BeethovenBuild
+import beethoven.{BeethovenBuild, platform}
+import chipsalliance.rocketchip.config.Parameters
 
 /**
  * Thank you to ChiselTest for inspiring this code.
  */
 
 object HarnessGenerator {
-  def generateHarness(): Unit = {
+  def generateHarness()(implicit p: Parameters): Unit = {
     val r = os.read(BeethovenBuild.hw_build_dir / "BeethovenTop.v").split("\n")
     def sanitize(q: String): Seq[String] = q.trim.split(" +").map(a => a.replace(",", "").trim)
     def is_reserved(q: Seq[String]): Boolean = {
       val r = q.last
-      r == "clock" || r == "reset"
+      r == "clock" || r == "reset" || r == "RESETn"
     }
 
     val inputs = r.filter(_.contains("input ")).map(sanitize).filter(!is_reserved(_))
     val outputs = r.filter(_.contains("output ")).map(sanitize).filter(!is_reserved(_))
+    val is_reset_active_high = platform.isActiveHighReset
+    val reset_active = if (is_reset_active_high) 1 else 0
+    val reset_inactive = reset_active ^ 1
+    val reset_name = if (is_reset_active_high) "reset" else "RESETn"
     val w =
       """
         |module BeethovenTopVCSHarness;
@@ -38,10 +43,10 @@ object HarnessGenerator {
         }.mkString("") +
         f"""
            |  reg clock = 0;
-           |  reg reset = 1;
+           |  reg $reset_name = $reset_active;
            |  BeethovenTop top(
            |    .clock(clock),
-           |    .reset(reset),
+           |    .$reset_name($reset_name),
            |""".stripMargin +
         (inputs ++ outputs).map { q =>f"    .${q.last}(${q.last})"}.mkString(",\n") +
         f"""
@@ -60,7 +65,7 @@ object HarnessGenerator {
            |    $$vcdplusfile("BeethovenTrace.vpd");
            |    $$dumpvars(0, top);
            |    $$vcdpluson;
-           |    $$init_input_signals(clock, reset, ${inputs.map(_.last).mkString(", ")});
+           |    $$init_input_signals(clock, $reset_name, ${inputs.map(_.last).mkString(", ")});
            |    $$init_output_signals(${outputs.map(_.last).mkString(", ")});
            |    $$init_structures;
            |  end
@@ -80,7 +85,7 @@ object HarnessGenerator {
            |    # `CLOCK_PERIOD
            |    ;
            |  end
-           |  reset = 0;
+           |  $reset_name = $reset_inactive;
            |  end
            |endmodule
            |

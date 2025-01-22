@@ -206,7 +206,7 @@ class BeethovenBuild(config: AcceleratorConfig,
 //    println("wrote to " + gsrc_dir / "vcs_srcs.in")
     os.write.over(top_build_dir / "vcs_srcs.in",
       chiselGeneratedSrcs.mkString("\n") + "\n" + movedSrcs.mkString("\n"))
-    vcs.HarnessGenerator.generateHarness()
+    vcs.HarnessGenerator.generateHarness()(configWithBuildMode)
 
     buildMode match {
       case BuildMode.Synthesis =>
