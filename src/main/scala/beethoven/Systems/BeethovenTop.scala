@@ -326,7 +326,7 @@ class TopImpl(outer: BeethovenTop)(implicit p: Parameters) extends LazyRawModule
   {
     val devicesNeedingReset = (LazyModuleWithSLRs.toplevelObjectsPerSLR.map(_._1) ++
       outer.devices.map {b: Subdevice => b.deviceId }).distinct
-    val resets =  devicesNeedingReset.map { a => (a, ResetBridge(reset, clock, 8)) }
+    val resets =  devicesNeedingReset.map { a => (a, ResetBridge(childReset, clock, 8)) }
     outer.devices.foreach { dev =>
       dev.module.reset := resets.find(_._1 == dev.deviceId).get._2
     }
