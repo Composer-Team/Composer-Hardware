@@ -49,7 +49,7 @@ object CommandParsing {
             aw - bitsLeftInPayload,
             seqAcc ++ pl)
         } else {
-          val pl = (basePayload, f"((uint64_t)$acc << $payloadLocalOffset)")
+          val pl = (basePayload, f"((((uint64_t)$acc) & (0x${(BigInt(2).pow(aw) - 1).toString(16)}ULL)) << $payloadLocalOffset)")
           val is_even_split = aw == bitsLeftInPayload
           unrollPayload(if (is_even_split) basePayload + 1 else basePayload,
             if (is_even_split) 64 else bitsLeftInPayload - aw,
