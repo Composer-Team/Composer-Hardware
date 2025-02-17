@@ -27,7 +27,7 @@ private class SRMMHelper(nReadPorts: Int,
     if (latency == 1) {
       mio.data_out(pidx) := readDat
     } else {
-      mio.data_out(pidx) := ShiftReg(readDat, latency - 1)
+      mio.data_out(pidx) := ShiftReg(readDat, latency - 1, clock)
     }
   }
 
@@ -45,7 +45,7 @@ private class SRMMHelper(nReadPorts: Int,
     if (latency == 1) {
       mio.data_out(pidx) := readDat
     } else {
-      mio.data_out(pidx) := ShiftReg(readDat, latency - 1)
+      mio.data_out(pidx) := ShiftReg(readDat, latency - 1, clock)
     }
   }
 }

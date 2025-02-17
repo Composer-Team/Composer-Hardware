@@ -46,7 +46,7 @@ abstract class Platform {
   val hasDiscreteMemory: Boolean
   val physicalMemoryBytes: Long
   val memorySpaceAddressBase: Long
-  val memorySpaceSizeBytes: Long
+  val memorySpaceSizeBytes: BigInt
   val memoryNChannels: Int
   val memoryControllerIDBits: Int
   val memoryControllerBeatBytes: Int

@@ -89,7 +89,7 @@ class SequentialWriter(userBytes: Int,
 
   val mask_buffer = if (userBytes < fabricBeatBytes) {
     val q = Module(new Queue[UInt](UInt((fabricBeatBytes / userBytes).W), q_size + platform.prefetchSourceMultiplicity + 1))
-    println(s"mask buffer is sz ${q.entries}")
+//    println(s"mask buffer is sz ${q.entries}")
     q.io.enq.valid := write_buffer_io.fire
     q.io.enq.bits := write_buffer_io.bits.mask.get
     q.io.deq.ready := tl_out.a.fire
@@ -247,7 +247,7 @@ class SequentialWriter(userBytes: Int,
        * cares?
        */
       beatCounter := io.req.bits.addr(upper, lower)
-      printf("Address: %x\tStart: %d\n", io.req.bits.addr, io.req.bits.addr(upper, lower))
+//      printf("Address: %x\tStart: %d\n", io.req.bits.addr, io.req.bits.addr(upper, lower))
     }
     when(io.channel.data.fire) {
       expectedNumBeats := expectedNumBeats - 1.U

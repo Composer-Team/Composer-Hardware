@@ -53,7 +53,7 @@ object hasAccessibleUserSubRegions {
 object CLog2Up {
   def apply(a: BigInt): Int = {
     if (a == 1) 0
-    else log2Up(a)
+    else CLog2Up(a/2) + 1
   }
 }
 

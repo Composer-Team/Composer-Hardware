@@ -313,7 +313,7 @@ object MemoryCompiler {
       def scan_shift[T <: Data](a: T, d: Int, acc: List[T] = List.empty): List[T] = {
         if (d == 0) acc.reverse
         else {
-          val ap = ShiftReg(a, 1)
+          val ap = ShiftReg(a, 1, io.clock.asClock)
           scan_shift(ap, d - 1, ap :: acc)
         }
       }

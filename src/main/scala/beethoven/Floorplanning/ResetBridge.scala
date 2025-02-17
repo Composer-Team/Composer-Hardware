@@ -25,6 +25,6 @@ class ResetBridge[T <: Reset](dut: T, bridgeDelay: Int)(implicit p: Parameters) 
     val dut_reset = Output(dut.cloneType)
   })
   withClockAndReset(io.clock, false.B.asAsyncReset) {
-    io.dut_reset := ShiftReg(io.reset, bridgeDelay)
+    io.dut_reset := ShiftReg(io.reset.asBool, bridgeDelay, io.clock)
   }
 }

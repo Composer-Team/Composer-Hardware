@@ -82,7 +82,7 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
       memory.read_enable(port) := true.B
       memory.write_enable(port) := false.B
       memory.data_in(port) := DontCare
-      io.res.valid := ShiftReg(io.req.valid, latency)
+      io.res.valid := ShiftReg(io.req.valid, latency, clock)
       io.res.bits := memory.data_out(port)
     }
   } else {
@@ -99,7 +99,7 @@ class IntraCoreScratchpadImp(dataWidthBits: Int,
       memory.read_enable(port) := !io.req.bits.write_enable
       memory.write_enable(port) := io.req.bits.write_enable
       memory.data_in(port) := io.req.bits.data
-      io.res.valid := ShiftReg(io.req.valid && !io.req.bits.write_enable, latency)
+      io.res.valid := ShiftReg(io.req.valid && !io.req.bits.write_enable, latency, clock)
       io.res.bits := memory.data_out(port)
     }
   }

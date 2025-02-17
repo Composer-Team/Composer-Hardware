@@ -314,7 +314,7 @@ class SequentialReader(val dWidth: Int,
 
   channel_buffer := channels(data_channel_read_idx)
 
-  val read_enable_pipeline = ShiftReg(prefetch_buffers.chip_select(read_port_idx) && read_ready, prefetch_blatency)
+  val read_enable_pipeline = ShiftReg(prefetch_buffers.chip_select(read_port_idx) && read_ready, prefetch_blatency, clock)
   val reads_in_flight = RegInit(0.U(3.W))
   val queue_occupancy = RegInit(0.U(log2Up(channel_buffer_depth + 1).W))
 

@@ -11,8 +11,8 @@ class TLSlaveBufferedBroadcast(depth: Int = 2)(implicit p: Parameters) extends L
     require(node.in.size == 1)
     val in = node.in.head._1
     node.out.foreach { case (out, _) =>
-      out.tl.valid := ShiftReg(in.tl.valid, depth)
-      out.tl.bits := ShiftReg(in.tl.bits, depth)
+      out.tl.valid := ShiftReg(in.tl.valid, depth, clock, allow_fpga_shreg = false)
+      out.tl.bits := ShiftReg(in.tl.bits, depth, clock, allow_fpga_shreg = false)
     }
   }
 }

@@ -1,6 +1,7 @@
 // See LICENSE.SiFive for license details.
 
 package beethoven.Protocol.tilelink
+
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.amba.axi4._
@@ -25,7 +26,7 @@ class TLToAXI4SRW(implicit p: Parameters) extends LazyModule {
       AXI4MasterPortParameters(
         masters = Seq(AXI4MasterParameters(
           name = "TLToAXI4SRW",
-          id = IdRange(0, tlpp.map(_.endSourceId).max),
+          id = IdRange(0, (1 << platform.memoryControllerIDBits) - 1), // tlpp.map(_.endSourceId).max
           aligned = true,
           maxFlight = Some(1)
         )))

@@ -10,7 +10,9 @@ import chipsalliance.rocketchip.config.Parameters
 object HarnessGenerator {
   def generateHarness()(implicit p: Parameters): Unit = {
     val r = os.read(BeethovenBuild.hw_build_dir / "BeethovenTop.v").split("\n")
+
     def sanitize(q: String): Seq[String] = q.trim.split(" +").map(a => a.replace(",", "").trim)
+
     def is_reserved(q: Seq[String]): Boolean = {
       val r = q.last
       r == "clock" || r == "reset" || r == "RESETn"
@@ -23,13 +25,14 @@ object HarnessGenerator {
     val reset_inactive = reset_active ^ 1
     val reset_name = if (is_reset_active_high) "reset" else "RESETn"
     val w =
-      """
+      """`timescale 1ns/1ps
+        |
         |module BeethovenTopVCSHarness;
         |""".stripMargin +
         inputs.map { i =>
           val widthMO = if (i.length == 2) 0 else {
             val ss = i(1)
-//            println(i)
+            //            println(i)
             ss.substring(1, ss.indexOf(":"))
           }
           f"  reg [$widthMO:0] ${i.last};\n"
@@ -48,12 +51,12 @@ object HarnessGenerator {
            |    .clock(clock),
            |    .$reset_name($reset_name),
            |""".stripMargin +
-        (inputs ++ outputs).map { q =>f"    .${q.last}(${q.last})"}.mkString(",\n") +
+        (inputs ++ outputs).map { q => f"    .${q.last}(${q.last})" }.mkString(",\n") +
         f"""
            |  );
            |
            |  reg dump_reg = 1'b0;
-           |  initial begin
+           |  initial begin:a1
            |    #`CLOCK_PERIOD
            |    forever begin
            |      #`CLOCK_PERIOD clock = ~clock;
@@ -61,16 +64,20 @@ object HarnessGenerator {
            |    end
            |  end
            |
-           |  initial begin
+           |  initial begin:a2
+           |`ifndef ICARUS
            |    $$vcdplusfile("BeethovenTrace.vpd");
+           |`endif
            |    $$dumpvars(0, top);
+           |`ifndef ICARUS
            |    $$vcdpluson;
+           |`endif
            |    $$init_input_signals(clock, $reset_name, ${inputs.map(_.last).mkString(", ")});
            |    $$init_output_signals(${outputs.map(_.last).mkString(", ")});
            |    $$init_structures;
            |  end
            |
-           |  always @(negedge clock) begin
+           |  always @(negedge clock) begin:a3
            |    if (!dump_reg) begin
            |      dump_reg = 1'b1;
            |      $$dumpon;
@@ -79,7 +86,7 @@ object HarnessGenerator {
            |    $$dumpflush;
            |  end
            |
-           |  initial begin
+           |  initial begin:a4
            |  integer i;
            |  for (i=0;i<100;i=i+1) begin
            |    # `CLOCK_PERIOD

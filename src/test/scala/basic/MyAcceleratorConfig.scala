@@ -1,5 +1,6 @@
 package basic
 
+import beethoven.Platforms.FPGA.Xilinx.F2.AWSF2Platform
 import beethoven._
 
 class MyAcceleratorConfig extends AcceleratorConfig(
@@ -13,4 +14,4 @@ class MyAcceleratorConfig extends AcceleratorConfig(
   ))
 object MyAcceleratorKria extends BeethovenBuild(new MyAcceleratorConfig,
   buildMode = BuildMode.Synthesis,
-  platform = new AWSF1Platform(1))
+  platform = new AWSF2Platform)

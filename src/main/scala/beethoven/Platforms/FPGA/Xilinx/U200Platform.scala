@@ -17,7 +17,7 @@ abstract class U200Platform(val memoryNChannels: Int) extends Platform {
 
   override val physicalMemoryBytes: Long = 0x400000000L
   override val memorySpaceAddressBase: Long = 0x0
-  override val memorySpaceSizeBytes: Long = 0x400000000L
+  override val memorySpaceSizeBytes: BigInt = BigInt(1) << 34
   override val memoryControllerIDBits: Int = 16
   override val memoryControllerBeatBytes: Int = 64
 

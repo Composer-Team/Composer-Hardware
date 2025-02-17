@@ -28,7 +28,7 @@ class RegMem(nRows: Int, nColumns: Int, nPorts: Int, latency: Int)(implicit p: P
   withClock(clock) {
     val mem = Reg(Vec(nRows, UInt(nColumns.W)))
     val out_regs = Reg(Vec(nPorts, UInt(nColumns.W)))
-    val out_regs_delayed = ShiftReg(out_regs, latency - 1)
+    val out_regs_delayed = ShiftReg(out_regs, latency - 1, clock)
     io.data_out zip out_regs_delayed foreach { case (i, r) => i := r }
     data_out zip out_regs foreach { case (o, r) => o := r }
     (0 until nPorts) foreach { port_idx =>

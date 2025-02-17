@@ -11,6 +11,7 @@ import beethoven.Platforms._
 import beethoven.Protocol.AXI.AXI4Compat
 import beethoven.Protocol.RoCC.{RoccNode, TLToRocc}
 import beethoven.Protocol.tilelink.{TLRWFilter, TLSourceShrinkerDynamicBlocking, TLSupportChecker, TLToAXI4SRW}
+import beethoven.common.CLog2Up
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
@@ -32,10 +33,10 @@ object BeethovenTop {
    * @return
    */
   @tailrec
-  def getAddressMask(addrBits: Int, baseTotal: Long, idx: Int = 0, acc: Long = 0): Long = {
+  def getAddressMask(addrBits: Int, baseTotal: BigInt, idx: Int = 0, acc: BigInt = 0): BigInt = {
     if (addrBits == 0) acc
     else if (((baseTotal >> idx) & 1) != 0) getAddressMask(addrBits, baseTotal, idx + 1, acc)
-    else getAddressMask(addrBits - 1, baseTotal, idx + 1, acc | (1L << idx))
+    else getAddressMask(addrBits - 1, baseTotal, idx + 1, acc | (BigInt(1) << idx))
   }
 
   def getAddressSet(ddrChannel: Int)(implicit p: Parameters): AddressSet = {
@@ -47,7 +48,7 @@ object BeethovenTop {
     //  but it seems anyways that it won't work UNLESS it's like this!
     val continuity = platform.extMem.master.size
     val baseTotal = (nMemChannels - 1) * continuity
-    val amask = getAddressMask(log2Up(platform.extMem.master.size), baseTotal.toLong)
+    val amask = getAddressMask(CLog2Up(platform.extMem.master.size), baseTotal)
 
     if (platform.extMem.master.base > 0) {
       assert(ddrChannel == 0)
@@ -326,7 +327,7 @@ class TopImpl(outer: BeethovenTop)(implicit p: Parameters) extends LazyRawModule
   {
     val devicesNeedingReset = (LazyModuleWithSLRs.toplevelObjectsPerSLR.map(_._1) ++
       outer.devices.map {b: Subdevice => b.deviceId }).distinct
-    val resets =  devicesNeedingReset.map { a => (a, ResetBridge(childReset, clock, 8)) }
+    val resets =  devicesNeedingReset.map { a => (a, ResetBridge(childReset, clock, 4)) }
     outer.devices.foreach { dev =>
       dev.module.reset := resets.find(_._1 == dev.deviceId).get._2
     }

@@ -26,7 +26,7 @@ case class KriaPlatform(memoryNChannels: Int = 1,
 
   override val physicalMemoryBytes: Long = 4L << 30
   override val memorySpaceAddressBase: Long = 0x0
-  override val memorySpaceSizeBytes: Long = 1L << 49
+  override val memorySpaceSizeBytes: BigInt = 1L << 49
   override val memoryControllerIDBits: Int = 6
   override val memoryControllerBeatBytes: Int = overrideMemoryBusWidthBytes match {
     case None => 16

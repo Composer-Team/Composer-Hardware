@@ -163,7 +163,7 @@ class ScratchpadImpl(csp: ScratchpadConfig,
 
   IOs.zipWithIndex.foreach { case (io, portIdx) =>
     val memIdx = getLowOrderAddr(io.req.bits.addr)
-    val memIdxDelay = ShiftReg(memIdx, latency)
+    val memIdxDelay = ShiftReg(memIdx, latency, clock)
     memory.zipWithIndex foreach { case (mem, mem_idx) =>
       mem.addr(portIdx) := getHighOrderAddr(io.req.bits.addr)
       mem.chip_select(portIdx) := io.req.valid && memIdx === mem_idx.U
@@ -174,7 +174,7 @@ class ScratchpadImpl(csp: ScratchpadConfig,
     val datsOut = VecInit(memory.map(_.data_out(portIdx)))
     io.req.ready := true.B
     io.res.bits := datsOut(memIdxDelay)
-    io.res.valid := ShiftReg(io.req.valid && !io.req.bits.write_enable, latency)
+    io.res.valid := ShiftReg(io.req.valid && !io.req.bits.write_enable, latency, clock)
   }
 
   require(isPow2(datasPerCacheLine))
@@ -369,7 +369,7 @@ class ScratchpadImpl(csp: ScratchpadConfig,
       val channel = writer.io.channel
       val writebackIdx, written = Reg(UInt(log2Up(realNRows).W))
 
-      val mem_valid = ShiftReg(memory(0).read_enable(0) && wb_state === wb_read, latency)
+      val mem_valid = ShiftReg(memory(0).read_enable(0) && wb_state === wb_read, latency, clock)
       channel.data.valid := mem_valid && wb_state === wb_read
       channel.data.bits := memory(0).data_out(0)
       when(wb_state =/= wb_idle) {

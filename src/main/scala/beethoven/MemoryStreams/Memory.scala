@@ -123,7 +123,7 @@ object Memory {
                 dout_i := (addr_low match {
                   case None => dout_o
                   case Some(q) =>
-                    val muxSel = ShiftReg(q, latency)
+                    val muxSel = ShiftReg(q, latency, mio.clock.asClock)
                     val muxD = VecInit((0 until allocInfo.mux_degree.get) map { i =>
                       dout_o((i + 1) * dataWidth - 1, i * dataWidth)
                     })
@@ -166,7 +166,7 @@ object Memory {
               mio.data_out(0) := (addrLow match {
                 case None => cmem.io.O
                 case Some(q) =>
-                  val muxSel = ShiftReg(q, latency)
+                  val muxSel = ShiftReg(q, latency, mio.clock.asClock)
                   val muxD = VecInit((0 until allocInfo.mux_degree.get) map { i =>
                     cmem.io.O((i + 1) * dataWidth - 1, i * dataWidth)
                   })
@@ -205,7 +205,7 @@ object Memory {
               mio.data_out(ridx) := (r_addr_low match {
                 case None => cmem.io.O
                 case Some(q) =>
-                  val muxSel = ShiftReg(q, latency)
+                  val muxSel = ShiftReg(q, latency, mio.clock.asClock)
                   val muxD = VecInit((0 until allocInfo.mux_degree.get) map { i =>
                     cmem.io.O((i + 1) * dataWidth - 1, i * dataWidth)
                   })
