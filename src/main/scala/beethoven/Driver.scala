@@ -159,7 +159,9 @@ class BeethovenBuild(config: AcceleratorConfig,
 
     os.remove.all(hw_build_dir / "firrtl_black_box_resource_files.f")
     val allChiselGeneratedSrcs = WalkPath(hw_build_dir)
-    val chiselGeneratedSrcs = allChiselGeneratedSrcs.filter(a => !a.toString().contains("ShiftReg") && !a.toString().contains("Queue"))
+    val chiselGeneratedSrcs = allChiselGeneratedSrcs.
+      filter(a => !a.toString().contains("ShiftReg") && !a.toString().contains("Queue")).
+      filter(a => !a.toString().contains("txt"))
     val shifts = allChiselGeneratedSrcs.filter(a => a.toString().contains("ShiftReg") || a.toString().contains("Queue"))
 
     // --------------- Verilog Annotators ---------------

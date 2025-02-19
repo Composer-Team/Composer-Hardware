@@ -279,6 +279,8 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
 class TopImpl(outer: BeethovenTop)(implicit p: Parameters) extends LazyRawModuleImp(outer) {
   val clock = IO(Input(Clock()))
   val reset = IO(Input(Bool()))
+  // have to keep these if statements separate so that chisel doesn't do any stupid renaming to "chiselReset_reset"
+  // for instance
   if (platform.isActiveHighReset) {
     reset.suggestName("reset")
   } else {
