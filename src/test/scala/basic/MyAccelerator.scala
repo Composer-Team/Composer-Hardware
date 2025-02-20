@@ -31,6 +31,8 @@ class MyAccelerator(implicit p: Parameters) extends AcceleratorCore {
   // split vector into 32b chunks and add addend to it
   vec_out_data.data <> vec_in_data.data.map(bitVec =>
     applyToChunks(bitVec, 32, _ + addendReg))
+
+
   io.req.ready := vec_in_request.ready && vec_out_request.ready && !activeCmd
   io.resp.valid := vec_in_request.ready && vec_out_request.ready && activeCmd
   when (io.resp.fire) {

@@ -66,6 +66,7 @@ class AWSF2Platform extends
       os.makeDir.all(run_dir)
       os.proc("touch", top_file.toString()).call()
       Shell.write(BeethovenBuild.hw_build_dir / "cl_beethoven_top.sv")(c)
+      Shell.write_header(BeethovenBuild.hw_build_dir / "cl_beethoven_top_defines.vh")(c)
 
       os.copy.over(BeethovenBuild.hw_build_dir, gen_dir)
       os.move(gen_dir / "BeethovenTop.v", top_file)

@@ -18,9 +18,8 @@ object SynthScript {
          |# Reading the .sv and .v files, as proper designs would not require reading
          |# .vh, nor .inc files
          |read_verilog -sv [glob ~/cl_beethoven_top/design/*v]
-         |
-         |#set_property file_type {Verilog Header} [get_files $${src_post_enc_dir}/cl_mem_perf_defines.vh]
-         |#set_property is_global_include true     [get_files $${src_post_enc_dir}/cl_mem_perf_defines.vh]
+         |#set_property file_type {Verilog Header} [get_files ~/cl_beethoven_top/design/cl_beethoven_top_defines.vh]
+         |#set_property is_global_include true     [get_files ~/cl_beethoven_top/design/cl_beethoven_top_defines.vh]
          |
          |#---- End of section replaced by User ----
          |

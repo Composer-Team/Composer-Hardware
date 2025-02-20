@@ -46,7 +46,7 @@ class SequentialReader(val dWidth: Int,
   val addr = Reg(UInt(addressBits.W))
   val len = RegInit(0.U(addressBits.W))
 
-  val data_channel_read_idx = RegInit(0.U((log2Up(fabricBeatsPerBufferRow) + 1).W))
+  val data_channel_read_idx = Reg(UInt((log2Up(fabricBeatsPerBufferRow) + 1).W))
 
   val s_idle :: s_send_mem_request :: s_read_memory :: Nil = Enum(3)
   val state = RegInit(s_idle)
@@ -215,7 +215,13 @@ class SequentialReader(val dWidth: Int,
   switch(state) {
     is(s_idle) {
       when(io.req.fire) {
-        addr := io.req.bits.addr.address
+        val raw_addr = io.req.bits.addr.address
+        val bound1 = CLog2Up(fabricBeatBytes)
+        val aligned_addr = Cat(raw_addr(addressBits-1, bound1), 0.U(bound1.W))
+        val beatOffset = raw_addr(bound1 - 1, 0)
+        val beatOffsetMultiple = beatOffset(bound1-1, CLog2Up(userBytes))
+        data_channel_read_idx := beatOffsetMultiple
+        addr := aligned_addr
         len := io.req.bits.len
         expectedChannelBeats := io.req.bits.len >> CLog2Up(userBytes)
         if (userBytes > 1) {

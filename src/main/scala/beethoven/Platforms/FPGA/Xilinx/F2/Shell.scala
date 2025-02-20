@@ -67,11 +67,15 @@ object Shell {
 
     os.write(toPath,
       f"""
+         |`include "cl_beethoven_top_defines.vh"
          |module cl_beethoven_top
          |#(parameter EN_DDR = 1,
          |  parameter EN_HBM = 0) (
          |`include "cl_ports.vh"
          |);
+         |`ifndef CL_VERSION
+         |   `define CL_VERSION 32'h10df_f002
+         |`endif
          |`include "cl_id_defines.vh"
          |`define CL_NAME cl_beethoven_top
          |//Highly recommeneded.  For lib FIFO block, uses less async reset (take advantage of
@@ -87,6 +91,9 @@ object Shell {
          |`define DEF_AXPROT    3'd2 // Unprivileged access, Non-Secure Access
          |`define DEF_AXQOS     4'd0   // Regular Identifier
          |`define DEF_AXREGION  4'd0   // Single region
+         |
+         |assign cl_sh_id0 = `CL_SH_ID0;
+         |assign cl_sh_id1 = `CL_SH_ID1;
          |
          | interface axi_bus_t #(DATA_WIDTH=32, ADDR_WIDTH=32, ID_WIDTH=16, AXLEN_WIDTH=8);
          |    logic [ADDR_WIDTH-1 : 0]  araddr  ;
@@ -580,7 +587,7 @@ object Shell {
          |
          |  BeethovenTop (
          |    .clock(gen_clk_main_a0),
-         |    .RESETn(ddr_sync_rst_n),
+         |    .RESETn(gen_rst_main_n),
          |    $ddr_connects,
          |    $dma_connects,
          |    $ocl_connects);
@@ -589,5 +596,26 @@ object Shell {
          |
          |endmodule
          |""".stripMargin)
+  }
+
+  def write_header(toPath: Path)(implicit p: Parameters): Unit = {
+    os.write.over(toPath,
+      f"""`ifndef CL_BEETHOVEN_TOP_DEFINES
+         |`define CL_BEETHOVEN_TOP_DEFINES
+         |
+         |//Put module name of the CL design here.  This is used to instantiate in top.sv
+         |`define CL_NAME cl_beethoven_top
+         |
+         |//Highly recommeneded.  For lib FIFO block, uses less async reset (take advantage of
+         |// FPGA flop init capability).  This will help with routing resources.
+         |`define FPGA_LESS_RST
+         |
+         |// Uncomment to disable Virtual JTAG
+         |//`define DISABLE_VJTAG_DEBUG
+         |`define NO_SDE_DEBUG_ILA
+         |
+         |`endif
+         |""".stripMargin)
+
   }
 }
