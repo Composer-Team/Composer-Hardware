@@ -13,5 +13,5 @@ class MyAcceleratorConfig extends AcceleratorConfig(List(
       WriteChannelConfig("vec_out", dataBytes = 4))
   ), new DMAHelperConfig, new MemsetHelperConfig(4)))
 object MyAcceleratorKria extends BeethovenBuild(new MyAcceleratorConfig,
-  buildMode = BuildMode.Synthesis,
+  buildMode = BuildMode.Simulation,
   platform = new AWSF2Platform)
