@@ -310,7 +310,7 @@ object MemoryCompiler {
 
     withClockAndReset(io.clock.asClock, false.B.asAsyncReset) {
       @tailrec
-      def scan_shift[T <: Data](a: T, d: Int, acc: List[T] = List.empty): List[T] = {
+      def scan_shift(a: UInt, d: Int, acc: List[UInt] = List.empty): List[UInt] = {
         if (d == 0) acc.reverse
         else {
           val ap = ShiftReg(a, 1, io.clock.asClock)
@@ -367,7 +367,7 @@ object MemoryCompiler {
             ((0 until nPorts) map { port_idx =>
               mem.data_in(port_idx) := data_shifts(port_idx)(l_idx)(d_off + cols - 1, d_off)
               mem.read_enable(port_idx) := fixActive(re_shift(port_idx)(l_idx))
-              mem.chip_select(port_idx) := fixActive(chip_active_shifts(port_idx)(l_idx) && lm_hit(port_idx))
+              mem.chip_select(port_idx) := fixActive(chip_active_shifts(port_idx)(l_idx).asBool && lm_hit(port_idx).asBool)
               mem.write_enable(port_idx) := fixActive(we_shift(port_idx)(l_idx))
               mem.addr(port_idx) := addr_shifts(port_idx)(l_idx).tail(l_bits + m_bits)
               Mux(RegNext(lm_hit(port_idx)),

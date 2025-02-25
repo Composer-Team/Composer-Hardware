@@ -11,8 +11,8 @@ class TLSlaveBuffer(depth: Int = 1)(implicit p: Parameters) extends LazyModule {
     require(node.in.size == 1)
     require(node.out.size == 1)
     val in = node.in.head._1
-    node.out(0)._1.tl.valid := ShiftReg(in.tl.valid, depth, clock, allow_fpga_shreg = false)
-    node.out(0)._1.tl.bits := ShiftReg(in.tl.bits, depth, clock, allow_fpga_shreg = false)
+    node.out(0)._1.tl.valid := ShiftReg(in.tl.valid, depth, clock, allow_fpga_shreg = false, as = a => a.asBool)
+    node.out(0)._1.tl.bits := ShiftReg(in.tl.bits, depth, clock, allow_fpga_shreg = false, as = a => a.asBool)
   }
 }
 
