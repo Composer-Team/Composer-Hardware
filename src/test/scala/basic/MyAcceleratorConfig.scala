@@ -6,7 +6,7 @@ import beethoven._
 class MyAcceleratorConfig extends AcceleratorConfig(List(
   AcceleratorSystemConfig(
     nCores = 1,
-    name = "MyAccelerator",
+    name = "MyAcceleratorSystem",
     moduleConstructor = ModuleBuilder(p => new MyAccelerator()(p)),
     memoryChannelConfig = List(
       ReadChannelConfig("vec_in", dataBytes = 4),
