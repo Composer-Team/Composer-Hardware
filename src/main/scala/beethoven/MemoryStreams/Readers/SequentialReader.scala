@@ -218,9 +218,13 @@ class SequentialReader(val dWidth: Int,
         val raw_addr = io.req.bits.addr.address
         val bound1 = CLog2Up(fabricBeatBytes)
         val aligned_addr = Cat(raw_addr(addressBits-1, bound1), 0.U(bound1.W))
-        val beatOffset = raw_addr(bound1 - 1, 0)
-        val beatOffsetMultiple = beatOffset(bound1-1, CLog2Up(userBytes))
-        data_channel_read_idx := beatOffsetMultiple
+        if (userBytes < fabricBeatBytes) {
+          val beatOffset = raw_addr(bound1 - 1, 0)
+          val beatOffsetMultiple = beatOffset(bound1 - 1, CLog2Up(userBytes))
+          data_channel_read_idx := beatOffsetMultiple
+        } else {
+          data_channel_read_idx := 0.U
+        }
         addr := aligned_addr
         len := io.req.bits.len
         expectedChannelBeats := io.req.bits.len >> CLog2Up(userBytes)
