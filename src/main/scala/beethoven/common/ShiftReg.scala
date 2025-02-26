@@ -7,8 +7,6 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.ValName
 
-import scala.annotation.tailrec
-
 /**
  * I've run into trouble in the past where Chisel3 shiftregisters give me
  * unexpected behavior, so I have these instead.
@@ -28,11 +26,11 @@ class ShiftReg(n: Int,
   })
 
   val (resetString, resetName, reset_code_sig, reset_sig) = resetVal match {
-    case Some(a) => ((0 until n).map { i => f"${space}shift_reg[${i}] <= ${a.asUInt.litValue};" }.mkString("\n"), a.asUInt.litValue.toString, "reset", "   input reset,")
+    case Some(a) => ((0 until n).map { i => f"${space}shift_reg[${i}] <= ${a.asUInt.litValue};" }.mkString("\n"), a.asUInt.litValue.toString, "reset", "\n    input reset,")
     case None => ("", "_", "1'b0", "")
   }
   val (enable, enable_sig) = if (with_enable) {
-    ("enable", "input enable,")
+    ("enable", "\n    input enable,")
   } else {
     ("1'b1", "")
   }
@@ -45,31 +43,49 @@ class ShiftReg(n: Int,
   val assigns = (0 until n - 1).map { i => f"${space}shift_reg[${i + 1}] <= shift_reg[$i];" }.mkString("\n")
   val path = os.pwd / "SRs" / f"$desiredName.v"
   val annot = if (allow_fpga_shreg) "" else "(* shreg_extract = \"no\" *)\n    "
-  os.write.over(path,
-    f"""
-       |module $desiredName (
-       |  input clock,
-       |  $reset_sig
-       |  $enable_sig
-       |  input [${width - 1}:0] in,
-       |  output [${width - 1}:0] out);
-       |
-       |  ${annot}reg [${width - 1}:0] shift_reg [0:${n - 1}];
-       |
-       |  always @(posedge clock)
-       |  begin
-       |    if ($reset_code_sig) begin
-       |$resetString
-       |    end else if ($enable) begin
-       |      shift_reg[0] <= in;
-       |$assigns
-       |    end
-       |  end
-       |
-       |  assign out = shift_reg[${n - 1}];
-       |endmodule
-       |
-       |""".stripMargin)
+  val range = if (width > 0) f" [${width-1}:0]" else ""
+  val lat = if (n > 0) f" [0:${n-1}]" else ""
+  val reg = if (width > 0) {
+    f"${annot}reg$range shift_reg$lat;"
+  } else {
+    f"${annot}reg$lat shift_reg;"
+  }
+  if (n > 0) {
+    os.write.over(path,
+      f"""
+         |module $desiredName (
+         |  input clock,$reset_sig$enable_sig
+         |  input$range in,
+         |  output$range out);
+         |
+         |  $reg
+         |
+         |  always @(posedge clock)
+         |  begin
+         |    if ($reset_code_sig) begin
+         |$resetString
+         |    end else if ($enable) begin
+         |      shift_reg[0] <= in;
+         |$assigns
+         |    end
+         |  end
+         |
+         |  assign out = shift_reg[${n - 1}];
+         |endmodule
+         |
+         |""".stripMargin)
+  } else {
+    os.write.over(path,
+      f"""
+         |module $desiredName (
+         |  input clock,$reset_sig$enable_sig
+         |  input$range in,
+         |  output$range out);
+         |  assign out = in;
+         |endmodule
+         |
+         |""".stripMargin)
+  }
   BeethovenBuild.addSource(path)
 }
 
@@ -128,11 +144,13 @@ object ShiftReg {
             clock: Clock)(implicit p: Parameters, valName: ValName): UInt = {
     apply[UInt](t, latency, clock, a => a)
   }
+
   def apply(t: Vec[UInt],
             latency: Int,
             clock: Clock)(implicit p: Parameters, valName: ValName): Vec[UInt] = {
     apply[Vec[UInt]](t, latency, clock, a => splitIntoChunks(a, t(0).getWidth))
   }
+
   def apply(t: SInt,
             latency: Int,
             clock: Clock)(implicit p: Parameters, valName: ValName): SInt = {
