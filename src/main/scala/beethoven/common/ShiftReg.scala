@@ -148,7 +148,7 @@ object ShiftReg {
   def apply(t: Vec[UInt],
             latency: Int,
             clock: Clock)(implicit p: Parameters, valName: ValName): Vec[UInt] = {
-    apply[Vec[UInt]](t, latency, clock, a => splitIntoChunks(a, t(0).getWidth))
+    apply[Vec[UInt]](t, latency, clock, a => VecInit(splitIntoChunks(a, t(0).getWidth).reverse))
   }
 
   def apply(t: SInt,
@@ -205,6 +205,6 @@ object ShiftRegEnable {
             latency: Int,
             enable: Bool,
             clock: Clock): Vec[UInt] = {
-    apply[Vec[UInt]](t, latency, a => splitIntoChunks(a, t(0).getWidth), enable, clock)
+    apply[Vec[UInt]](t, latency, a => VecInit(splitIntoChunks(a, t(0).getWidth).reverse), enable, clock)
   }
 }
