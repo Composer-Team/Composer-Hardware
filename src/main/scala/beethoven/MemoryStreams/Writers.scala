@@ -155,7 +155,6 @@ class SequentialWriter(userBytes: Int,
     /** TODO verify this doesn't mess everything up. We should be able to start a new command when old writes
      * from a previous command are in flight but there's no data left in the buffers
      */
-    //        when(!sourcesInProgress) {
     io.busy := false.B
     io.req.ready := true.B
     when(io.req.fire) {
@@ -165,7 +164,6 @@ class SequentialWriter(userBytes: Int,
       req_addr := choppedAddr
       burst_progress_count := 0.U
     }
-    //        }
   }
   // these are always true
   tl_out.a.bits.mask := (if (mask_buffer.isDefined) {
@@ -224,6 +222,9 @@ class SequentialWriter(userBytes: Int,
     write_buffer_io.bits.payload := io.channel.data.bits
     write_buffer_io.valid := io.channel.data.valid
     io.channel.data.ready := write_buffer_io.ready
+    when (io.channel.data.fire) {
+      expectedNumBeats := expectedNumBeats - 1.U
+    }
   } else if (userBytes < fabricBeatBytes) {
     val beatLim = fabricBeatBytes / userBytes
     val beatBuffer = Reg(Vec(beatLim - 1, UInt((userBytes * 8).W)))
