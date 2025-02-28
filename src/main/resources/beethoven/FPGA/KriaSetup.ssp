@@ -22,13 +22,16 @@
 
 
 create_project ${project_name} ${output_dir} -part ${part_name} -force
+if { [file exists ip.tcl] == 1} {
+  source ip.tcl
+}
 set_property board_part ${board_part} [current_project]
 
 create_bd_design "design_1"
 
 # Add Zynq MPSoC
 startgroup
-create_bd_cell -type ip -vlnv xilinx.com:ip:zynq_ultra_ps_e:3.4 soc
+create_bd_cell -type ip -vlnv xilinx.com:ip:zynq_ultra_ps_e soc
 endgroup
 apply_bd_automation -rule xilinx.com:bd_rule:zynq_ultra_ps_e -config {apply_board_preset "1" } [get_bd_cells soc]
 set_property -dict [list \\
@@ -37,21 +40,13 @@ set_property -dict [list \\
     CONFIG.PSU__SAXIGP2__DATA_WIDTH {32} \\
     CONFIG.PSU__CRL_APB__PL0_REF_CTRL__FREQMHZ {${clock_rate}} \\
 ] [get_bd_cells soc]
-add_files beethoven.build/
+add_files hw/
 update_compile_order -fileset sources_1
 create_bd_cell -type module -reference ${top_module} top
 
 set my_bd [exec find ${output_dir} -name "design_1.bd"]
-# Chisel designs have active high reset, but Zynq uses active low, so we need to switch it around
-startgroup
-create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 notReset
-endgroup
-set_property -dict [list \\
-    CONFIG.C_OPERATION {not} \\
-    CONFIG.C_SIZE {1} \\
-] [get_bd_cells notReset]
-connect_bd_net [get_bd_pins top/reset] [get_bd_pins notReset/Res]
-connect_bd_net [get_bd_pins notReset/Op1] [get_bd_pins soc/pl_resetn0]
+
+connect_bd_net [get_bd_pins top/RESETn] [get_bd_pins soc/pl_resetn0]
 
 # Connect together AXI4
 startgroup
