@@ -140,7 +140,7 @@ class MCRFileModuleAXI(outer: Protocol2RoccWidget, numRegs: Int)(implicit p: Par
 
   val address = Reg(UInt(logNumRegs.W))
   val writeData = Reg(UInt(32.W))
-  val readData = Reg(UInt(32.W))
+  val readData = Reg(UInt((platform.frontBusBeatBytes * 8).W))
   val opLen = Reg(UInt(8.W))
   val opvalid = Reg(Bool())
 
@@ -175,7 +175,8 @@ class MCRFileModuleAXI(outer: Protocol2RoccWidget, numRegs: Int)(implicit p: Par
     }
     when (state === s_idle) {
       in.aw.ready := true.B
-      addr := in.aw.bits.addr(logNumRegs+2-1, 2)
+      val addr_skip = log2Up(platform.frontBusBeatBytes)
+      addr := in.aw.bits.addr(logNumRegs+addr_skip-1, addr_skip)
       len := in.aw.bits.len
       when (in.aw.fire) {
         state := s_write
@@ -215,14 +216,15 @@ class MCRFileModuleAXI(outer: Protocol2RoccWidget, numRegs: Int)(implicit p: Par
     in.r.bits.id := id
     in.r.bits.last := len === 0.U
     in.r.bits.resp := 0.U
-    in.r.bits.data := io.mcr.read(addr).bits
+    in.r.bits.data := 0.U
 
     when (in.r.fire) {
       len := len - 1.U
     }
     when (state === s_idle) {
       in.ar.ready := true.B
-      addr := in.ar.bits.addr(logNumRegs+2-1, 2)
+      val addr_skip = log2Up(platform.frontBusBeatBytes)
+      addr := in.ar.bits.addr(logNumRegs+addr_skip-1, addr_skip)
       len := in.ar.bits.len
       id := in.ar.bits.id
       when (in.ar.fire) {
@@ -230,6 +232,11 @@ class MCRFileModuleAXI(outer: Protocol2RoccWidget, numRegs: Int)(implicit p: Par
       }
     }.elsewhen(state === s_read) {
       in.r.valid := true.B
+      if (platform.frontBusBeatBytes == 4) {
+        in.r.bits.data := io.mcr.read(addr).bits
+      } else {
+        in.r.bits.data := Cat(0.U((8*(platform.frontBusBeatBytes-4)).W), io.mcr.read(addr).bits)
+      }
       io.mcr.read(addr).ready := in.r.ready
       when (in.r.fire) {
         when (len === 0.U) {
