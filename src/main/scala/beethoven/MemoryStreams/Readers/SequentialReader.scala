@@ -204,7 +204,7 @@ class SequentialReader(val dWidth: Int,
 
       }
     }
-    require(isPow2(beatsPerLine))
+    require(isPow2(beatsPerLine), s"the reader width must be a multible of ${fabricBeatBytes}.")
     (largeTxNBeats / beatsPerLine, beatsPerLine)
   }
 
