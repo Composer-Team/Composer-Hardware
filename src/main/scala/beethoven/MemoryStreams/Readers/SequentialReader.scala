@@ -31,7 +31,7 @@ class SequentialReader(val dWidth: Int,
     minSizeBytes.getOrElse(0) / fabricBeatBytes)
   val useRegMem = prefetchDepthRows < 32
   val rowsAvailableToAlloc = RegInit(prefetchDepthRows.U(log2Up(prefetchDepthRows+1).W))
-  require(isPow2(userBytes))
+  require(isPow2(userBytes), "The width of the reader channel must be a power of two")
 
   // io goes to user, TL connects with AXI4
   val io = IO(new ReadChannelIO(dWidth))

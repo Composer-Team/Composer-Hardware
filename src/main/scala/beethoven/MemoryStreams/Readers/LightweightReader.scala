@@ -18,7 +18,6 @@ class LightweightReader(val dWidth: Int,
                         tl_edge: TLEdgeOut,
                         minSizeBytes: Option[Int] = None)(implicit p: Parameters) extends Module with ReaderModuleIO {
   override val desiredName = "LightReader_w" + dWidth.toString
-  BeethovenBuild.requestModulePartition(this.desiredName)
   val beatBytes = tl_edge.manager.beatBytes
   val beatBits = beatBytes * 8
   val addressBits = log2Up(tl_edge.manager.maxAddress)
