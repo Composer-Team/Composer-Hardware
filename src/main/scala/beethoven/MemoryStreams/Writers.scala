@@ -29,14 +29,15 @@ class SequentialWriter(userBytes: Int,
                        minSizeBytes: Option[Int] = None)
                       (implicit p: Parameters) extends Module {
   override val desiredName = s"SequentialWriter_w${userBytes * 8}"
-  require(isPow2(userBytes))
+  require(isPow2(userBytes), "Writer must have a data channel with that is a power-of-2 number of bytes wide.")
   private val fabricBeatBytes = tl_outer.params.dataBits / 8
   private val addressBits = tl_outer.params.addressBits
   private val addressBitsChop = addressBits - log2Up(fabricBeatBytes)
   private val nSources = edge.master.endSourceId
   val pfsm = platform.prefetchSourceMultiplicity
   val userBeatsPerLargeTx = fabricBeatBytes * pfsm / userBytes
-  require(isPow2(pfsm) && pfsm > 1)
+  require(isPow2(pfsm) && pfsm > 1, "Platform Developer: This platform has seemed to declare an invalid number of" +
+    "sources per Writer. It must be a power-of-two and greater than 1.")
 
   val io = IO(new SequentialWriteChannelIO(userBytes))
   val tl_out = IO(new TLBundle(tl_outer.params))

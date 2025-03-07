@@ -31,8 +31,8 @@ class LightweightReader_small(val dWidth: Int,
     val p2 = 1 << log2Ceil(nonp2)
     p2
   }
-  require(tl_edge.client.endSourceId == 1)
-  require(isPow2(channelBytes))
+  require(tl_edge.client.endSourceId == 1, "Developer: Lightweight readers must be parameterized with endSourceId=1")
+  require(isPow2(channelBytes), "Develo")
 
   // io goes to user, TL connects with AXI4
   val io = IO(new ReadChannelIO(dWidth))

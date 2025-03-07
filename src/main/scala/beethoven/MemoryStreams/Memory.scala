@@ -46,7 +46,7 @@ object Memory {
     if (nPorts > mostPortsSupported && (nWritePorts + nReadWritePorts > 1 || mostPortsSupported == 1)) {
       if (withWriteEnable) throw new Exception("Don't support write enable in SyncReadMem")
       val regMem = Module(new SyncReadMemMem(nReadPorts, nWritePorts, nReadWritePorts, nRows, dataWidth, latency))
-      require(nPorts < 16)
+      require(nPorts < 16, "Memories must have less than 16 ports.")
       (0 until nReadPorts) foreach { idx =>
         val ridx = regMem.mio.getReadPortIdx(idx)
         regMem.mio.data_in(ridx) := DontCare
@@ -59,7 +59,7 @@ object Memory {
     } else {
       (p(PlatformKey).platformType, p(BuildModeKey)) match {
         case (PlatformType.FPGA, _) | (_, BuildMode.Simulation) =>
-          require(latency >= 1)
+          require(latency >= 1, "The latency of declared memories must be at least 1 cycle.")
 
           def determineWE(mux_degree: Option[Int],
                           lowDegreeAddr: Option[UInt],
@@ -326,12 +326,12 @@ class MemoryIOBundle(val nReadPorts: Int,
   }
 
   def getWritePortIdx(idx: Int): Int = {
-    require(idx < nWritePorts)
+    require(idx < nWritePorts, "Developer: Sanity check failed")
     idx + nReadPorts
   }
 
   def getReadWritePortIdx(idx: Int): Int = {
-    require(idx < nReadWritePorts)
+    require(idx < nReadWritePorts, "Developer: Sanity check failed")
     idx + nReadPorts + nWritePorts
   }
 

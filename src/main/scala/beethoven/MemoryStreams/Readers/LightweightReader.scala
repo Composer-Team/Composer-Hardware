@@ -28,7 +28,7 @@ class LightweightReader(val dWidth: Int,
     nSources * platform.prefetchSourceMultiplicity,
     minSizeBytes.getOrElse(0) / beatBytes)
   val rowsAvailableToAlloc = RegInit(prefetchRows.U(log2Up(prefetchRows + 1).W))
-  require(isPow2(maxBytes))
+  require(isPow2(maxBytes), "Readers's data buses must be a power of two bytes wide")
 
 
   // io goes to user, TL connects with AXI4

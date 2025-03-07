@@ -112,7 +112,7 @@ trait MCRFile {
 }
 
 class Protocol2RoccWidget(numRegs: Int)(implicit p: Parameters) extends LazyModule with MCRFile {
-  require((platform.frontBusBaseAddress& 0x3FFL) == 0)
+  require((platform.frontBusBaseAddress& 0x3FFL) == 0, "Platform: The defined front bus address must be aligned to 0x400 (1KB)")
   val node = AXI4SlaveNode(portParams = Seq(AXI4SlavePortParameters(slaves = Seq(
     AXI4SlaveParameters(
       address = Seq(AddressSet(platform.frontBusBaseAddress, platform.frontBusAddressMask)),

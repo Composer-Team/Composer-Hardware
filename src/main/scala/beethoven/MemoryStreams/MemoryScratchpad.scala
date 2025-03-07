@@ -73,8 +73,8 @@ object MemoryScratchpad {
  * @param specialization How data is loaded from memory. Choose a specialization from ScratchpadSpecialization
  */
 class MemoryScratchpad(csp: ScratchpadConfig)(implicit p: Parameters) extends LazyModule {
-  require(csp.dataWidthBits.intValue() > 0)
-  require(csp.nDatas.intValue() > 0)
+  require(csp.dataWidthBits.intValue() > 0, "The Scratchpad datawidth must be greater than 0.")
+  require(csp.nDatas.intValue() > 0, "The scratchpad depth (number of rows) must be greater than 0.")
   val channelWidthBytes = platform.extMem.master.beatBytes
 
   val blockBytes = p(CacheBlockBytes)
@@ -177,7 +177,7 @@ class ScratchpadImpl(csp: ScratchpadConfig,
     io.res.valid := ShiftReg(io.req.valid && !io.req.bits.write_enable, latency, clock)
   }
 
-  require(isPow2(datasPerCacheLine))
+  require(isPow2(datasPerCacheLine), "The Scratchpad nBanks/datas-per-cache-line parameter must be a power of 2.")
   if (outer.mem_reader.isDefined) {
 
     val swWordSize = specialization match {
@@ -187,7 +187,7 @@ class ScratchpadImpl(csp: ScratchpadConfig,
     }
     val loader = Module(specialization match {
       case psw: PackedSubwordScratchpadConfig =>
-        require(datasPerCacheLine == 1)
+        require(datasPerCacheLine == 1, "Using packed subword, only assumes nbanks=1 in the Scratchpad")
         new ScratchpadPackedSubwordLoader(dWidth, scReqBits, psw.wordSizeBits, psw.datsPerSubword)
       case _: FlatPackScratchpadConfig =>
         new ScratchpadPackedSubwordLoader(dWidth * datasPerCacheLine,
@@ -349,7 +349,9 @@ class ScratchpadImpl(csp: ScratchpadConfig,
 
 
     if (supportWriteback) {
-      require(specialization.isInstanceOf[FlatPackScratchpadConfig] && dWidth % 8 == 0)
+      require(specialization.isInstanceOf[FlatPackScratchpadConfig] && dWidth % 8 == 0,
+      "Using the assisted writeback in the Scratchpad requires the data to resemble the same restrictions we place on Writers." +
+        "The data must be a power-of-two number of bytes and the data layout must be flat.")
       val writer = Module(new SequentialWriter(userBytes = dWidth / 8,
         tl_outer = outer.mem_writer.get.out(0)._1,
         edge = outer.mem_writer.get.out(0)._2))

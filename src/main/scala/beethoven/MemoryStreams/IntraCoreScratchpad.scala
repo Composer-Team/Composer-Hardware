@@ -30,8 +30,8 @@ class IntraCoreScratchpad(dataWidthBits: Number,
                           systemParams: AcceleratorSystemConfig,
                           coreIdx: Int,
                           channel_id: Int)(implicit p: Parameters) extends LazyModule {
-  require(dataWidthBits.intValue() > 0)
-  require(nDatas.intValue() > 0)
+  require(dataWidthBits.intValue() > 0, "The scratchpad must have a data-width greater than 0.")
+  require(nDatas.intValue() > 0, "The scratchpad must have a number of rows greater than 0")
   lazy val module = new IntraCoreScratchpadImp(
     dataWidthBits.intValue(),
     nDatas.intValue(),
