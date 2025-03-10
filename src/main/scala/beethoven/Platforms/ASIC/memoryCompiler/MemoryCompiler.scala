@@ -113,7 +113,7 @@ abstract class MemoryCompiler {
                           latency: Int,
                           withWE: Boolean)(implicit p: Parameters): Option[SRAMArray] = {
     if (latency < 1) return None
-
+    println(s"ASKING FOR SUGGESTED ROWS ${suggestedRows}")
     // (latency-1)*x + y >= suggestedRows & x,y are powers of two
     val (rx, ry) = {
       if (latency == 1) {
