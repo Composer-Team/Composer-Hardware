@@ -118,7 +118,7 @@ abstract class MemoryCompiler {
     val (rx, ry) = {
       if (latency == 1) {
         if (supports_onlyPow2) {
-          (1 << CLog2Up((suggestedRows)), -1)
+          (1 << log2Up(suggestedRows), -1)
         } else
           (suggestedRows, -1)
       } else {
