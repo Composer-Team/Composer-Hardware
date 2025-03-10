@@ -113,7 +113,7 @@ abstract class MemoryCompiler {
                           latency: Int,
                           withWE: Boolean)(implicit p: Parameters): Option[SRAMArray] = {
     if (latency < 1) return None
-    println(s"ASKING FOR SUGGESTED ROWS ${suggestedRows}")
+    println(s"ASKING FOR SUGGESTED ROWS ${suggestedRows} l = ${latency}")
     // (latency-1)*x + y >= suggestedRows & x,y are powers of two
     val (rx, ry) = {
       if (latency == 1) {
@@ -137,7 +137,12 @@ abstract class MemoryCompiler {
       }
     }
 
+
+
     val ws = Seq(wx, wy).filter(_ > 0).distinct
+
+    println("rs: " + rs)
+    println("ws: " + ws)
 
     val combos = rs.flatMap(a => ws.map(b => (a, b))).distinct
 
