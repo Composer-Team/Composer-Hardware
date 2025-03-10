@@ -334,6 +334,7 @@ object MemoryCompiler {
 
 
       // each stage increases the depth of the array
+      println(s"RDIVAR IS ${mem.array.length}x${mem.array(0).length}x${mem.array(0)(0).length}")
       val latency_array = mem.array.zipWithIndex.map { case (rDivSArray, l_idx: Int) =>
         if (l_idx < mem.array.length - 1) {
           (0 until nPorts) foreach { port_idx =>
