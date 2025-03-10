@@ -374,7 +374,7 @@ trait HasMemoryInterface {
 }
 
 
-case class SRAMArray(array: List[List[List[sramChar_t]]], characteristics: Map[String, Any] = Map.empty)
+case class SRAMArray(array: List[List[sramChar_t]], characteristics: Map[String, Any] = Map.empty)
 
 /**
  * ALL LOGIC IMPLEMENTED HERE MUST BE ACTIVE LOW
