@@ -11,7 +11,7 @@ import beethoven.Platforms.ASIC.memoryCompiler.MemoryCompiler._
 import beethoven.Platforms.ASIC.memoryCompiler.MemoryCompilerDeliverable.{Datasheet, MemoryCompilerDeliverable}
 import beethoven.Platforms._
 import beethoven.common.{CLog2Up, ShiftReg}
-import beethoven.platform
+import beethoven.{BuildMode, platform}
 import os.Path
 
 import scala.annotation.tailrec
@@ -122,8 +122,8 @@ abstract class MemoryCompiler {
         } else
           (suggestedRows, -1)
       } else {
-        val x = 1 << CLog2Up((suggestedRows.toFloat / latency).ceil.toInt)
-        val y = if (supports_onlyPow2) 1 << CLog2Up(suggestedRows - x * (latency - 1)) else suggestedRows - x * (latency - 1)
+        val x = 1 << log2Up((suggestedRows.toFloat / latency).ceil.toInt)
+        val y = if (supports_onlyPow2) 1 << log2Up(suggestedRows - x * (latency - 1)) else suggestedRows - x * (latency - 1)
         (x, y)
       }
     }
@@ -273,6 +273,10 @@ object MemoryCompiler {
    * @param io        IO in the parent context. Needs to be a CMemoryIOBundle
    */
   def buildSRAM(Latency: Int, dataWidth: Int, nRows: Int, nPorts: Int, withWE: Boolean, allowFallBack: Boolean, freqMHz: Int)(implicit io: MemoryIOBundle, p: Parameters): Unit = {
+    if (p(BuildModeKey) == BuildMode.Simulation) {
+
+    }
+
     def works(latency: Int): Option[(SRAMArray, Float)] = {
       if (withWE)
         mc.asInstanceOf[MemoryCompiler with SupportsWriteEnable].getWESRAMArray(
