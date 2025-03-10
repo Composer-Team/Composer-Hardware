@@ -343,7 +343,6 @@ object MemoryCompiler {
 
       val l_bits = CLog2Up(mem.array.length)
       val m_bits = CLog2Up(mem.array.head.length)
-      //            val mem_bits = CLog2Up(mem.array.head.head.head._1)
 
       def fixActive(a: UInt): UInt = {
         if (mc.isActiveHighSignals) a else (~a).asUInt
