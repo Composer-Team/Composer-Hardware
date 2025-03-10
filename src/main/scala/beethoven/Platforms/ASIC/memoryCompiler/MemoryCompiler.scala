@@ -287,8 +287,6 @@ object MemoryCompiler {
     }
     if (memOpts.isEmpty) {
       if (allowFallBack) {
-        //        beethoven.Generation.CLogger.log(s"Failed to find suitable SRAM configuration for ${nPorts}x${nRows}x${dataWidth} at L=${Latency}" +
-        //          s" Falling back to Register-based memory")
         val mem = Module(new SyncReadMemMem(0, 0, nPorts, nRows, dataWidth, Latency))
         mem.mio.clock := io.clock
         mem.suggestName(s"mem_${nRows}x${dataWidth}x${nPorts}_l${Latency}")
@@ -328,12 +326,14 @@ object MemoryCompiler {
 
       val l_bits = CLog2Up(mem.array.length)
       val m_bits = CLog2Up(mem.array.head.length)
-      //      val mem_bits = CLog2Up(mem.array.head.head.head._1)
+//            val mem_bits = CLog2Up(mem.array.head.head.head._1)
 
       def fixActive(a: UInt): UInt = {
         if (mc.isActiveHighSignals) a else (~a).asUInt
       }
 
+
+      // each stage increases the depth of the array
       val latency_array = mem.array.zipWithIndex.map { case (rDivSArray, l_idx: Int) =>
         if (l_idx < mem.array.length - 1) {
           (0 until nPorts) foreach { port_idx =>
@@ -363,6 +363,7 @@ object MemoryCompiler {
             val mem =
               if (withWE) mc.asInstanceOf[SupportsWriteEnable].generateMemoryFactory(sd, withWE)(p)()
               else mc.generateMemoryFactory(sd)(p)()
+            println(f"generated: ${sd(SRAMRows)}x${sd(SRAMColumns)}")
             mem.clocks.foreach(_ := io.clock)
             ((0 until nPorts) map { port_idx =>
               mem.data_in(port_idx) := data_shifts(port_idx)(l_idx)(d_off + cols - 1, d_off)

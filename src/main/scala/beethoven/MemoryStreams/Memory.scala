@@ -58,7 +58,7 @@ object Memory {
       throw new Exception("Too many ports!!!")
     } else {
       (p(PlatformKey).platformType, p(BuildModeKey)) match {
-        case (PlatformType.FPGA, _) | (_, BuildMode.Simulation) =>
+        case (PlatformType.FPGA, _) =>
           require(latency >= 1, "The latency of declared memories must be at least 1 cycle.")
 
           def determineWE(mux_degree: Option[Int],
@@ -246,7 +246,7 @@ object Memory {
             BRAMTDP.allocateBRAM(allocInfo.brams)
             mio
           }
-        case (PlatformType.ASIC, BuildMode.Synthesis) =>
+        case (PlatformType.ASIC, _) =>
           //          println("ASIC Mem")
           val cmem = Module(new CASICMemory(latency, dataWidth, nRows, nPorts, withWriteEnable, allowFallbackToRegister, p(PlatformKey).clockRateMHz))
           cmem.suggestName(valName.name)
