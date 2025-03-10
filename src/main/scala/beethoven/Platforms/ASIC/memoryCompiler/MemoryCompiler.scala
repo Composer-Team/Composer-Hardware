@@ -274,7 +274,7 @@ object MemoryCompiler {
           nRows, dataWidth, nPorts, latency).map(a => (a, a.characteristics("area").asInstanceOf[Float]))
       else
         mc.getMemoryCascadeOpt(nRows, dataWidth, nPorts, latency, withWE).map { q =>
-          (q, q.array.flatten.flatten.map(s => s(SRAMArea)).sum)
+          (q, q.array.flatten.map(s => s(SRAMArea)).sum)
         }
       //          .map(a => (a, a.characteristics("area").asInstanceOf[Float]))
     }
@@ -342,8 +342,8 @@ object MemoryCompiler {
 
 
       // each stage increases the depth of the array
-      println(s"RDIVAR IS ${mem.array.length}x${mem.array(0).length}x${mem.array(0)(0).length}")
-      val latency_array = mem.array.zipWithIndex.map { case (rDivSArray, l_idx: Int) =>
+      println(s"RDIVAR IS ${mem.array.length}x${mem.array(0).length}")
+      val latency_array = mem.array.zipWithIndex.map { case (bankArray, l_idx: Int) =>
         if (l_idx < mem.array.length - 1) {
           (0 until nPorts) foreach { port_idx =>
             data_stages(port_idx)(l_idx) := RegNext(data_out_wires(port_idx)(l_idx))
@@ -357,8 +357,6 @@ object MemoryCompiler {
             l.map(_ === l_idx.U)
           }
         }
-        assert(rDivSArray.length == 1)
-        val bankArray = rDivSArray(0)
         val sramMacroRowOuts: List[List[UInt]] = bankArray.zipWithIndex.map { case (sd, s_idx: Int) =>
           val cols = sd(SRAMColumns)
           val d_off = (0 until s_idx).map(bankArray(_)(SRAMColumns)).sum
