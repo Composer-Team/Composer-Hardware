@@ -342,7 +342,7 @@ object MemoryCompiler {
       val data_out_wires = Seq.fill(nPorts)(Seq.fill(mem.array.length)(Wire(UInt(dataWidth.W))))
 
       val l_bits = CLog2Up(mem.array.length)
-      val m_bits = CLog2Up(mem.array.head.length)
+      println("lbits: " + l_bits)
 
       def fixActive(a: UInt): UInt = {
         if (mc.isActiveHighSignals) a else (~a).asUInt
@@ -378,7 +378,7 @@ object MemoryCompiler {
             mem.read_enable(port_idx) := fixActive(re_shift(port_idx)(l_idx))
             mem.chip_select(port_idx) := fixActive(chip_active_shifts(port_idx)(l_idx).asBool && l_hit(port_idx).asBool)
             mem.write_enable(port_idx) := fixActive(we_shift(port_idx)(l_idx))
-            mem.addr(port_idx) := addr_shifts(port_idx)(l_idx).tail(l_bits + m_bits)
+            mem.addr(port_idx) := addr_shifts(port_idx)(l_idx).tail(l_bits)
             Mux(RegNext(l_hit(port_idx)),
               mem.data_out(port_idx),
               if (l_idx == 0) 0.U(cols.W) else data_stages(port_idx)(l_idx - 1))
