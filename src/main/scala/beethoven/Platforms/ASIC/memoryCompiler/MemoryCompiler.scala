@@ -138,7 +138,6 @@ abstract class MemoryCompiler {
     }
 
 
-
     val ws = Seq(wx, wy).filter(_ > 0).distinct
 
     println("rs: " + rs)
@@ -175,7 +174,9 @@ abstract class MemoryCompiler {
               else suggestedColumns - usum
               val r = if (l == latency - 1 && l != 0) ry else rx
               println("R IS " + r)
+
               def eq_pr(a: (Int, Int), b: (Int, Int)): Boolean = a._1 == b._1 && a._2 == b._2
+
               combos_eval.find(a => eq_pr(a._1, (r, w))).get._2
           }
       }))
@@ -342,7 +343,7 @@ object MemoryCompiler {
       val latency_array = mem.array.zipWithIndex.map { case (bankArray, l_idx: Int) =>
         if (l_idx < mem.array.length - 1) {
           (0 until nPorts) foreach { port_idx =>
-            data_stages(port_idx)(l_idx) := RegNext(data_out_wires(port_idx)(l_idx))
+            data_stages(port_idx)(l_idx) := data_out_wires(port_idx)(l_idx)
           }
         }
         val per_port_addr = addr_shifts.map(a => a(l_idx))
@@ -353,15 +354,15 @@ object MemoryCompiler {
             l.map(_ === l_idx.U)
           }
         }
-        val sramMacroRowOuts: List[List[UInt]] = bankArray.zipWithIndex.map { case (sd, s_idx: Int) =>
-          val cols = sd(SRAMColumns)
-          val d_off = (0 until s_idx).map(bankArray(_)(SRAMColumns)).sum
-          val mem =
-            if (withWE) mc.asInstanceOf[SupportsWriteEnable].generateMemoryFactory(sd, withWE)(p)()
-            else mc.generateMemoryFactory(sd)(p)()
-          println(f"generated: ${sd(SRAMRows)}x${sd(SRAMColumns)}")
-          mem.clocks.foreach(_ := io.clock)
-          ((0 until nPorts) map { port_idx =>
+        val each_port = ((0 until nPorts) map { port_idx =>
+          val sramMacroRowOuts_per_col = bankArray.zipWithIndex.map { case (sd, s_idx: Int) =>
+            val cols = sd(SRAMColumns)
+            val d_off = (0 until s_idx).map(bankArray(_)(SRAMColumns)).sum
+            val mem =
+              if (withWE) mc.asInstanceOf[SupportsWriteEnable].generateMemoryFactory(sd, withWE)(p)()
+              else mc.generateMemoryFactory(sd)(p)()
+            println(f"generated: ${sd(SRAMRows)}x${sd(SRAMColumns)}")
+            mem.clocks.foreach(_ := io.clock)
             mem.data_in(port_idx) := data_shifts(port_idx)(l_idx)(d_off + cols - 1, d_off)
             mem.read_enable(port_idx) := fixActive(re_shift(port_idx)(l_idx))
             mem.chip_select(port_idx) := fixActive(chip_active_shifts(port_idx)(l_idx).asBool && l_hit(port_idx).asBool)
@@ -369,13 +370,12 @@ object MemoryCompiler {
             mem.addr(port_idx) := addr_shifts(port_idx)(l_idx).tail(l_bits)
             Mux(RegNext(l_hit(port_idx)),
               mem.data_out(port_idx),
-              if (l_idx == 0) 0.U(cols.W) else data_stages(port_idx)(l_idx - 1))
-          }).toList
-        }
-        val portCats = (0 until nPorts).map { port_idx =>
-          Cat(sramMacroRowOuts.map(a => a(port_idx)).reverse)
-        }
-        portCats.zip(data_out_wires).foreach { case (p, w) => w(l_idx) := p }
+              if (l_idx == 0) 0.U else data_out_wires(port_idx)(l_idx - 1)
+            )
+          }
+          val whole_col = Cat(sramMacroRowOuts_per_col.reverse)
+          data_out_wires(port_idx)(l_idx) := whole_col
+        })
       }
       io.data_out.zip(data_out_wires).foreach { case (d, w) => d := w.last }
     }
