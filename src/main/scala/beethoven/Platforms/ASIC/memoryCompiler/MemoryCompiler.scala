@@ -273,9 +273,6 @@ object MemoryCompiler {
    * @param io        IO in the parent context. Needs to be a CMemoryIOBundle
    */
   def buildSRAM(Latency: Int, dataWidth: Int, nRows: Int, nPorts: Int, withWE: Boolean, allowFallBack: Boolean, freqMHz: Int)(implicit io: MemoryIOBundle, p: Parameters): Unit = {
-    if (p(BuildModeKey) == BuildMode.Simulation) {
-
-    }
 
     def works(latency: Int): Option[(SRAMArray, Float)] = {
       if (withWE)
