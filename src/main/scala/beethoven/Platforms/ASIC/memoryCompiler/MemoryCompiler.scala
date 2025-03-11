@@ -321,20 +321,11 @@ object MemoryCompiler {
     val ((mem, _), _, _) = memOpts.minBy(_._1._2)
 
     withClockAndReset(io.clock.asClock, false.B.asAsyncReset) {
-      @tailrec
-      def scan_shift(a: UInt, d: Int, acc: List[UInt] = List.empty): List[UInt] = {
-        if (d == 0) acc.reverse
-        else {
-          val ap = ShiftReg(a, 1, io.clock.asClock)
-          scan_shift(ap, d - 1, ap :: acc)
-        }
-      }
-
-      val addr_shifts = io.addr.map { addr => scan_shift(addr, mem.array.length) }
-      val chip_active_shifts = io.chip_select.map { cs => scan_shift(cs, mem.array.length) }
-      val we_shift = io.write_enable.map { we => scan_shift(we, mem.array.length) }
-      val re_shift = io.read_enable.map { re => scan_shift(re, mem.array.length) }
-      val data_shifts = io.data_in.map { data => scan_shift(data, mem.array.length) }
+      val addr_shifts = io.addr.map { addr => ScanShifter(addr, mem.array.length) }
+      val chip_active_shifts = io.chip_select.map { cs => ScanShifter(cs, mem.array.length) }
+      val we_shift = io.write_enable.map { we => ScanShifter(we, mem.array.length) }
+      val re_shift = io.read_enable.map { re => ScanShifter(re, mem.array.length) }
+      val data_shifts = io.data_in.map { data => ScanShifter(data, mem.array.length) }
       val data_stages = Seq.fill(nPorts)(Seq.fill(mem.array.length - 1)(Reg(UInt(dataWidth.W))))
       val data_out_wires = Seq.fill(nPorts)(Seq.fill(mem.array.length)(Wire(UInt(dataWidth.W))))
 
