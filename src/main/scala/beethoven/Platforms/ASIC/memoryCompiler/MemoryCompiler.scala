@@ -374,7 +374,7 @@ object MemoryCompiler {
             )
           }
           val whole_col = Cat(sramMacroRowOuts_per_col.reverse)
-          data_out_wires(port_idx)(l_idx) := whole_col
+          data_out_wires(port_idx)(l_idx) := RegNext(whole_col)
         })
       }
       io.data_out.zip(data_out_wires).foreach { case (d, w) => d := w.last }
