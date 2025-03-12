@@ -370,11 +370,11 @@ object MemoryCompiler {
             mem.addr(port_idx) := addr_shifts(port_idx)(l_idx).tail(l_bits)
             Mux(RegNext(l_hit(port_idx)),
               mem.data_out(port_idx),
-              if (l_idx == 0) 0.U else data_out_wires(port_idx)(l_idx - 1)
+              if (l_idx == 0) 0.U else RegNext(data_out_wires(port_idx)(l_idx - 1))
             )
           }
           val whole_col = Cat(sramMacroRowOuts_per_col.reverse)
-          data_out_wires(port_idx)(l_idx) := RegNext(whole_col)
+          data_out_wires(port_idx)(l_idx) := whole_col
         })
       }
       io.data_out.zip(data_out_wires).foreach { case (d, w) => d := w.last }
