@@ -294,7 +294,8 @@ object MemoryCompiler {
       r
     }
 
-    val memOpts = Seq((Latency - 2, (x: Data) => rn(x), (x: Data) => rn(x)),
+    val memOpts = Seq(
+      (Latency - 2, (x: Data) => rn(x), (x: Data) => rn(x)),
       (Latency - 1, (x: Data) => x, (x: Data) => rn(x)),
       (Latency - 0, (x: Data) => x, (x: Data) => x)).flatMap {
       case (lat, pre, post) =>
@@ -319,14 +320,14 @@ object MemoryCompiler {
         throw new Exception(s"Failed to find suitable SRAM configuration for ${nPorts}x${nRows}x${dataWidth} at L=${Latency}")
       }
     }
-    val ((mem, _), _, _) = memOpts.minBy(_._1._2)
+    val ((mem, _), act_pre, act_post) = memOpts.minBy(_._1._2)
 
     withClockAndReset(io.clock.asClock, false.B.asAsyncReset) {
-      val addr_shifts = io.addr.map { addr => ScanShifter(addr, mem.array.length) }
-      val chip_active_shifts = io.chip_select.map { cs => ScanShifter(cs, mem.array.length) }
-      val we_shift = io.write_enable.map { we => ScanShifter(we, mem.array.length) }
-      val re_shift = io.read_enable.map { re => ScanShifter(re, mem.array.length) }
-      val data_shifts = io.data_in.map { data => ScanShifter(data, mem.array.length) }
+      val addr_shifts = io.addr.map { addr => ScanShifter(act_pre(addr).asUInt, mem.array.length) }
+      val chip_active_shifts = io.chip_select.map { cs => ScanShifter(act_pre(cs).asUInt, mem.array.length) }
+      val we_shift = io.write_enable.map { we => ScanShifter(act_pre(we).asUInt, mem.array.length) }
+      val re_shift = io.read_enable.map { re => ScanShifter(act_pre(re).asUInt, mem.array.length) }
+      val data_shifts = io.data_in.map { data => ScanShifter(act_pre(data).asUInt, mem.array.length) }
       val data_stages = Seq.fill(nPorts)(Seq.fill(mem.array.length - 1)(Reg(UInt(dataWidth.W))))
       val data_out_wires = Seq.fill(nPorts)(Seq.fill(mem.array.length)(Wire(UInt(dataWidth.W))))
 
@@ -377,7 +378,7 @@ object MemoryCompiler {
           data_out_wires(port_idx)(l_idx) := whole_col
         })
       }
-      io.data_out.zip(data_out_wires).foreach { case (d, w) => d := w.last }
+      io.data_out.zip(data_out_wires).foreach { case (d, w) => d := act_post(w.last).asUInt }
     }
   }
 }
