@@ -12,7 +12,9 @@ import os.Path
 
 case class KriaPlatform(memoryNChannels: Int = 1,
                         override val clockRateMHz: Int = 100,
-                        overrideMemoryBusWidthBytes: Option[Int] = None) extends Platform with HasPostProccessorScript with HasXilinxMem {
+                        overrideMemoryBusWidthBytes: Option[Int] = None,
+                        override val hasDebugAXICACHEPROT: Boolean = false)
+  extends Platform with HasPostProccessorScript with HasXilinxMem {
 
   override val platformType: PlatformType = PlatformType.FPGA
   override val hasDiscreteMemory: Boolean = false

@@ -1,6 +1,7 @@
 package beethoven.Protocol.RoCC.Helpers
 
 import beethoven.Protocol.RoCC.{RoccClientNode, RoccMasterParams}
+import beethoven.platform
 import chisel3._
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.amba.axi4.AXI4IdentityNode
@@ -30,6 +31,11 @@ class AXILHubModule(outer: FrontBusHub)(implicit p: Parameters) extends LazyModu
 
   val axil_to_rocc = Module(new AXILToRocc)
   val rocc_to_axil = Module(new RoccToAXIL)
+
+  val io = IO(new Bundle {
+    val cache_prot = if (platform.hasDebugAXICACHEPROT) Some(Output(UInt(7.W))) else None
+  })
+  if (io.cache_prot.isDefined) io.cache_prot.get := axil_widget.io.cache_prot.get
 
   axil_widget.io.resp <> rocc_to_axil.io.out
   rocc_to_axil.io.rocc <> outer.rocc_out.out(0)._1.resp

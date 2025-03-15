@@ -9,6 +9,7 @@ import beethoven.{BuildMode, _}
 import beethoven.Systems.BeethovenTop._
 import beethoven.Platforms._
 import beethoven.Protocol.AXI.AXI4Compat
+import beethoven.Protocol.FrontBus.{DMANodeKey, DebugCacheProtSignalKey, OptionalPassKey, RoccNodeKey}
 import beethoven.Protocol.RoCC.{RoccNode, TLToRocc}
 import beethoven.Protocol.tilelink.{TLRWFilter, TLSourceShrinkerDynamicBlocking, TLSupportChecker, TLToAXI4SRW}
 import beethoven.common.CLog2Up
@@ -68,7 +69,12 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
   private val device = new MemoryDevice
 
   // AXI-L Port - commands come through here
-  val (comm_node, rocc_front, frontDMA_joined) = platform.frontBusProtocol.deriveTLSources(p)
+  val front_bus_config = platform.frontBusProtocol.deriveTLSources(p)
+//  comm_node, rocc_front, frontDMA_joined
+  val comm_node = front_bus_config(OptionalPassKey)
+  val frontDMA_joined = front_bus_config(DMANodeKey)
+  val rocc_front = front_bus_config(RoccNodeKey)
+
 
   val (frontDMA_r, frontDMA_w) = if (frontDMA_joined.isDefined) {
     val maxTransfer = TransferSizes(platform.extMem.master.beatBytes, platform.extMem.master.beatBytes * (1 << AXI4Compat.lenWidth))
@@ -304,7 +310,7 @@ class TopImpl(outer: BeethovenTop)(implicit p: Parameters) extends LazyRawModule
     }
     val ins = dram_ports.map(_.in(0))
     (M00_AXI zip ins) foreach { case (i, (o, _)) =>
-      AXI4Compat.connectCompatMaster(i, o)
+      AXI4Compat.connectCompatMaster(i, o, if (platform.hasDebugAXICACHEPROT) outer.front_bus_config(DebugCacheProtSignalKey) else None)
     }
 
     require(M00_AXI(0).rid.getWidth <= platform.extMem.master.idBits,

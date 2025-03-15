@@ -1,7 +1,7 @@
 package beethoven.Protocol.FrontBus
 
 import beethoven.Protocol.RoCC.{RoccClientNode, RoccIdentityNode, RoccNode}
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config.{Config, Field, Parameters}
 import chisel3._
 import freechips.rocketchip.tilelink.{TLIdentityNode, TLNode}
 
@@ -23,5 +23,15 @@ abstract class FrontBusProtocol {
    * 3. Optionally, there may be DMA from the front-bus-associated modules, so those can be exposed here as well
    *    in the TileLink format.
    */
-  def deriveTLSources(implicit p:Parameters) : (Any, RoccNode, Option[TLNode])
+  def deriveTLSources(implicit p:Parameters) : Config
 }
+
+// MUST DEFINE THE FOLLOWING
+case object OptionalPassKey extends Field[Any]
+
+case object RoccNodeKey extends Field[RoccNode]
+
+case object DMANodeKey extends Field[Option[TLIdentityNode]]
+
+// CAN OPTIONALLY DEFINE THIS ONE
+case object   DebugCacheProtSignalKey extends Field[Option[UInt]]

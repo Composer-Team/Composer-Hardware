@@ -121,6 +121,9 @@ abstract class Platform {
     }
   }
 
+  // debug for driving AXI prot/cache signals from the accelerator. The host can change how beethoven drives
+  // these signals in case there's a problem
+  val hasDebugAXICACHEPROT = false
 }
 
 abstract class PhysicalInterface {

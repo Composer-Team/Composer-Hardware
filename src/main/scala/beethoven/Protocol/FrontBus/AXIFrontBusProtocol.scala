@@ -3,7 +3,7 @@ package beethoven.Protocol.FrontBus
 import beethoven.Floorplanning.DeviceContext
 import beethoven.Floorplanning.LazyModuleWithSLRs.LazyModuleWithFloorplan
 import beethoven.Generation.DotGen
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3._
 import beethoven.Platforms._
 import beethoven.Protocol.AXI.{AXI4Compat, LongAXI4ToTL}
@@ -38,7 +38,7 @@ class AXIFrontBusProtocol(withDMA: Boolean) extends FrontBusProtocol {
 
   }
 
-  override def deriveTLSources(implicit p: Parameters): (Any, RoccNode, Option[TLIdentityNode]) = {
+  override def deriveTLSources(implicit p: Parameters): Config = {
     DeviceContext.withDevice(platform.physicalInterfaces.find(_.isInstanceOf[PhysicalHostInterface]).get.locationDeviceID) {
       val axi_master = AXI4MasterNode(Seq(AXI4MasterPortParameters(
         masters = Seq(AXI4MasterParameters(
@@ -52,13 +52,6 @@ class AXIFrontBusProtocol(withDMA: Boolean) extends FrontBusProtocol {
       val fronthub =
         DeviceContext.withDevice(frontInterfaceID) {
           val fronthub = LazyModuleWithFloorplan(new FrontBusHub(), "zzfront6_axifronthub")
-//          fronthub.tl_in :=
-//            LazyModuleWithFloorplan(new AXI4ToTL(false), "zzfront5_axi4ToTL_front").node :=
-//            LazyModuleWithFloorplan(new AXI4UserYanker(capMaxFlight = Some(1)), "zzfront4_axi4yank_front").node :=
-//            LazyModuleWithFloorplan(new AXI4Buffer(), "zzfront3_axi4buffer_front").node :=
-//            LazyModuleWithFloorplan(new AXI4Fragmenter(), "zzfront2_axi4fragment_front").node :=
-//            LazyModuleWithFloorplan(new AXI4IdIndexer(1), "zzfront1_axi4idxer").node := axi_master
-//          fronthub
           fronthub.axi_in := axi_master
           fronthub
         }
@@ -79,8 +72,6 @@ class AXIFrontBusProtocol(withDMA: Boolean) extends FrontBusProtocol {
             make_tl_buffer() :=
             LazyModuleWithFloorplan(new LongAXI4ToTL(64)).node :=
             AXI4UserYanker(capMaxFlight = Some(1)) :=
-//            AXI4Buffer() :=
-//            AXI4Fragmenter() :=
             AXI4IdIndexer(1) :=
             AXI4Buffer() := node
         }
@@ -90,7 +81,12 @@ class AXIFrontBusProtocol(withDMA: Boolean) extends FrontBusProtocol {
       val rocc_xb = DeviceContext.withDevice(frontInterfaceID) { RoccFanout("zzfront_7roccout") }
 
       rocc_xb := fronthub.rocc_out
-      ((axi_master, dma_node), rocc_xb, dma_front)
+      new Config((_, _, _) => {
+        case OptionalPassKey => (axi_master, dma_node)
+        case RoccNodeKey => rocc_xb
+        case DMANodeKey => dma_front
+        case DebugCacheProtSignalKey => fronthub.module.io.cache_prot
+      })
     }
   }
 }

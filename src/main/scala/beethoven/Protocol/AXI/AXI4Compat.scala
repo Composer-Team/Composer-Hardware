@@ -83,7 +83,15 @@ object AXI4Compat {
   val prot_level = AXI4Parameters.PROT_INSECURE
   val cache_level = 0xF.U
 
-  def connectCompatMaster(s: AXI4Compat, m: AXI4Bundle): Unit = {
+  def connectCompatMaster(s: AXI4Compat, m: AXI4Bundle, driveAXIPROTCACHE: => Option[UInt] = None): Unit = {
+    val (chosen_prot, chosen_cache) = if (driveAXIPROTCACHE.isDefined) {
+      val pt = driveAXIPROTCACHE.get
+      val prot = pt(2, 0)
+      val cache = pt(6, 3)
+      (prot, cache)
+    } else {
+      (prot_level, cache_level)
+    }
     m.r.bits.id := s.rid
     m.r.bits.data := s.rdata
     m.r.bits.resp := s.rresp
@@ -95,11 +103,11 @@ object AXI4Compat {
     s.arqos := m.ar.bits.qos
     s.arlen := m.ar.bits.len
     s.arlock := m.ar.bits.lock
-    s.arprot := prot_level // m.ar.bits.prot
+    s.arprot := chosen_prot // m.ar.bits.prot
     s.araddr := m.ar.bits.addr
     s.arburst := m.ar.bits.burst
     s.aruser := m.ar.bits.user.asUInt
-    s.arcache := cache_level // 0xF.U //axi4.ar.bits.cache
+    s.arcache := chosen_cache // 0xF.U //axi4.ar.bits.cache
     s.arregion := 0.U
     s.arsize := m.ar.bits.size
     m.ar.ready := s.arready
@@ -114,10 +122,10 @@ object AXI4Compat {
     s.awqos := m.aw.bits.qos
     s.awlen := m.aw.bits.len
     s.awlock := 0.U
-    s.awprot := prot_level
+    s.awprot := chosen_prot
     s.awaddr := m.aw.bits.addr
     s.awburst := m.aw.bits.burst
-    s.awcache := cache_level // 0xF.U // axi4.aw.bits.cache
+    s.awcache := chosen_cache // 0xF.U // axi4.aw.bits.cache
     s.awsize := m.aw.bits.size
     s.awuser := 0.U
     s.awregion := 0.U

@@ -2,6 +2,7 @@ package beethoven.Protocol.RoCC.Helpers
 
 import beethoven.Generation.CppGeneration
 import beethoven.Platforms.PlatformKey
+import beethoven.platform
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
@@ -20,6 +21,8 @@ class AXILWidgetModule(outer: FrontBusWidget) extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
     val cmds = Decoupled(UInt(32.W))
     val resp = Flipped(Decoupled(UInt(32.W)))
+
+    val cache_prot = if (platform.hasDebugAXICACHEPROT) Some(Output(UInt(7.W))) else None
   })
 
 
@@ -78,6 +81,11 @@ class AXILWidgetModule(outer: FrontBusWidget) extends LazyModuleImp(outer) {
 
   genRO("AXIL_DEBUG", 0xDEADCAFEL.U(32.W), mcrio.read(6))
 
+  val prot_cache_bits = if (platform.hasDebugAXICACHEPROT) {
+    val prot_cache = Reg(UInt(7.W))
+    prot_cache := genWO("CACHEPROT", mcrio.write(7), 0x7a.U(7.W))
+    io.cache_prot.get := prot_cache
+  }
   io.cmds <> roccCmdFifo.io.deq
   roccRespFifo.io.enq <> io.resp
 
