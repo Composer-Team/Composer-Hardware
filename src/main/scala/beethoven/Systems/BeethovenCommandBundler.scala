@@ -53,10 +53,7 @@ class BeethovenCommandBundler[T1 <: AccelCommand, T2 <: AccelResponse](bundleIn:
 
   val s_req_idle :: s_done :: Nil = Enum(2)
   val req_state = RegInit(s_req_idle)
-  var reqCounter = Reg(UInt(log2Up(bundleIn.getNBeats + 1).W))
-  when(reset.asBool) {
-    reqCounter := 0.U
-  }
+  var reqCounter = RegInit(0.U(log2Up(bundleIn.getNBeats + 1).W))
 
   val nReqBeatsRequired = bundleIn.getNBeats
 

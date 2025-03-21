@@ -259,10 +259,12 @@ class ScratchpadImpl(csp: ScratchpadConfig,
         val beatBytes = tl_out.params.dataBits / 8
         val beatBytesWidth = CLog2Up(beatBytes)
 
-        val addr, expectedBeatsLeft = Reg(UInt((tl_out.params.addressBits - beatBytesWidth).W))
+        val addr = Reg(UInt((tl_out.params.addressBits - beatBytesWidth).W))
+        val expectedBeatsLeft = RegInit(0.U((tl_out.params.addressBits - beatBytesWidth).W))
+
         val bigTxBytes = platform.prefetchSourceMultiplicity * beatBytes
 
-        val sourceIdle = Reg(Vec(tl_edge.client.endSourceId, Bool()))
+        val sourceIdle = RegInit(VecInit(Seq.fill(tl_edge.client.endSourceId)(true.B)))
         val hasIdle = sourceIdle.asUInt =/= 0.U
         val nextSource = PriorityEncoder(sourceIdle)
 
@@ -270,10 +272,6 @@ class ScratchpadImpl(csp: ScratchpadConfig,
         val spadAddrOffsetPerSource = Reg(Vec(tl_edge.client.endSourceId, UInt(log2Up(csp.nDatas).W)))
         val beatsLeftPerSourcee = Reg(Vec(tl_edge.client.endSourceId, UInt(log2Up(platform.prefetchSourceMultiplicity).W)))
 
-        when(reset.asBool) {
-          sourceIdle.foreach(_ := true.B)
-          expectedBeatsLeft := 0.U
-        }
 
 
         val s_idle :: s_emit :: s_wait :: Nil = Enum(3)
@@ -342,6 +340,7 @@ class ScratchpadImpl(csp: ScratchpadConfig,
       loader.io.cache_block_in.valid := reader.channel.data.valid
       loader.io.cache_block_in.bits.dat := reader.channel.data.bits
       reader.channel.data.ready := loader.io.cache_block_in.ready
+
       reader.req.ready
     }
 

@@ -136,11 +136,8 @@ class SequentialWriter(userBytes: Int,
 
   val req_addr = RegInit(0.U(addressBitsChop.W))
 
-  val sourceBusyBits = Reg(Vec(edge.master.endSourceId, Bool()))
-  when(reset.asBool) {
-    sourceBusyBits.foreach(_ := false.B)
-  }
-  val sourcesInProgress = sourceBusyBits.fold(false.B)(_ || _)
+  val sourceBusyBits = RegInit(VecInit(Seq.fill(edge.master.endSourceId)(false.B)))
+//  val sourcesInProgress = sourceBusyBits.fold(false.B)(_ || _)
   val hasAvailableSource = (~sourceBusyBits.asUInt).asBools.fold(false.B)(_ || _)
   val nextSource = PriorityEncoder(~sourceBusyBits.asUInt)
 
@@ -233,10 +230,7 @@ class SequentialWriter(userBytes: Int,
     io.channel.data.ready := write_buffer_io.ready && expectedNumBeats > 0.U
     write_buffer_io.valid := false.B
     write_buffer_io.bits := DontCare
-    val maskAcc = Reg(Vec(beatLim - 1, Bool()))
-    when(reset.asBool) {
-      maskAcc.foreach(_ := false.B)
-    }
+    val maskAcc = RegInit(VecInit(Seq.fill(beatLim - 1)(false.B)))
     when(io.req.fire) {
       val upper = log2Up(fabricBeatBytes) - 1
       val lower = CLog2Up(userBytes)

@@ -5,6 +5,7 @@ import Chisel._
 import beethoven.Protocol.tilelink.TLSlave
 import chipsalliance.rocketchip.config._
 import beethoven.platform
+import chisel3.VecInit
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
@@ -65,17 +66,12 @@ class TLSourceShrinkerDynamicBlocking(maxNIDs: Int)(implicit p: Parameters) exte
       } else {
         val sourceOut2InMap = Reg(Vec(maxNIDs, UInt(width = log2Up(edgeIn.client.endSourceId).W)))
 
-        val allocated = Reg(Vec(maxNIDs, Bool()))
+        val allocated = RegInit(VecInit(Seq.fill(maxNIDs)(false.B)))
         val beatsLeftPerAllocation = Reg(Vec(maxNIDs,
           UInt(log2Up((edgeOut.manager.maxTransfer / edgeOut.manager.beatBytes) + 1).W)))
         val d_last = beatsLeftPerAllocation(out.d.bits.source) === UInt(1)
         val nextFree = PriorityEncoder((~allocated)())
         val full = allocated.andR
-
-        when(reset.asBool) {
-          allocated.foreach(_ := false.B)
-        }
-
         val a_in_valid = RegInit(false.B)
         val a_in = Reg(in.a.bits)
         out.a.valid := a_in_valid

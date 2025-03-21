@@ -17,7 +17,7 @@ class AllocSource(n: Int) extends Module {
     val free_idx = Input(UInt(log2Up(n).W))
   })
 
-  val idle = Reg(Vec(n, Bool()))
+  val idle = RegInit(VecInit(Seq.fill(n)(true.B)))
   io.valid_out := Cat(idle) =/= 0.U
   val alloced = PriorityEncoder(idle)
   io.idx_out := alloced
@@ -28,12 +28,6 @@ class AllocSource(n: Int) extends Module {
 
   when(io.free_in) {
     idle(io.free_idx) := true.B
-  }
-
-  when(reset.asBool) {
-    idle foreach {
-      _ := true.B
-    }
   }
 }
 

@@ -95,7 +95,7 @@ object Generation {
              |using BeethovenFrontBusAddr_t = ${getUnsignedCIntType(platform.frontBusAddressNBits)};
              |#endif
              |#endif
-             |
+             1|
              |#define DATA_BUS_WIDTH ${platform.extMem.master.beatBytes * 8}
              |#define DEFAULT_PL_CLOCK ${platform.clockRateMHz}
              |

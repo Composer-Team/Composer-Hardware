@@ -98,32 +98,31 @@ object ShiftReg {
                        allow_fpga_shreg: Boolean = true,
                        withWidth: Option[Int] = None)(implicit valName: ValName, p: Parameters): T = {
     if (useMemory) {
-      val mem = Memory(2, withWidth.getOrElse(t.getWidth), latency + 1, 1, 1, 0, allowFallbackToRegister = false)
-      mem.initLow(clock = chisel3.Module.clock)
-      val read = mem.getReadPortIdx(0)
-      val write = mem.getWritePortIdx(0)
-      val read_ptr = Reg(UInt(log2Up(latency + 1).W))
-      when(chisel3.Module.reset.asBool) {
-        read_ptr := 0.U
-      }
-      when(read_ptr === latency.U) {
-        read_ptr := 0.U
-      }.otherwise {
-        read_ptr := read_ptr + 1.U
-      }
-      val write_ptr = RegNext(read_ptr)
-      mem.addr(read) := read_ptr
-      mem.write_enable(read) := false.B
-      mem.read_enable(read) := true.B
-      mem.chip_select(read) := true.B
+      withClockAndReset(clock, chisel3.Module.reset) {
+        val mem = Memory(2, withWidth.getOrElse(t.getWidth), latency + 1, 1, 1, 0, allowFallbackToRegister = false)
+        mem.initLow(clock = chisel3.Module.clock)
+        val read = mem.getReadPortIdx(0)
+        val write = mem.getWritePortIdx(0)
+        val read_ptr = RegInit(0.U(log2Up(latency + 1).W))
+        when(read_ptr === latency.U) {
+          read_ptr := 0.U
+        }.otherwise {
+          read_ptr := read_ptr + 1.U
+        }
+        val write_ptr = RegNext(read_ptr)
+        mem.addr(read) := read_ptr
+        mem.write_enable(read) := false.B
+        mem.read_enable(read) := true.B
+        mem.chip_select(read) := true.B
 
-      mem.addr(write) := write_ptr
-      mem.write_enable(write) := true.B
-      mem.read_enable(write) := true.B
-      mem.chip_select(write) := true.B
-      mem.data_in(write) := t.asUInt
+        mem.addr(write) := write_ptr
+        mem.write_enable(write) := true.B
+        mem.read_enable(write) := true.B
+        mem.chip_select(write) := true.B
+        mem.data_in(write) := t.asUInt
+        mem.data_out(read).asTypeOf(t)
 
-      mem.data_out(read).asTypeOf(t)
+      }
     } else {
       val sr = Module(new ShiftReg(latency, t.asUInt, allow_fpga_shreg = allow_fpga_shreg))
       sr.suggestName("shiftReg" + valName.name)

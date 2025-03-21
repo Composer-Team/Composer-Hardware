@@ -81,8 +81,8 @@ class AXILWidgetModule(outer: FrontBusWidget) extends LazyModuleImp(outer) {
 
   genRO("AXIL_DEBUG", 0xDEADCAFEL.U(32.W), mcrio.read(6))
 
-  val prot_cache_bits = if (platform.hasDebugAXICACHEPROT) {
-    val prot_cache = Reg(UInt(7.W))
+  if (platform.hasDebugAXICACHEPROT) {
+    val prot_cache = Wire(UInt(7.W))
     prot_cache := genWO("CACHEPROT", mcrio.write(7), 0x7a.U(7.W))
     io.cache_prot.get := prot_cache
   }

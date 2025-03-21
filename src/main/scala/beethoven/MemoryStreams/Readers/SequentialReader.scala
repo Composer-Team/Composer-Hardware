@@ -70,10 +70,7 @@ class SequentialReader(val dWidth: Int,
   val sourceWire = Wire(UInt(log2Up(nSources).W))
   sourceWire := 0.U
 
-  val sourceIdleBits = Reg(Vec(nSources, Bool()))
-  when(reset.asBool) {
-    sourceIdleBits.foreach(_ := true.B)
-  }
+  val sourceIdleBits = RegInit(VecInit(Seq.fill(nSources)(true.B)))
   val sourceAvailable = sourceIdleBits.reduce(_ || _)
   val atLeastOneSourceActive = sourceIdleBits.map(!_).reduce(_ || _)
   val chosenSource = PriorityEncoder(sourceIdleBits)
@@ -103,13 +100,10 @@ class SequentialReader(val dWidth: Int,
     SequentialReader.has_warned_dp = true
     System.err.println("Warning: CReader is using a single port memory. This may cause performance degradation.")
   }
-  val prefetch_buffers_valid = Reg(Vec(prefetchDepthRows, Bool()))
+  val prefetch_buffers_valid = RegInit(VecInit(Seq.fill(prefetchDepthRows)(false.B)))
   val sourceToIdx = Reg(Vec(nSources, UInt(log2Up(prefetchDepthRows).W)))
   val beatsRemaining = Reg(Vec(nSources, UInt(log2Up(largeTxNBeats).W)))
 
-  when(reset.asBool) {
-    prefetch_buffers_valid.foreach(_ := false.B)
-  }
   val nRead = if (hasDualPortMemory) 1 else 0
   val nWrite = if (hasDualPortMemory) 1 else 0
   val nRW = if (hasDualPortMemory) 0 else 1
