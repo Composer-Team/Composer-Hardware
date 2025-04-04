@@ -76,7 +76,7 @@ class AcceleratorCore(implicit p: Parameters) extends Module {
       port.a.valid := w.valid
       w.ready := port.a.ready
       port.a.bits.source := 0.U
-      port.a.bits.address := getCommMemAddress(params._1.toSystem, w.bits.core.getOrElse(0), params._1.toMemoryPort, w.bits.channel.getOrElse(0), w.bits.addr, CLog2Up(port.params.dataBits/8))
+      port.a.bits.address := getCommMemAddress(params._1.toSystem, w.bits.core.getOrElse(0), params._1.toMemoryPort, w.bits.channel.getOrElse(0), w.bits.addr, CLog2Up(port.params.dataBits / 8))
       port.a.bits.size := CLog2Up(port.params.dataBits / 8).U
       port.a.bits.data := w.bits.data
       port.a.bits.mask := BigInt("1" * (match_params.dataWidthBits / 8), 2).U
@@ -254,7 +254,7 @@ class AcceleratorCore(implicit p: Parameters) extends Module {
       beethovenCustomCommandManager.cio.req <> io_declaration.req
     }
 
-    when (beethovenCustomCommandManager.io_am_active) {
+    when(beethovenCustomCommandManager.io_am_active) {
       io_declaration.resp.valid := beethovenCustomCommandManager.cio.resp.valid
       io_declaration.resp.bits := beethovenCustomCommandManager.cio.resp.bits
       beethovenCustomCommandManager.cio.resp.ready := io_declaration.resp.ready
@@ -316,10 +316,12 @@ class AcceleratorCore(implicit p: Parameters) extends Module {
 
 class AcceleratorBlackBoxCore(blackboxBuilder: ModuleConstructor)(implicit p: Parameters, systemParams: AcceleratorSystemConfig)
   extends AcceleratorCore {
+  override val desiredName = systemParams.name + "Wrapper"
 
 
   val aio = blackboxBuilder match {
-    case bbc: BlackboxBuilderCustom => BeethovenIO(bbc.coreCommand, bbc.coreResponse)
+    case bbc: BlackboxBuilderCustom[_, _] =>
+      BeethovenIO(bbc.coreCommand, bbc.coreResponse)
   }
 
   val readerParams = systemParams.memoryChannelConfig.filter(_.isInstanceOf[ReadChannelConfig]).map(_.asInstanceOf[ReadChannelConfig])
@@ -360,6 +362,8 @@ class AcceleratorBlackBoxCore(blackboxBuilder: ModuleConstructor)(implicit p: Pa
 
   class VerilogPort(nm: String, val dir: Boolean, val dim: Seq[Int], val sources: Seq[String]) {
     val name = nm.strip().stripSuffix("_")
+
+    override def toString: String = f"PORT[nm:'$nm', out:$dir, srcs: $sources]"
   }
 
   object VerilogPort {
@@ -403,7 +407,10 @@ class AcceleratorBlackBoxCore(blackboxBuilder: ModuleConstructor)(implicit p: Pa
   // for reads, there are a few dimensions. The first index is the read channel name itself, the second index is
   // the channel number, and the third index (if applicable) is the vector index
 
-  def getStructureAsPorts(a: Data, primaryDirection: Boolean, structureDepth: Int = 0, yieldSubfieldOnlyWithPrefix: Option[String] = None): Iterable[VerilogPort] = {
+  def getStructureAsPorts(a: Data,
+                          primaryDirection: Boolean,
+                          structureDepth: Int = 0,
+                          yieldSubfieldOnlyWithPrefix: Option[String] = None): Iterable[VerilogPort] = {
     def getRName(s: String): String = {
       yieldSubfieldOnlyWithPrefix match {
         case None => fix2Real(s)
@@ -412,6 +419,8 @@ class AcceleratorBlackBoxCore(blackboxBuilder: ModuleConstructor)(implicit p: Pa
     }
 
     a match {
+      case _: EmptyAccelResponse =>
+        Seq()
       case v: Vec[_] =>
         v.zipWithIndex.flatMap { case (data, _) =>
           getStructureAsPorts(data, primaryDirection, structureDepth + 1, yieldSubfieldOnlyWithPrefix)
@@ -497,12 +506,15 @@ class AcceleratorBlackBoxCore(blackboxBuilder: ModuleConstructor)(implicit p: Pa
   impl.io.resp <> aio.resp
 
   def getVerilogPorts(m: Iterable[VerilogPort]): String = {
+    def len_of_io(L: Seq[Int]): Int = if (L.head == 1) 0 else 4 + Math.log10(L.head).ceil.toInt
+    val longest_io = m.map(a => len_of_io(a.dim)).max
     m.map { a =>
       val dim = a.dim.map { b =>
         if (b == 1) "" else s"[${b - 1}:0]"
       }.reverse
-      val dir = if (a.dir == OUTPUT) "output" else "input"
-      s"  $dir ${dim.head} ${a.name}${(if (dim.tail.isEmpty) "" else " ") + dim.tail.mkString("")}"
+      val dir = if (a.dir == OUTPUT) "output" else "input "
+      val dim_pad = dim.head + " " * (longest_io - dim.head.length)
+      s"  $dir ${dim_pad} ${a.name}${(if (dim.tail.isEmpty) "" else " ") + dim.tail.mkString("")}"
     }.mkString(",\n")
   }
 
@@ -549,6 +561,7 @@ class AcceleratorBlackBoxCore(blackboxBuilder: ModuleConstructor)(implicit p: Pa
        |module ${systemParams.name} (
        |  input clock,
        |  input reset,
+       |
        |${getVerilogPorts(allIOs)}
        |);
        |

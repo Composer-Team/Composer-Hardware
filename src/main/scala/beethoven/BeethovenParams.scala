@@ -34,7 +34,7 @@ case object MaxInFlightMemTxsPerSource extends Field[Int]
 
 trait ModuleConstructor {}
 
-case class BlackboxBuilderCustom(coreCommand: AccelCommand, coreResponse: AccelResponse) extends ModuleConstructor
+case class BlackboxBuilderCustom[T <: AccelCommand,R <: AccelResponse](coreCommand: T, coreResponse: R) extends ModuleConstructor
 
 case class BlackboxBuilderRocc() extends ModuleConstructor
 

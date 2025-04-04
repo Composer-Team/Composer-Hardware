@@ -41,7 +41,9 @@ class SequentialWriter(userBytes: Int,
 
   val io = IO(new SequentialWriteChannelIO(userBytes))
   val tl_out = IO(new TLBundle(tl_outer.params))
-  io.req.ready := false.B
+  val idle = RegInit(true.B)
+  io.busy := !idle
+  io.req.ready := idle
   io.channel.data.ready := false.B
   tl_out.a.valid := false.B
   tl_out.a.bits := DontCare
@@ -62,10 +64,8 @@ class SequentialWriter(userBytes: Int,
 
   val localMaskBits = tl_outer.params.dataBits / 8
   val memory_latency = 3
-  val write_buffer_io = Wire(Output(Decoupled(new Bundle {
-    val payload = UInt(tl_outer.params.dataBits.W)
-    val mask = if (userBytes < fabricBeatBytes) Some(UInt(localMaskBits.W)) else None
-  })))
+  val write_buffer_payload = Wire(UInt(tl_outer.params.dataBits.W))
+  write_buffer_payload := DontCare
 
 
   val write_buffer = Memory(memory_latency, tl_outer.params.dataBits, q_size, 1, 1, 0)
@@ -77,22 +77,20 @@ class SequentialWriter(userBytes: Int,
   val (wb_widx, wb_ridx) = if (write_buffer.nWritePorts == 0) (0, 1) else (write_buffer.getWritePortIdx(0), write_buffer.getReadPortIdx(0))
 
   write_buffer_read_shift := Cat(write_buffer.chip_select(wb_ridx), write_buffer_read_shift >> 1)
-  write_buffer_io.valid := false.B
-  write_buffer_io.bits := DontCare
-  write_buffer_io.ready := write_buffer_occupancy < q_size.U
 
+  val enable_buffer_write = WireInit(false.B)
   write_buffer.initLow(clock)
   write_buffer.addr(wb_widx) := waddr
   write_buffer.write_enable(wb_widx) := true.B
-  write_buffer.data_in(wb_widx) := write_buffer_io.bits.payload
-  write_buffer.chip_select(wb_widx) := write_buffer_io.fire
+  write_buffer.data_in(wb_widx) := write_buffer_payload
+  write_buffer.chip_select(wb_widx) := enable_buffer_write
   waddr := waddr + write_buffer.chip_select(wb_widx)
 
   val mask_buffer = if (userBytes < fabricBeatBytes) {
     val q = Module(new Queue[UInt](UInt((fabricBeatBytes / userBytes).W), q_size + platform.prefetchSourceMultiplicity + 1))
 //    println(s"mask buffer is sz ${q.entries}")
-    q.io.enq.valid := write_buffer_io.fire
-    q.io.enq.bits := write_buffer_io.bits.mask.get
+    q.io.enq.valid := enable_buffer_write
+    q.io.enq.bits := 0.U
     q.io.deq.ready := tl_out.a.fire
     when(q.io.enq.valid) {
       assert(q.io.enq.ready, "Mask buffer needs to be made bigger")
@@ -101,33 +99,44 @@ class SequentialWriter(userBytes: Int,
   } else None
 
 
+  val wbuff_re = burst_storage_occupancy < platform.prefetchSourceMultiplicity.U && write_buffer_occupancy > 0.U
+  val wbuff_we = enable_buffer_write
+
   write_buffer.addr(wb_ridx) := raddr
   write_buffer.read_enable(wb_ridx) := true.B
-  write_buffer.chip_select(wb_ridx) := burst_storage_occupancy < platform.prefetchSourceMultiplicity.U && write_buffer_occupancy > 0.U
+  write_buffer.chip_select(wb_ridx) := wbuff_re
   burst_storage_io.enq.valid := write_buffer_read_shift(0)
   burst_storage_io.enq.bits := write_buffer.data_out(wb_ridx)
   assert(implies(burst_storage_io.enq.valid, burst_storage_io.enq.ready))
   raddr := raddr + write_buffer.chip_select(wb_ridx)
 
-  when(write_buffer_io.fire) {
-    when(!write_buffer.chip_select(wb_ridx)) {
-      write_buffer_occupancy := write_buffer_occupancy + 1.U
-    }
-  }.otherwise {
-    when(write_buffer.chip_select(wb_ridx)) {
-      write_buffer_occupancy := write_buffer_occupancy - 1.U
-    }
-  }
+  val wb_occ_mo = write_buffer_occupancy - 1.U
+  val wb_occ_po = write_buffer_occupancy + 1.U
 
-  when(write_buffer.chip_select(wb_ridx)) {
-    when(!burst_storage_io.deq.fire) {
-      burst_storage_occupancy := burst_storage_occupancy + 1.U
-    }
-  }.otherwise {
-    when(burst_storage_io.deq.fire) {
-      burst_storage_occupancy := burst_storage_occupancy - 1.U
-    }
-  }
+  write_buffer_occupancy := Mux1H(
+    Seq(
+      // don't change
+      (wbuff_re && wbuff_we) || (!wbuff_re && !wbuff_we),
+      // add to buffer
+      !wbuff_re && wbuff_we,
+      // sub from buffer
+      wbuff_re && !wbuff_we
+    ),
+    Seq(write_buffer_occupancy, wb_occ_po,  wb_occ_mo)
+  )
+
+  val buff_deq = burst_storage_io.deq.fire
+  val buff_enq = wbuff_re
+
+  burst_storage_occupancy := Mux1H(
+    Seq((buff_deq && buff_enq) || (!buff_deq && !buff_enq),
+      buff_deq && !buff_enq,
+      !buff_deq && buff_enq),
+    Seq(burst_storage_occupancy,
+      burst_storage_occupancy - 1.U,
+      burst_storage_occupancy + 1.U
+    )
+  )
 
   burst_storage_io.deq.ready := tl_out.a.fire
 
@@ -145,22 +154,21 @@ class SequentialWriter(userBytes: Int,
   val sourceInProgress = Reg(UInt(tl_out.params.sourceBits.W))
   val addrInProgress = Reg(UInt(addressBits.W))
 
-  io.busy := true.B
   io.channel.isFlushed := sourceBusyBits.asUInt === 0.U
 
   val expectedNumBeats = RegInit(0.U((addressBits - log2Up(userBytes)).W))
-  when(expectedNumBeats === 0.U && write_buffer_occupancy === 0.U && burst_storage_occupancy === 0.U) {
-    /** TODO verify this doesn't mess everything up. We should be able to start a new command when old writes
-     * from a previous command are in flight but there's no data left in the buffers
-     */
-    io.busy := false.B
-    io.req.ready := true.B
+  when (idle) {
     when(io.req.fire) {
+      idle := false.B
       val choppedAddr = (io.req.bits.addr >> log2Up(fabricBeatBytes)).asUInt
       expectedNumBeats := io.req.bits.len >> CLog2Up(userBytes)
       assert(io.req.bits.len(CLog2Up(userBytes)-1, 0) === 0.U, "Writer: can't write less than channel width ")
       req_addr := choppedAddr
       burst_progress_count := 0.U
+    }
+  }.otherwise {
+    when(expectedNumBeats === 0.U && write_buffer_occupancy === 0.U && burst_storage_occupancy === 0.U) {
+      idle := true.B
     }
   }
   // these are always true
@@ -217,9 +225,9 @@ class SequentialWriter(userBytes: Int,
   }
 
   if (userBytes == fabricBeatBytes) {
-    write_buffer_io.bits.payload := io.channel.data.bits
-    write_buffer_io.valid := io.channel.data.valid
-    io.channel.data.ready := write_buffer_io.ready
+    write_buffer_payload := io.channel.data.bits
+    enable_buffer_write := io.channel.data.valid && write_buffer_occupancy < q_size.U
+    io.channel.data.ready := write_buffer_occupancy < q_size.U
     when (io.channel.data.fire) {
       expectedNumBeats := expectedNumBeats - 1.U
     }
@@ -227,9 +235,7 @@ class SequentialWriter(userBytes: Int,
     val beatLim = fabricBeatBytes / userBytes
     val beatBuffer = Reg(Vec(beatLim - 1, UInt((userBytes * 8).W)))
     val beatCounter = Reg(UInt(log2Up(beatLim).W))
-    io.channel.data.ready := write_buffer_io.ready && expectedNumBeats > 0.U
-    write_buffer_io.valid := false.B
-    write_buffer_io.bits := DontCare
+    io.channel.data.ready := write_buffer_occupancy < q_size.U && expectedNumBeats > 0.U
     val maskAcc = RegInit(VecInit(Seq.fill(beatLim - 1)(false.B)))
     when(io.req.fire) {
       val upper = log2Up(fabricBeatBytes) - 1
@@ -253,7 +259,7 @@ class SequentialWriter(userBytes: Int,
       beatCounter := beatCounter + 1.U
       maskAcc(beatCounter) := true.B
       when(beatCounter === (beatLim - 1).U || expectedNumBeats === 1.U) {
-        write_buffer_io.valid := true.B
+        enable_buffer_write := true.B
         val bgc = Cat(bytesGrouped.reverse)
         val beatBuffer_concat = Wire(Vec(beatLim, UInt((userBytes * 8).W)))
         val maskAcc_concat = Wire(Vec(beatLim, Bool()))
@@ -265,8 +271,8 @@ class SequentialWriter(userBytes: Int,
         maskAcc_concat.last := false.B
         beatBuffer_concat(beatCounter) := bgc
         maskAcc_concat(beatCounter) := true.B
-        write_buffer_io.bits.payload := Cat(beatBuffer_concat.reverse)
-        write_buffer_io.bits.mask.get := Cat(maskAcc_concat.reverse)
+        write_buffer_payload := Cat(beatBuffer_concat.reverse)
+        mask_buffer.get.io.enq.bits := Cat(maskAcc_concat.reverse)
         maskAcc.foreach(_ := false.B)
         beatCounter := 0.U
       }
@@ -277,9 +283,9 @@ class SequentialWriter(userBytes: Int,
     val channelReg = Reg(Vec(userBytes / fabricBeatBytes, UInt((fabricBeatBytes * 8).W))) // bottom chunk will get optimized away
     val dsplitCount = Reg(UInt(log2Up(userBytes / fabricBeatBytes + 1).W))
     when(!inProgressPushing) {
-      io.channel.data.ready := expectedNumBeats > 0.U && write_buffer_io.ready
-      write_buffer_io.bits.payload := dsplit(0)
-      write_buffer_io.valid := expectedNumBeats > 0.U && io.channel.data.valid
+      io.channel.data.ready := expectedNumBeats > 0.U && write_buffer_occupancy < q_size.U
+      write_buffer_payload := dsplit(0)
+      enable_buffer_write := expectedNumBeats > 0.U && io.channel.data.valid
       when(io.channel.data.fire) {
         inProgressPushing := true.B
         channelReg := dsplit
@@ -287,9 +293,9 @@ class SequentialWriter(userBytes: Int,
       }
     }.otherwise {
       io.channel.data.ready := false.B
-      write_buffer_io.valid := true.B
-      write_buffer_io.bits.payload := channelReg(dsplitCount)
-      when(write_buffer_io.fire) {
+      enable_buffer_write := write_buffer_occupancy < q_size.U
+      write_buffer_payload := channelReg(dsplitCount)
+      when(enable_buffer_write) {
         dsplitCount := dsplitCount + 1.U
         when(dsplitCount === (userBytes / fabricBeatBytes - 1).U) {
           inProgressPushing := false.B

@@ -30,7 +30,7 @@ class SequentialReader(val dWidth: Int,
     nSources * platform.prefetchSourceMultiplicity,
     minSizeBytes.getOrElse(0) / fabricBeatBytes)
   val useRegMem = prefetchDepthRows < 32
-  val rowsAvailableToAlloc = RegInit(prefetchDepthRows.U(log2Up(prefetchDepthRows+1).W))
+  val rowsAvailableToAlloc = RegInit(prefetchDepthRows.U(log2Up(prefetchDepthRows + 1).W))
   require(isPow2(userBytes), "The width of the reader channel must be a power of two")
 
   // io goes to user, TL connects with AXI4
@@ -204,14 +204,14 @@ class SequentialReader(val dWidth: Int,
 
   val allocatingBig = WireInit(false.B)
   val allocatingSmall = WireInit(false.B)
-  val expectedChannelBeats = Reg(UInt(log2Up(addressBits - log2Up(userBytes)).W))
+  val expectedChannelBeats = Reg(UInt((addressBits - log2Up(userBytes)).W))
 
   switch(state) {
     is(s_idle) {
       when(io.req.fire) {
         val raw_addr = io.req.bits.addr.address
         val bound1 = CLog2Up(fabricBeatBytes)
-        val aligned_addr = Cat(raw_addr(addressBits-1, bound1), 0.U(bound1.W))
+        val aligned_addr = Cat(raw_addr(addressBits - 1, bound1), 0.U(bound1.W))
         if (userBytes < fabricBeatBytes) {
           val beatOffset = raw_addr(bound1 - 1, 0)
           val beatOffsetMultiple = beatOffset(bound1 - 1, CLog2Up(userBytes))
@@ -245,12 +245,12 @@ class SequentialReader(val dWidth: Int,
         )._2
         when(tl_reg.io.enq.fire) {
           addr := addr + (fabricBeatBytes * small_tx_mult).U
-          when (len < fabricBeatBytes.U) {
+          when(len < fabricBeatBytes.U) {
             len := 0.U
           }.otherwise {
             len := len - (fabricBeatBytes * small_tx_mult).U
           }
-          beatsRemaining(chosenSource) := (small_tx_mult-1).U
+          beatsRemaining(chosenSource) := (small_tx_mult - 1).U
 
           prefetch_writeIdx := prefetch_writeIdx + 1.U
           allocatingSmall := true.B
@@ -299,16 +299,16 @@ class SequentialReader(val dWidth: Int,
 
   val currentlyWritingRow = channel_buffer_q.io.enq.fire
 
-  when (currentlyWritingRow) {
-    when (allocatingSmall) {
+  when(currentlyWritingRow) {
+    when(allocatingSmall) {
       // do nothing
     }.elsewhen(allocatingBig) {
-      rowsAvailableToAlloc := rowsAvailableToAlloc - (slots_per_alloc-1).U
+      rowsAvailableToAlloc := rowsAvailableToAlloc - (slots_per_alloc - 1).U
     }.otherwise {
       rowsAvailableToAlloc := rowsAvailableToAlloc + 1.U
     }
   }.otherwise {
-    when (allocatingSmall) {
+    when(allocatingSmall) {
       rowsAvailableToAlloc := rowsAvailableToAlloc - 1.U
     }.elsewhen(allocatingBig) {
       rowsAvailableToAlloc := rowsAvailableToAlloc - slots_per_alloc.U
@@ -340,7 +340,8 @@ class SequentialReader(val dWidth: Int,
   }
 
   // maintain queue occupancy
-  when(channel_buffer_q.io.deq.fire && channel_buffer_q.io.enq.fire) {}.elsewhen(channel_buffer_q.io.deq.fire) {
+  when(channel_buffer_q.io.deq.fire && channel_buffer_q.io.enq.fire) {
+  }.elsewhen(channel_buffer_q.io.deq.fire) {
     queue_occupancy := queue_occupancy - 1.U
   }.elsewhen(channel_buffer_q.io.enq.fire) {
     queue_occupancy := queue_occupancy + 1.U

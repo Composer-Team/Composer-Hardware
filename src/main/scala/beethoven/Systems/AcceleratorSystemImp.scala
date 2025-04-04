@@ -20,7 +20,8 @@ class AcceleratorSystemImp(val outer: AcceleratorSystem)(implicit p: Parameters)
     }
     val impl = Module(outer.systemParams.moduleConstructor match {
       case mb: ModuleBuilder => mb.constructor(altered)
-      case bbc: BlackboxBuilderCustom => new AcceleratorBlackBoxCore(bbc)(altered, outer.systemParams)
+      case bbc: BlackboxBuilderCustom[_, _] => new AcceleratorBlackBoxCore(bbc)(altered, outer.systemParams)
+//      case bbv: BlackboxBuilderRocc => new AcceleratorBlackBoxCore(bbv)(altered, outer.systemParams)
     })
     impl.suggestName(f"System${outer.systemParams.name}_core${core_idx}_impl")
     impl

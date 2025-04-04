@@ -135,17 +135,13 @@ class MCRFileModuleAXI(outer: Protocol2RoccWidget, numRegs: Int)(implicit p: Par
   val logNumRegs = log2Up(numRegs)
   val (in, edge) = outer.node.in(0)
 
-  val s_idle :: s_read :: s_read_send :: s_write :: s_write_data :: s_write_response :: Nil = Enum(6)
+  val s_idle :: s_read :: s_write :: s_write_response :: Nil = Enum(4)
   val state = RegInit(s_idle)
 
   val address = Reg(UInt(logNumRegs.W))
   val writeData = Reg(UInt(32.W))
   val readData = Reg(UInt((platform.frontBusBeatBytes * 8).W))
-  val opLen = Reg(UInt(8.W))
-  val opvalid = Reg(Bool())
 
-  in.ar.ready := false.B
-  in.aw.ready := false.B
   in.r.valid := false.B
   in.r.bits.data := readData
   in.r.bits.id := 0.U
@@ -170,11 +166,11 @@ class MCRFileModuleAXI(outer: Protocol2RoccWidget, numRegs: Int)(implicit p: Par
     val addr = Reg(UInt(logNumRegs.W))
     val len = Reg(in.ar.bits.len.cloneType)
     val id = Reg(in.ar.bits.id.cloneType)
+    in.aw.ready := state === s_idle
     when (in.w.fire) {
       len := len - 1.U
     }
     when (state === s_idle) {
-      in.aw.ready := true.B
       val addr_skip = log2Up(platform.frontBusBeatBytes)
       addr := in.aw.bits.addr(logNumRegs+addr_skip-1, addr_skip)
       len := in.aw.bits.len
@@ -209,7 +205,7 @@ class MCRFileModuleAXI(outer: Protocol2RoccWidget, numRegs: Int)(implicit p: Par
   val read_machine = {
     val s_idle :: s_read :: s_drain :: Nil = Enum(3)
     val state = RegInit(s_idle)
-
+    in.ar.ready := state === s_idle
     val addr = Reg(UInt(logNumRegs.W))
     val len = Reg(in.ar.bits.len.cloneType)
     val id = Reg(in.ar.bits.id.cloneType)
@@ -245,7 +241,7 @@ class MCRFileModuleAXI(outer: Protocol2RoccWidget, numRegs: Int)(implicit p: Par
           state := s_drain
         }
       }
-    }.otherwise {
+    }.elsewhen(state === s_drain) {
       in.r.valid := true.B
       in.r.bits.data := 0xABCDABCDL.U
       when (len === 0.U && in.r.fire) {

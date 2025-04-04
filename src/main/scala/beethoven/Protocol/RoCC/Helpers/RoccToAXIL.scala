@@ -29,7 +29,7 @@ class RoccToAXIL(implicit val p: Parameters) extends Module {
   val beats = VecInit((0 until nBeats) map { i =>
     wholePayload((i + 1) * bus_bits - 1, i * bus_bits)
   })
-  val beatCounter = Reg(UInt(log2Up(nBeats).W))
+  val beatCounter = RegInit(0.U(log2Up(nBeats).W))
 
   val sIdle :: sSend :: Nil = Enum(2)
   val state = RegInit(sIdle)
