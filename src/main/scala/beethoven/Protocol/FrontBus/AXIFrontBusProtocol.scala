@@ -39,7 +39,9 @@ class AXIFrontBusProtocol(withDMA: Boolean) extends FrontBusProtocol {
   }
 
   override def deriveTLSources(implicit p: Parameters): Config = {
-    DeviceContext.withDevice(platform.physicalInterfaces.find(_.isInstanceOf[PhysicalHostInterface]).get.locationDeviceID) {
+    val frontInterfaceID = platform.physicalInterfaces.find(_.isInstanceOf[PhysicalHostInterface]).get.locationDeviceID
+
+    DeviceContext.withDevice(frontInterfaceID) {
       val axi_master = AXI4MasterNode(Seq(AXI4MasterPortParameters(
         masters = Seq(AXI4MasterParameters(
           name = "S00_AXI",
@@ -48,7 +50,6 @@ class AXIFrontBusProtocol(withDMA: Boolean) extends FrontBusProtocol {
           id = IdRange(0, 1 << 16)
         )),
       )))
-      val frontInterfaceID = platform.physicalInterfaces.find(_.isInstanceOf[PhysicalHostInterface]).get.locationDeviceID
       val fronthub =
         DeviceContext.withDevice(frontInterfaceID) {
           val fronthub = LazyModuleWithFloorplan(new FrontBusHub(), "zzfront6_axifronthub")

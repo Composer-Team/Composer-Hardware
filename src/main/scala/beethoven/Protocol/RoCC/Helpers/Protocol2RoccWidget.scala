@@ -164,8 +164,8 @@ class MCRFileModuleAXI(outer: Protocol2RoccWidget, numRegs: Int)(implicit p: Par
     val s_idle :: s_write :: s_drain :: s_response :: Nil = Enum(4)
     val state = RegInit(s_idle)
     val addr = Reg(UInt(logNumRegs.W))
-    val len = Reg(in.ar.bits.len.cloneType)
-    val id = Reg(in.ar.bits.id.cloneType)
+    val len = Reg(in.aw.bits.len.cloneType)
+    val id = Reg(in.aw.bits.id.cloneType)
     in.aw.ready := state === s_idle
     when (in.w.fire) {
       len := len - 1.U
@@ -176,6 +176,7 @@ class MCRFileModuleAXI(outer: Protocol2RoccWidget, numRegs: Int)(implicit p: Par
       len := in.aw.bits.len
       when (in.aw.fire) {
         state := s_write
+        id := in.aw.bits.id
       }
     }.elsewhen(state === s_write) {
       in.w.ready := true.B

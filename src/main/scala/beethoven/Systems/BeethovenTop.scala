@@ -70,7 +70,7 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
 
   // AXI-L Port - commands come through here
   val front_bus_config = platform.frontBusProtocol.deriveTLSources(p)
-//  comm_node, rocc_front, frontDMA_joined
+  //  comm_node, rocc_front, frontDMA_joined
   val comm_node = front_bus_config(OptionalPassKey)
   val frontDMA_joined = front_bus_config(DMANodeKey)
   val rocc_front = front_bus_config(RoccNodeKey)
@@ -95,7 +95,7 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
           supportsPutFull = maxTransfer,
           supportsPutPartial = maxTransfer
         )))))
-    val indexer = LazyModule(new TLSourceShrinkerDynamicBlocking(2))
+    val indexer = LazyModule(new TLSourceShrinkerDynamicBlocking(1 << platform.extMem.master.idBits))
     splitter.in_node := indexer.node := frontDMA_joined.get
     val read_out = TLXbar() := TLBuffer() := splitter.read_out
     val write_out = TLXbar() := TLBuffer() := splitter.write_out
@@ -277,7 +277,6 @@ class BeethovenTop(implicit p: Parameters) extends LazyModule {
   }
 
 
-
   lazy val module = new TopImpl(this)
 }
 
@@ -312,12 +311,13 @@ class TopImpl(outer: BeethovenTop)(implicit p: Parameters) extends LazyRawModule
     (M00_AXI zip ins) foreach { case (i, (o, _)) =>
       AXI4Compat.connectCompatMaster(i, o, if (platform.hasDebugAXICACHEPROT) outer.front_bus_config(DebugCacheProtSignalKey) else None)
     }
-
-    require(M00_AXI(0).rid.getWidth <= platform.extMem.master.idBits,
-      s"Too many ID bits for this platform. Try reducing the\n" +
-        s"prefetch length of scratchpads/readers/writers.\n" +
-        s"Current width: ${M00_AXI(0).rid.getWidth}\n" +
-        s"Required width: ${platform.extMem.master.idBits}")
+    if (platform.extMem.master.idBits > 0) {
+      require(M00_AXI(0).rid.getWidth <= platform.extMem.master.idBits,
+        s"Too many ID bits for this platform. Try reducing the\n" +
+          s"prefetch length of scratchpads/readers/writers.\n" +
+          s"Current width: ${M00_AXI(0).rid.getWidth}\n" +
+          s"Required width: ${platform.extMem.master.idBits}")
+    }
   }
 
   // Generate C++ headers once all of the cores have been generated so that they have
@@ -334,8 +334,8 @@ class TopImpl(outer: BeethovenTop)(implicit p: Parameters) extends LazyRawModule
   // reset propagation
   {
     val devicesNeedingReset = (LazyModuleWithSLRs.toplevelObjectsPerSLR.map(_._1) ++
-      outer.devices.map {b: Subdevice => b.deviceId }).distinct
-    val resets =  devicesNeedingReset.map { a => (a, ResetBridge(childReset, clock, 4)) }
+      outer.devices.map { b: Subdevice => b.deviceId }).distinct
+    val resets = devicesNeedingReset.map { a => (a, ResetBridge(childReset, clock, 4)) }
     outer.devices.foreach { dev =>
       dev.module.reset := resets.find(_._1 == dev.deviceId).get._2
     }
