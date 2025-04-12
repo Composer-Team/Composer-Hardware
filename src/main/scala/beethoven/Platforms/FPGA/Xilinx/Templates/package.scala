@@ -8,9 +8,9 @@ package object Templates {
          |  if(CSB$port) begin
          |    for(gi=0;gi<$weWidth;gi=gi+1)
          |      if (WEB$port[gi]) begin
-         |        mem[gi][A$port] <= I$port[(gi+1)*8-gi:gi*8];
+         |        mem[gi][A$port] <= I$port[(gi+1)*8-gi-:8];
          |      end else begin
-         |      memreg$port[(gi+1)*8-1:gi*8] <= mem[gi][A$port];
+         |      memreg$port[(gi+1)*8-1-:8] <= mem[gi][A$port];
          |      end
          |    end
          |  end

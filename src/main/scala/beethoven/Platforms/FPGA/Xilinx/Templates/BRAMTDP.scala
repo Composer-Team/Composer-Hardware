@@ -99,6 +99,13 @@ private[beethoven] class BRAMTDP(latency: Int,
   // versions, this code _may_ complain about not being able to infer a memory because they actually
   // expect the read and write procedures to be in separate processes (always blocks).
 
+  def fetch(i: Int): String = {
+    if (latency == 1)
+      f"memreg$i"
+     else
+      f"mem_pipe_reg$i[${latency-1}]"
+  }
+
   val src =
     f"""
        |(* keep_hierarchy = "yes" *)
@@ -135,8 +142,8 @@ private[beethoven] class BRAMTDP(latency: Int,
        |  mem_pipe_reg2[0] <= memreg2;
        |  $mvR
        |end
-       |assign O1 = mem_pipe_reg1[$latency-1];
-       |assign O2 = mem_pipe_reg2[$latency-1];
+       |assign O1 = ${fetch(1)};
+       |assign O2 = ${fetch(2)};
        |
        |endmodule
        |

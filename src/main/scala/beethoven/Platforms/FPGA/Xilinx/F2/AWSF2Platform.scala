@@ -148,7 +148,7 @@ class AWSF2Platform extends
   override val physicalInterfaces: List[PhysicalInterface] = List(
     PhysicalHostInterface(0),
     PhysicalMemoryInterface(1, 0)
-  ) ++ (if (memoryNChannels <= 1) List() else (1 until memoryNChannels).map(a => PhysicalMemoryInterface(a - 1, a)))
+  )
   override val physicalConnectivity: List[(Int, Int)] = List((0, 1), (1, 2))
 
   override val physicalDevices: List[DeviceConfig] = List(
