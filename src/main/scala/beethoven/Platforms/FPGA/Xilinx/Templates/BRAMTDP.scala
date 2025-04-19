@@ -83,8 +83,8 @@ private[beethoven] class BRAMTDP(latency: Int,
 
   BeethovenBuild.addSource(component)
 
-  val mvR = if (latency > 1) {
-    f"""for (i = 0; i < $latency-1; i = i+1) begin
+  private val mvR = if (latency >= 3) {
+    f"""for (i = 0; i < ${latency-1}; i = i+1) begin
        |      mem_pipe_reg1[i+1] <= mem_pipe_reg1[i];
        |      mem_pipe_reg2[i+1] <= mem_pipe_reg2[i];
        |  end
@@ -102,8 +102,26 @@ private[beethoven] class BRAMTDP(latency: Int,
   def fetch(i: Int): String = {
     if (latency == 1)
       f"memreg$i"
-     else
-      f"mem_pipe_reg$i[${latency-1}]"
+    else {
+      if (latency > 2)
+        f"mem_pipe_reg$i[${latency-1}]"
+      else
+        f"mem_pipe_reg$i"
+    }
+  }
+
+  def pipe(i: Int): String = {
+    if (latency >= 2) {
+      val deep = if (latency > 2) f" [0:${latency-2}]" else ""
+      f"reg [${dataWidth - 1}:0] mem_pipe_reg$i$deep;\n"
+    } else ""
+  }
+
+  def fwd(i: Int): String = {
+    if (latency >= 2) {
+      val d = if (latency > 2) "[0]" else ""
+      f"  mem_pipe_reg$i$d <= memreg$i;\n"
+    } else ""
   }
 
   val src =
@@ -128,18 +146,13 @@ private[beethoven] class BRAMTDP(latency: Int,
        |reg [${adjDataW - 1}:0] mem [${weWidth - 1}:0] [${nRows - 1}:0];        // Memory Declaration
        |reg [${dataWidth - 1}:0] memreg1;
        |reg [${dataWidth - 1}:0] memreg2;
-       |reg [${dataWidth - 1}:0] mem_pipe_reg1 [${latency - 1}:0];    // Pipelines for memory
-       |reg [${dataWidth - 1}:0] mem_pipe_reg2 [${latency - 1}:0];    // Pipelines for memory
-       |
+       |${pipe(1)}${pipe(2)}
        |integer i, gi;
        |always @ (posedge CE)
        |begin
-       |
        |${writeF("1", withWriteEnable, weWidth, dataWidth)}
        |${writeF("2", withWriteEnable, weWidth, dataWidth)}
-       |
-       |  mem_pipe_reg1[0] <= memreg1;
-       |  mem_pipe_reg2[0] <= memreg2;
+       |${fwd(1)}${fwd(2)}
        |  $mvR
        |end
        |assign O1 = ${fetch(1)};

@@ -14,7 +14,7 @@ private[beethoven] class BRAMSDP(latency: Int,
                                  nRows: Int,
                                  withWE: Boolean,
                                  debugName: String,
-                               )(implicit p: Parameters) extends BlackBox with HasMemoryInterface {
+                                )(implicit p: Parameters) extends BlackBox with HasMemoryInterface {
   val weWidth = if (withWE) dataWidth / 8 else 1
   val adjustedDW = if (withWE) 8 else dataWidth
   val io = IO(new Bundle {
@@ -83,22 +83,22 @@ private[beethoven] class BRAMSDP(latency: Int,
 
   val read = if (!withWE)
     "memreg <= mem[0][A_read];"
-  else f"""
-        |  for(gi=0;gi<$weWidth;gi=gi+1)
-        |    memreg[(gi+1)*8-1-:8] <= mem[gi][A_read];
-        |  end
-        |
+  else
+    f"""  for(gi=0;gi<$weWidth;gi=gi+1) begin
+       |    memreg[(gi+1)*8-1-:8] <= mem[gi][A_read];
+       |  end
         """.stripMargin
 
   val write = if (!withWE)
-    f"""
-       |    if (WEB) begin
+    f"""    if (WEB) begin
        |      mem[0][A_write] <= I;
        |    end
        |""".stripMargin
     else
-    f"""    if (WEB[gi]) begin
-       |      mem[gi][A_write] <= I[(gi+1)*8-1-:8];
+    f"""    for(gi=0;gi<${weWidth};gi=gi+1) begin
+       |      if (WEB[gi]) begin
+       |        mem[gi][A_write] <= I[(gi+1)*8-1-:8];
+       |      end
        |    end
        |""".stripMargin
 
